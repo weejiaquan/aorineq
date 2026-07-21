@@ -16,7 +16,8 @@ namespace ApoVolume.UI;
 public partial class SkinOsdWindow : Window
 {
     private readonly SkinInfo _info;
-    private readonly AlphaMap _alphaMap;
+    private readonly AlphaMap _emptyAlpha;
+    private readonly AlphaMap _fullAlpha;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
 
     // Behavior config, pushed in from Settings via ApplyConfig; same defaults as OsdWindow so the
@@ -45,7 +46,10 @@ public partial class SkinOsdWindow : Window
 
         var emptyBitmap = LoadBitmap(info.EmptyPath);
         var fullBitmap = LoadBitmap(info.FullPath);
-        _alphaMap = new AlphaMap(emptyBitmap); // empty.png's silhouette defines the clickable shape
+        // Hit shape is the UNION of both images' opaque pixels: a skin whose full.png draws a
+        // glow/highlight extending past empty.png's silhouette must stay clickable there too.
+        _emptyAlpha = new AlphaMap(emptyBitmap);
+        _fullAlpha = new AlphaMap(fullBitmap);
 
         EmptyImage.Source = emptyBitmap;
         FullImage.Source = fullBitmap;
@@ -63,6 +67,7 @@ public partial class SkinOsdWindow : Window
         {
             if (IsMouseOver) return; // user is interacting: stay open, timer keeps ticking
             _hideTimer.Stop();
+            ReleaseDragIfActive(); // never hide out from under an in-progress drag's capture
             if (!_animationEnabled)
             {
                 Hide(); // instant hide, no fade
@@ -81,6 +86,8 @@ public partial class SkinOsdWindow : Window
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
+        LostMouseCapture += (_, _) => _dragging = false; // capture can be stolen (e.g. by another
+            // window/element) without ever raising MouseLeftButtonUp — keep _dragging accurate.
     }
 
     /// <summary>Decodes a PNG with BitmapCacheOption.OnLoad so the file handle is released
@@ -115,8 +122,8 @@ public partial class SkinOsdWindow : Window
         if (_info.Text is { Show: true })
             PercentTextBlock.Text = percent.ToString();
 
-        double fillWidth = SkinMath.FillWidth(_info.Width, percent) * _info.Scale;
-        FillClip.Rect = new Rect(0, 0, Math.Max(0, fillWidth), Height);
+        double fillWidth = SkinMath.FillWidth(_info.Width, percent) * _info.Scale; // already clamped >= 0
+        FillClip.Rect = new Rect(0, 0, fillWidth, Height);
 
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
         EmptyImage.Opacity = muted ? 0.6 : 1.0;
@@ -151,7 +158,7 @@ public partial class SkinOsdWindow : Window
     {
         int px = (int)(windowPoint.X / _info.Scale);
         int py = (int)(windowPoint.Y / _info.Scale);
-        return _alphaMap.IsOpaque(px, py);
+        return _emptyAlpha.IsOpaque(px, py) || _fullAlpha.IsOpaque(px, py);
     }
 
     private void RaisePercentFromWindowPoint(System.Windows.Point windowPoint)
@@ -164,8 +171,12 @@ public partial class SkinOsdWindow : Window
     {
         var pos = e.GetPosition(this);
         if (!IsOpaqueAt(pos)) return;
-        _dragging = true;
-        CaptureMouse(); // keeps drags alive even if the pointer crosses a transparent pixel mid-drag
+        // The initial click always sets the percent; CaptureMouse() additionally keeps the drag
+        // alive even if the pointer crosses a transparent pixel mid-drag. Capture can fail (e.g.
+        // another element/window already holds it), so _dragging only tracks whether it actually
+        // succeeded — MouseMove below requires _dragging, so a failed capture just means this
+        // click doesn't continue into a drag, rather than getting stuck in a bad state.
+        _dragging = CaptureMouse();
         RaisePercentFromWindowPoint(pos);
     }
 
@@ -177,7 +188,13 @@ public partial class SkinOsdWindow : Window
         RaisePercentFromWindowPoint(pos);
     }
 
-    private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => ReleaseDragIfActive();
+
+    /// <summary>No-op unless a drag is in progress; otherwise releases mouse capture and clears
+    /// the flag. Shared by button-up and the auto-hide path, which must not hide this window while
+    /// it's still holding capture for an in-progress drag (e.g. the pointer dragged outside the
+    /// window's bounds, so IsMouseOver reads false even though the button is still held).</summary>
+    private void ReleaseDragIfActive()
     {
         if (!_dragging) return;
         _dragging = false;

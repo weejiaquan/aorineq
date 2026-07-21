@@ -518,9 +518,11 @@ public partial class App : System.Windows.Application
     /// a skin-driven <see cref="SkinOsdWindow"/> when <c>OsdStyle == "skin"</c> and the named skin
     /// loads successfully. Safe to call repeatedly (e.g. whenever settings change) — the skin
     /// window is only recreated when the folder it points at actually changes. On a missing or
-    /// invalid skin, balloons the reason via the tray and falls back to dark-pill in memory only;
-    /// <c>Settings.OsdStyle</c>/<c>SkinName</c> on disk are never touched here, so a later fix to
-    /// the skin folder (or a restart after Equalizer APO etc. becomes available) retries cleanly.
+    /// invalid skin — including one that passes <see cref="SkinLoader"/>'s header-only validation
+    /// but fails to actually decode (truncated/corrupt PNG data) — balloons the reason via the
+    /// tray and falls back to dark-pill in memory only; <c>Settings.OsdStyle</c>/<c>SkinName</c>
+    /// on disk are never touched here, so a later fix to the skin folder (or a restart after
+    /// Equalizer APO etc. becomes available) retries cleanly.
     /// </summary>
     private void ApplyOsdConfig(Settings s)
     {
@@ -544,10 +546,26 @@ public partial class App : System.Windows.Application
 
         if (_skinOsd is null || _loadedSkinFolder != info.Folder)
         {
-            _skinOsd?.Close(); // real teardown, unlike OsdWindow's Close-cancels-and-Hides pattern
-            _skinOsd = new SkinOsdWindow(info);
-            _skinOsd.PercentChangedByUser += OnOsdPercentChanged;
-            _loadedSkinFolder = info.Folder;
+            // SkinLoader only validates the PNG header (signature + IHDR), not the full image
+            // data — a truncated/corrupt file still passes info.IsValid but can throw from
+            // BitmapImage.EndInit inside SkinOsdWindow's constructor (imaging can raise several
+            // exception types: NotSupportedException, FileFormatException, etc.). That must be
+            // contained exactly like an invalid SkinInfo, not left to crash the process.
+            try
+            {
+                var next = new SkinOsdWindow(info);
+                _skinOsd?.Close(); // real teardown, unlike OsdWindow's Close-cancels-and-Hides pattern
+                _skinOsd = next;
+                _skinOsd.PercentChangedByUser += OnOsdPercentChanged;
+                _loadedSkinFolder = info.Folder;
+            }
+            catch (Exception ex)
+            {
+                _tray?.ShowWarning(ex.Message);
+                _useSkinOsd = false; // in-memory fallback only — see remarks above
+                _skinOsd?.Hide();
+                return;
+            }
         }
         _skinOsd.ApplyConfig(s);
         _useSkinOsd = true;
