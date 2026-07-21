@@ -50,5 +50,43 @@
                         IsMoveToPointEnabled="True" ValueChanged="OnSliderValueChanged" />
             </Grid>
         </Grid>
+
+        <!-- fluent style: Win11-esque light/dark panel, glyph + slider + percent layout like
+             dark-pill. Background/border/text/accent colors depend on the live registry-read
+             theme and accent (SystemTheme), so they aren't set here — OsdWindow.xaml.cs's
+             ApplyFluentTheme() sets them fresh on every ShowVolume. Track fill and thumb reuse
+             minimal-bar's "decorative visuals + transparent overlay Slider" trick (see
+             MinimalBarRoot above) rather than a custom Slider ControlTemplate, since elements
+             named inside a ControlTemplate live in the template's own namescope and aren't
+             reachable as ordinary code-behind fields the way these plain, top-level-named
+             elements are. -->
+        <Border x:Name="FluentRoot" Visibility="Collapsed" CornerRadius="8" BorderThickness="1" Padding="16,10">
+            <Border.Effect>
+                <DropShadowEffect Opacity="0.3" BlurRadius="16" ShadowDepth="0" />
+            </Border.Effect>
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="48" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="FluentGlyphText" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                           VerticalAlignment="Center" Text="&#xE767;" />
+                <Grid x:Name="FluentTrackHost" Grid.Column="1" VerticalAlignment="Center" Height="14">
+                    <Border x:Name="FluentTrackTail" Height="4" VerticalAlignment="Center" CornerRadius="2" />
+                    <Border x:Name="FluentTrackFill" Height="4" Width="0" VerticalAlignment="Center"
+                            HorizontalAlignment="Left" CornerRadius="2" />
+                    <Ellipse x:Name="FluentThumbRing" Width="14" Height="14" HorizontalAlignment="Left" />
+                    <Ellipse x:Name="FluentThumbCenter" Width="6" Height="6" HorizontalAlignment="Left" />
+                    <!-- Fully transparent but still hit-testable: same trick as MinimalSlider,
+                         gives the decorative track/thumb above a real, default-behaved Slider
+                         (drag / click-to-jump / keyboard) for the interactive surface. -->
+                    <Slider x:Name="FluentSlider" Minimum="0" Maximum="100" Opacity="0"
+                            IsMoveToPointEnabled="True" ValueChanged="OnSliderValueChanged" />
+                </Grid>
+                <TextBlock x:Name="FluentPercentText" Grid.Column="2" FontSize="16" FontWeight="SemiBold"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" Text="50" />
+            </Grid>
+        </Border>
     </Grid>
 </Window>

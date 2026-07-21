@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using ApoVolume.Core;
@@ -78,11 +79,14 @@ public partial class OsdWindow : Window
         _updatingFromCode = true;
         VolumeSlider.Value = percent;
         MinimalSlider.Value = percent;
+        FluentSlider.Value = percent;
         _updatingFromCode = false;
 
         PercentText.Text = percent.ToString();
         MinimalPercentText.Text = percent.ToString();
+        FluentPercentText.Text = percent.ToString();
         GlyphText.Text = muted ? GlyphMute : GlyphVolume;
+        FluentGlyphText.Text = muted ? GlyphMute : GlyphVolume;
 
         var wa = SystemParameters.WorkArea;
         bool isMinimal = _style == OsdStyles.MinimalBar;
@@ -99,6 +103,7 @@ public partial class OsdWindow : Window
         {
             Width = DarkPillWidth;
             Height = DarkPillHeight;
+            if (_style == OsdStyles.Fluent) ApplyFluentTheme(percent);
         }
 
         // minimal-bar sits flush against the edge(s) its anchor names (margin 0); the two
@@ -136,8 +141,10 @@ public partial class OsdWindow : Window
     private void ApplyStyle()
     {
         bool isMinimal = _style == OsdStyles.MinimalBar;
-        DarkPillRoot.Visibility = isMinimal ? Visibility.Collapsed : Visibility.Visible;
+        bool isFluent = _style == OsdStyles.Fluent;
+        DarkPillRoot.Visibility = !isMinimal && !isFluent ? Visibility.Visible : Visibility.Collapsed;
         MinimalBarRoot.Visibility = isMinimal ? Visibility.Visible : Visibility.Collapsed;
+        FluentRoot.Visibility = isFluent ? Visibility.Visible : Visibility.Collapsed;
         if (!isMinimal) return;
 
         bool chipBelow = _anchor is "top-left" or "top-center" or "top-right";
@@ -158,10 +165,67 @@ public partial class OsdWindow : Window
     {
         // Not marked as updating-from-code: the change flows through ValueChanged like any
         // other user edit, and the slider itself clamps to its 0..100 range. Only the slider
-        // for the currently active style is nudged, so the other (collapsed) one doesn't also
+        // for the currently active style is nudged, so the other (collapsed) ones don't also
         // fire PercentChangedByUser for the same wheel notch.
-        var slider = _style == OsdStyles.MinimalBar ? MinimalSlider : VolumeSlider;
+        var slider = _style switch
+        {
+            OsdStyles.MinimalBar => MinimalSlider,
+            OsdStyles.Fluent => FluentSlider,
+            _ => VolumeSlider,
+        };
         slider.Value += e.Delta > 0 ? StepPercent : -StepPercent;
+    }
+
+    /// <summary>Re-reads the system theme/accent (cheap registry reads; no watcher — this runs
+    /// on every <see cref="ShowVolume"/> while the fluent style is active) and repaints the
+    /// fluent root's theme-dependent brushes, then repositions the accent-filled track and ring
+    /// thumb for the given percent. <see cref="FluentTrackHost"/>'s star-sized column width isn't
+    /// known until layout runs, so this forces one explicit Measure/Arrange pass against the
+    /// style's fixed 300x64 size (same technique <see cref="ShowVolume"/> already uses via
+    /// <c>MinimalBarRoot.Measure</c>) rather than guessing a pixel width.</summary>
+    private void ApplyFluentTheme(int percent)
+    {
+        // Color is ambiguous in this project (UseWindowsForms also brings System.Drawing.Color
+        // into scope), so every literal Color here is fully qualified per repo convention.
+        bool light = SystemTheme.AppsUseLightTheme();
+        var accentBrush = new SolidColorBrush(SystemTheme.Accent());
+        var textBrush = light ? System.Windows.Media.Brushes.Black : System.Windows.Media.Brushes.White;
+        // The thumb's center is a "cutout" that matches the panel background, not the text
+        // color, so the accent ring reads as floating on top of the panel.
+        var thumbCenterBrush = light
+            ? System.Windows.Media.Brushes.White
+            : new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20));
+
+        FluentRoot.Background = new SolidColorBrush(light
+            ? System.Windows.Media.Color.FromArgb(0xF2, 0xF3, 0xF3, 0xF3)
+            : System.Windows.Media.Color.FromArgb(0xF2, 0x20, 0x20, 0x20));
+        FluentRoot.BorderBrush = new SolidColorBrush(light
+            ? System.Windows.Media.Color.FromArgb(0x14, 0x00, 0x00, 0x00)
+            : System.Windows.Media.Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF));
+        // Unfilled track color isn't specified by the spec (only the panel background/border and
+        // the accent fill/thumb are); this reuses the same subtle overlay tone as the panel
+        // border, just a bit more opaque so the track reads as a track rather than disappearing.
+        FluentTrackTail.Background = new SolidColorBrush(light
+            ? System.Windows.Media.Color.FromArgb(0x1F, 0x00, 0x00, 0x00)
+            : System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF));
+
+        FluentGlyphText.Foreground = textBrush;
+        FluentPercentText.Foreground = textBrush;
+        FluentTrackFill.Background = accentBrush;
+        FluentThumbRing.Fill = accentBrush;
+        FluentThumbCenter.Fill = thumbCenterBrush;
+
+        FluentRoot.Measure(new System.Windows.Size(DarkPillWidth, DarkPillHeight));
+        FluentRoot.Arrange(new Rect(0, 0, DarkPillWidth, DarkPillHeight));
+
+        double trackWidth = FluentTrackHost.ActualWidth;
+        double fillWidth = Math.Clamp(trackWidth * percent / 100.0, 0, trackWidth);
+        FluentTrackFill.Width = fillWidth;
+
+        const double thumbDiameter = 14;
+        double thumbLeft = Math.Clamp(fillWidth - thumbDiameter / 2, 0, Math.Max(0, trackWidth - thumbDiameter));
+        FluentThumbRing.Margin = new Thickness(thumbLeft, 0, 0, 0);
+        FluentThumbCenter.Margin = new Thickness(thumbLeft + 4, 0, 0, 0);
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
