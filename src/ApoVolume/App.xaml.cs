@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application
     private OsdWindow? _osd;
     private VolumeState _state = new();
     private string _settingsPath = "";
+    private readonly Coalescer _settingsSaver = new(TimeSpan.FromMilliseconds(50));
 
     private static string ExePath => Environment.ProcessPath!;
 
@@ -50,7 +51,7 @@ public partial class App : System.Windows.Application
             configDir = ApoPaths.GetConfigDir();
             EnsureWritableOrElevate(configDir);
         }
-        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException)
+        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException)
         {
             System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
@@ -82,8 +83,15 @@ public partial class App : System.Windows.Application
         // second-instance listener
         var waiter = new Thread(() =>
         {
-            while (_showEvent.WaitOne())
-                Dispatcher.BeginInvoke(() => Render(interactive: true));
+            try
+            {
+                while (_showEvent.WaitOne())
+                {
+                    if (Dispatcher.HasShutdownStarted) break;
+                    Dispatcher.BeginInvoke(() => Render(interactive: true));
+                }
+            }
+            catch (Exception) { } // shutdown races (disposed handle / stopped dispatcher) must not crash the process
         }) { IsBackground = true };
         waiter.Start();
 
@@ -93,12 +101,27 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>One render path for every change: APO file, OSD, tray, settings.</summary>
+    // Null-forgiving below relies on OnStartup's construction order: _writer/_osd/_tray are all
+    // assigned before the keyboard hook, tray, or second-instance listener can dispatch into Render.
     private void Render(bool interactive)
     {
         _writer!.WriteVolume(_state.CurrentDb);
         _osd!.ShowVolume(_state.Percent, _state.Muted, interactive);
         _tray!.Update(_state.Percent, _state.Muted);
-        new Settings(_state.Percent, _state.Muted).Save(_settingsPath);
+        var s = new Settings(_state.Percent, _state.Muted);
+        _settingsSaver.Post(() =>
+        {
+            try
+            {
+                s.Save(_settingsPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        });
     }
 
     /// <summary>Normal runs must be able to write apo-volume.txt and config.txt. If not, self-elevate once.</summary>
@@ -154,6 +177,7 @@ public partial class App : System.Windows.Application
         _writer?.Dispose();
         _mutex?.Dispose();
         _showEvent?.Dispose();
+        _settingsSaver.Dispose();
         base.OnExit(e);
     }
 }
