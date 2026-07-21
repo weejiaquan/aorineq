@@ -7,8 +7,8 @@ namespace ApoVolume.UI;
 
 public partial class OsdWindow : Window
 {
-    private const string GlyphVolume = "";
-    private const string GlyphMute = "";
+    private const string GlyphVolume = "\uE767"; // Segoe MDL2 'Volume'
+    private const string GlyphMute = "\uE74F";   // Segoe MDL2 'Mute'
 
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
     private bool _updatingFromCode;
