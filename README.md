@@ -38,7 +38,7 @@ Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in
    and adds `Include: apo-volume.txt` to `config.txt` (elevating once only if needed).
 2. Set your DAC's physical volume to your maximum comfortable loudness — once. From now on
    the keyboard controls loudness digitally below that ceiling.
-3. Tray menu → "Start with Windows" to run at boot.
+3. Tray menu → Settings… → "Start with Windows" to run at boot.
 
 ## Usage
 
