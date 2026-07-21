@@ -78,6 +78,66 @@ public class ApoWriterTests : IDisposable
     }
 
     [Fact]
+    public void WriteVolume_survives_locked_volume_file()
+    {
+        using var w = new ApoWriter(_dir);
+
+        using (var locker = new FileStream(w.VolumeFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            var ex = Record.Exception(() => w.WriteVolume(-10));
+            _out.WriteLine("exception while file locked: " + (ex?.ToString() ?? "<none>"));
+            Assert.Null(ex);
+        }
+
+        Thread.Sleep(60); // >50 ms pause, past the coalescer interval, file now unlocked
+        w.WriteVolume(-10);
+        Thread.Sleep(200); // let the coalesced/leading write land on disk
+
+        var content = File.ReadAllText(w.VolumeFilePath);
+        _out.WriteLine("content after unlock + retry: " + content.TrimEnd());
+        Assert.Equal("Preamp: -10.0 dB" + Environment.NewLine, content);
+    }
+
+    [Fact]
+    public async Task EnsureInclude_is_thread_safe_under_concurrent_calls()
+    {
+        using var w = new ApoWriter(_dir);
+        const int taskCount = 8;
+        using var barrier = new Barrier(taskCount);
+        var results = new bool[taskCount];
+
+        var tasks = new Task[taskCount];
+        for (int i = 0; i < taskCount; i++)
+        {
+            int idx = i;
+            tasks[idx] = Task.Run(() =>
+            {
+                barrier.SignalAndWait(); // all tasks call EnsureInclude at the same instant
+                results[idx] = w.EnsureInclude();
+            });
+        }
+        await Task.WhenAll(tasks);
+
+        var lines = File.ReadAllLines(w.ConfigTxtPath);
+        var includeCount = lines.Count(l => l.Trim().Equals(ApoWriter.IncludeLine, StringComparison.OrdinalIgnoreCase));
+        _out.WriteLine("config.txt after concurrent EnsureInclude:\n" + string.Join("\n", lines));
+        _out.WriteLine("per-task results: " + string.Join(", ", results));
+        _out.WriteLine($"include line count: {includeCount}");
+        Assert.Equal(1, includeCount);
+        Assert.Equal(1, results.Count(r => r)); // exactly one task actually appended
+    }
+
+    [Fact]
+    public void FormatPreamp_normalizes_values_rounding_to_zero()
+    {
+        var a = ApoWriter.FormatPreamp(-0.04);
+        var b = ApoWriter.FormatPreamp(-0.0);
+        _out.WriteLine($"-0.04 => {a}; -0.0 => {b}");
+        Assert.Equal("Preamp: 0.0 dB", a);
+        Assert.Equal("Preamp: 0.0 dB", b);
+    }
+
+    [Fact]
     public void IncludeGuard_restores_line_after_external_rewrite()
     {
         using var w = new ApoWriter(_dir);
