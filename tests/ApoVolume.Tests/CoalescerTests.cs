@@ -48,4 +48,116 @@ public class CoalescerTests
         Thread.Sleep(150);
         Assert.Equal(2, ran);
     }
+
+    [Fact]
+    public void Throwing_trailing_action_does_not_crash_and_coalescer_keeps_working()
+    {
+        using var c = new Coalescer(TimeSpan.FromMilliseconds(50));
+
+        // Leading edge: runs synchronously, starts cooldown.
+        c.Post(() => _out.WriteLine("leading action ran"));
+
+        // Queued during cooldown; will run as the trailing action and throw.
+        c.Post(() => throw new InvalidOperationException("simulated disk-full failure"));
+
+        // If the exception escaped the timer thread, the test process would be killed here.
+        Thread.Sleep(200);
+        _out.WriteLine("survived trailing-action exception; process still running");
+
+        // Let the coalescer go fully idle, then confirm it still works normally.
+        Thread.Sleep(200);
+        int ran = 0;
+        c.Post(() => ran++);
+        Assert.Equal(1, ran);
+        _out.WriteLine($"post-throw recovery post executed: ran={ran}");
+    }
+
+    [Fact]
+    public void Dispose_during_pending_trailing_does_not_throw()
+    {
+        var c = new Coalescer(TimeSpan.FromMilliseconds(50));
+        int ran = 0;
+
+        c.Post(() => { ran++; _out.WriteLine("leading action ran"); }); // leading edge
+        c.Post(() => { ran++; _out.WriteLine("trailing action ran"); }); // queued as pending trailing
+
+        var ex = Record.Exception(() => c.Dispose());
+        Assert.Null(ex);
+
+        // Give any in-flight timer callback a chance to fire; must not throw or crash.
+        Thread.Sleep(200);
+        _out.WriteLine($"after dispose + sleep: ran={ran}");
+
+        // Post-after-Dispose must be a silent no-op, not throw.
+        var postEx = Record.Exception(() => c.Post(() => _out.WriteLine("should not run")));
+        Assert.Null(postEx);
+    }
+
+    [Fact]
+    public void Leading_and_trailing_actions_never_overlap()
+    {
+        using var c = new Coalescer(TimeSpan.FromMilliseconds(50));
+
+        int concurrent = 0;
+        int maxConcurrent = 0;
+
+        void TrackEnter()
+        {
+            int now = Interlocked.Increment(ref concurrent);
+            int prevMax;
+            do
+            {
+                prevMax = Volatile.Read(ref maxConcurrent);
+                if (now <= prevMax) break;
+            } while (Interlocked.CompareExchange(ref maxConcurrent, now, prevMax) != prevMax);
+        }
+
+        void TrackExit() => Interlocked.Decrement(ref concurrent);
+
+        var leadingDone = new ManualResetEventSlim(false);
+
+        // Post the slow leading action from a background thread so the test thread
+        // isn't blocked and can immediately queue the trailing action.
+        var leadingTask = Task.Run(() =>
+        {
+            c.Post(() =>
+            {
+                TrackEnter();
+                try
+                {
+                    Thread.Sleep(150); // longer than the 50ms interval
+                }
+                finally
+                {
+                    TrackExit();
+                    leadingDone.Set();
+                }
+            });
+        });
+
+        // Give the leading action a moment to actually start running.
+        Thread.Sleep(20);
+
+        var trailingRan = new ManualResetEventSlim(false);
+        c.Post(() =>
+        {
+            TrackEnter();
+            try
+            {
+                _out.WriteLine("trailing action ran");
+            }
+            finally
+            {
+                TrackExit();
+                trailingRan.Set();
+            }
+        });
+
+        Assert.True(leadingDone.Wait(TimeSpan.FromSeconds(5)), "leading action did not complete in time");
+        Assert.True(trailingRan.Wait(TimeSpan.FromSeconds(5)), "trailing action did not run in time");
+        Assert.True(leadingTask.Wait(TimeSpan.FromSeconds(5)), "background Task.Run for the leading post did not complete in time");
+
+        _out.WriteLine($"max observed concurrency = {maxConcurrent}");
+        Assert.Equal(1, maxConcurrent);
+    }
 }
