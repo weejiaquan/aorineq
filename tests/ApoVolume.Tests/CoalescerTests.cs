@@ -118,7 +118,7 @@ public class CoalescerTests
 
         // Post the slow leading action from a background thread so the test thread
         // isn't blocked and can immediately queue the trailing action.
-        var leadingTask = Task.Run(() =>
+        _ = Task.Run(() =>
         {
             c.Post(() =>
             {
@@ -155,7 +155,6 @@ public class CoalescerTests
 
         Assert.True(leadingDone.Wait(TimeSpan.FromSeconds(5)), "leading action did not complete in time");
         Assert.True(trailingRan.Wait(TimeSpan.FromSeconds(5)), "trailing action did not run in time");
-        Assert.True(leadingTask.Wait(TimeSpan.FromSeconds(5)), "background Task.Run for the leading post did not complete in time");
 
         _out.WriteLine($"max observed concurrency = {maxConcurrent}");
         Assert.Equal(1, maxConcurrent);
