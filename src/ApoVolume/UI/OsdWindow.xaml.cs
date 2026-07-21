@@ -42,7 +42,10 @@ public partial class OsdWindow : Window
         InitializeComponent();
         _hideTimer.Tick += (_, _) =>
         {
-            if (IsMouseOver) return; // user is interacting: stay open, timer keeps ticking
+            // IsMouseOver: user is interacting; IsMouseCaptureWithin: the volume Slider's Thumb
+            // holds mouse capture during a drag, which can continue with the pointer outside the
+            // window's bounds (IsMouseOver false) — either way, stay open, timer keeps ticking.
+            if (IsMouseOver || IsMouseCaptureWithin) return;
             _hideTimer.Stop();
             if (!_animationEnabled)
             {

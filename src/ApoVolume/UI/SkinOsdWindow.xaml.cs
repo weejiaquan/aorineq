@@ -65,9 +65,14 @@ public partial class SkinOsdWindow : Window
 
         _hideTimer.Tick += (_, _) =>
         {
-            if (IsMouseOver) return; // user is interacting: stay open, timer keeps ticking
+            // IsMouseOver: user is interacting; _dragging: a drag can continue with the pointer
+            // outside the window's bounds (IsMouseOver false) since OnMouseMove requires only
+            // _dragging + the left button, not IsMouseOver — either way, stay open, timer keeps
+            // ticking, and hiding resumes on its own once the drag ends.
+            if (IsMouseOver || _dragging) return;
             _hideTimer.Stop();
             ReleaseDragIfActive(); // never hide out from under an in-progress drag's capture
+                                    // (defensive: reachable paths above already require !_dragging)
             if (!_animationEnabled)
             {
                 Hide(); // instant hide, no fade
@@ -91,12 +96,16 @@ public partial class SkinOsdWindow : Window
     }
 
     /// <summary>Decodes a PNG with BitmapCacheOption.OnLoad so the file handle is released
-    /// immediately — the skin folder must not stay locked while the OSD is showing.</summary>
+    /// immediately — the skin folder must not stay locked while the OSD is showing. Also sets
+    /// BitmapCreateOptions.IgnoreImageCache: WPF's process-wide bitmap cache otherwise keys on the
+    /// URI alone, so reloading a skin whose PNGs were edited in place (same path, new bytes) would
+    /// silently serve the stale cached image instead of the updated one.</summary>
     private static BitmapImage LoadBitmap(string path)
     {
         var bmp = new BitmapImage();
         bmp.BeginInit();
         bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
         bmp.UriSource = new Uri(path, UriKind.Absolute);
         bmp.EndInit();
         bmp.Freeze();
