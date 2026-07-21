@@ -1,0 +1,92 @@
+using ApoVolume.Core;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace ApoVolume.Tests;
+
+public class VolumeStateTests
+{
+    private readonly ITestOutputHelper _out;
+    public VolumeStateTests(ITestOutputHelper output) => _out = output;
+
+    [Theory]
+    [InlineData(1, -50.0)]      // spec: 1% = -50 dB
+    [InlineData(100, 0.0)]      // spec: 100% = 0 dB
+    [InlineData(50, -25.252525252525253)]  // -50 * 50 / 99
+    public void CurrentDb_maps_percent_linearly_in_dB(int percent, double expectedDb)
+    {
+        var s = new VolumeState(percent);
+        _out.WriteLine($"percent={percent} -> {s.CurrentDb} dB (expected {expectedDb})");
+        Assert.Equal(expectedDb, s.CurrentDb, 3);
+    }
+
+    [Fact]
+    public void Zero_percent_and_mute_both_yield_minus_120_dB()
+    {
+        Assert.Equal(-120.0, new VolumeState(0).CurrentDb);
+        Assert.Equal(-120.0, new VolumeState(80, muted: true).CurrentDb);
+    }
+
+    [Fact]
+    public void Up_and_Down_step_by_2_and_clamp()
+    {
+        var s = new VolumeState(99);
+        s.Up();
+        Assert.Equal(100, s.Percent);
+        s.Up();
+        Assert.Equal(100, s.Percent);
+
+        var t = new VolumeState(1);
+        t.Down();
+        Assert.Equal(0, t.Percent);
+        t.Down();
+        Assert.Equal(0, t.Percent);
+
+        var u = new VolumeState(50);
+        u.Up();
+        Assert.Equal(52, u.Percent);
+        u.Down();
+        u.Down();
+        Assert.Equal(48, u.Percent);
+    }
+
+    [Fact]
+    public void Up_unmutes_Down_keeps_mute_like_Windows()
+    {
+        var s = new VolumeState(50, muted: true);
+        s.Down();
+        Assert.True(s.Muted);
+        s.Up();
+        Assert.False(s.Muted);
+        Assert.Equal(50, s.Percent); // the Up that unmuted still stepped: 48+2? No — Down took it to 48, Up back to 50.
+    }
+
+    [Fact]
+    public void ToggleMute_flips_and_preserves_percent()
+    {
+        var s = new VolumeState(62);
+        s.ToggleMute();
+        Assert.True(s.Muted);
+        Assert.Equal(62, s.Percent);
+        s.ToggleMute();
+        Assert.False(s.Muted);
+    }
+
+    [Fact]
+    public void SetPercent_clamps_and_unmutes_when_positive()
+    {
+        var s = new VolumeState(50, muted: true);
+        s.SetPercent(150);
+        Assert.Equal(100, s.Percent);
+        Assert.False(s.Muted);
+        s.SetPercent(-5);
+        Assert.Equal(0, s.Percent);
+    }
+
+    [Fact]
+    public void Constructor_clamps_percent()
+    {
+        Assert.Equal(100, new VolumeState(300).Percent);
+        Assert.Equal(0, new VolumeState(-1).Percent);
+    }
+}

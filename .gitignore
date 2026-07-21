@@ -1,0 +1,9 @@
+# Superpowers workflow artifacts stay local
+docs/superpowers/
+
+# Build output
+bin/
+obj/
+publish/
+*.user
+.superpowers/

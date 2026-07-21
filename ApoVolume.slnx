@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ApoVolume.Core/ApoVolume.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ApoVolume.Tests/ApoVolume.Tests.csproj" />
+  </Folder>
+</Solution>
