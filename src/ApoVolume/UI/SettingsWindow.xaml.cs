@@ -47,6 +47,8 @@ public partial class SettingsWindow : Window
 
     private void OnNavigate(object sender, RequestNavigateEventArgs e)
     {
+        // When this window is running in an elevated session, ShellExecute here inherits the
+        // elevated token, so the browser process it launches is elevated too.
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri)
         {
             UseShellExecute = true,

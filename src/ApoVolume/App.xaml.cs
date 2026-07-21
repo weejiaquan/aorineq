@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Windows;
@@ -25,6 +26,7 @@ public partial class App : System.Windows.Application
     private bool _runAsAdmin;
     private bool _uacDeclined;
     private bool _togglingRunAsAdmin;
+    private bool _togglingAutostart;
     private readonly Coalescer _settingsSaver = new(TimeSpan.FromMilliseconds(50));
 
     private static string ExePath => Environment.ProcessPath!;
@@ -72,12 +74,27 @@ public partial class App : System.Windows.Application
         if (BounceToElevatedOrContinue(e.Args))
             return;
 
-        _mutex = new Mutex(initiallyOwned: true, MutexName, out bool isFirstInstance);
-        _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
-        if (!isFirstInstance)
+        try
         {
-            _showEvent.Set(); // ask the running instance to show its slider
-            Shutdown();
+            _mutex = new Mutex(initiallyOwned: true, MutexName, out bool isFirstInstance);
+            _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
+            if (!isFirstInstance)
+            {
+                _showEvent.Set(); // ask the running instance to show its slider
+                Shutdown();
+                return;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // A restrictive token-owner policy (e.g. the named objects already exist, owned
+            // by a different account/integrity level) can deny access outright here. Fail
+            // fast with the same dialog + exit-code pattern used below, rather than letting
+            // this surface as an unhandled-exception crash.
+            System.Windows.MessageBox.Show(
+                "Another session or account is already running apo-volume.", "apo-volume",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
             return;
         }
 
@@ -108,20 +125,40 @@ public partial class App : System.Windows.Application
                 _tray.ShowWarning(
                     "Running without administrator rights — volume keys won't work while elevated games are focused.");
 
-            // Elevated-startup reconciliation: only act when Run-key autostart is on, the scheduled
-            // task isn't, and we actually have the rights to create it now — otherwise this would
-            // create needless schtasks churn on every elevated launch.
-            if (Elevation.IsElevated && _runAsAdmin
-                && new Autostart().IsEnabled() && !new ScheduledTaskAutostart().IsEnabled())
+            // Elevated-startup reconciliation.
+            if (Elevation.IsElevated && _runAsAdmin)
             {
-                ApplyAutostart(true);
+                if (new ScheduledTaskAutostart().IsEnabled())
+                {
+                    // Self-heal: schtasks /Create /F is idempotent, so re-running Enable
+                    // refreshes the task's target path in case the exe moved since it was
+                    // created. Comparing against the task's registered command line isn't
+                    // cheaply checkable (would need another schtasks query + XML parse), so
+                    // this re-Enable is unconditional — elevated startup only, so it's rare.
+                    try
+                    {
+                        new ScheduledTaskAutostart().Enable(ExePath);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        _tray?.ShowWarning(ex.Message);
+                    }
+                }
+                else if (new Autostart().IsEnabled())
+                {
+                    // Run-key autostart is on but the scheduled task isn't, and we actually
+                    // have the rights to create it now — migrate it over. Gated behind the
+                    // Run-key check so this doesn't create needless schtasks churn when
+                    // autostart was never on at all.
+                    ApplyAutostart(true);
+                }
             }
-            // Reverse case: RunAsAdmin is off (or was turned off) but a scheduled task from an
-            // earlier elevated/RunAsAdmin session is still registered. We're elevated right now,
-            // so we have the rights to remove it — register the Run key instead, under the
-            // current (non-admin) mode.
             else if (Elevation.IsElevated && !_runAsAdmin && new ScheduledTaskAutostart().IsEnabled())
             {
+                // Reverse case: RunAsAdmin is off (or was turned off) but a scheduled task
+                // from an earlier elevated/RunAsAdmin session is still registered. We're
+                // elevated right now, so we have the rights to remove it — register the Run
+                // key instead, under the current (non-admin) mode.
                 ApplyAutostart(true);
             }
 
@@ -155,9 +192,11 @@ public partial class App : System.Windows.Application
         }) { IsBackground = true };
         waiter.Start();
 
-        // apply persisted volume to APO immediately at startup
-        _writer.WriteVolume(_state.CurrentDb);
-        _tray.Update(_state.Percent, _state.Muted);
+        // apply persisted volume to APO immediately at startup. Null-forgiving: same
+        // construction-order guarantee as Render() above — the try block either assigns
+        // both fields or returns before reaching here.
+        _writer!.WriteVolume(_state.CurrentDb);
+        _tray!.Update(_state.Percent, _state.Muted);
     }
 
     /// <summary>
@@ -368,6 +407,41 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>Handles the SettingsWindow AutostartChanged event: applies the change and
+    /// re-syncs the checkbox against the actual resulting state, so a failed enable (e.g. no
+    /// elevation yet for the scheduled task) un-checks the box instead of leaving it stuck on.</summary>
+    private async void OnAutostartToggled(bool on)
+    {
+        // Same reentrancy concern as OnRunAsAdminToggled: guard against a second checkbox
+        // click re-entering before the first async call finishes.
+        if (_togglingAutostart) return;
+        _togglingAutostart = true;
+        try
+        {
+            await ApplyAutostartAsync(on);
+            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _runAsAdmin, Elevation.IsElevated);
+        }
+        finally
+        {
+            _togglingAutostart = false;
+        }
+    }
+
+    /// <summary>Prefers the informational version (includes the git commit hash after '+' when
+    /// built from a git checkout), trimmed to just the version proper; falls back to the
+    /// four-part assembly version if no informational version attribute is present.</summary>
+    private static string GetVersionString()
+    {
+        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrEmpty(info))
+        {
+            var plus = info.IndexOf('+');
+            return plus >= 0 ? info[..plus] : info;
+        }
+        return asm.GetName().Version?.ToString() ?? "dev";
+    }
+
     /// <summary>Lazily creates (or re-syncs and shows) the single SettingsWindow instance.
     /// Queries autostart state off the dispatcher thread since ScheduledTaskAutostart.IsEnabled()
     /// shells out to schtasks (~100ms); the await resumes back here on the UI thread.</summary>
@@ -377,9 +451,8 @@ public partial class App : System.Windows.Application
 
         if (_settingsWindow is null)
         {
-            var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev";
-            _settingsWindow = new SettingsWindow(autostartEnabled, _runAsAdmin, Elevation.IsElevated, version);
-            _settingsWindow.AutostartChanged += async on => await ApplyAutostartAsync(on);
+            _settingsWindow = new SettingsWindow(autostartEnabled, _runAsAdmin, Elevation.IsElevated, GetVersionString());
+            _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
         }
         else
@@ -421,6 +494,10 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>Normal runs must be able to write apo-volume.txt and config.txt. If not, self-elevate once.</summary>
+    // Note: if this method itself runs elevated (e.g. a normal-mode session started via "Run as
+    // administrator" rather than the RunAsAdmin/ScheduledTask path), the probe below trivially
+    // succeeds without ever granting the Users ACL that RunElevatedSetup would add — a later
+    // non-elevated run would then fail the probe and self-correct via --setup as usual.
     private static void EnsureWritableOrElevate(string configDir)
     {
         try
