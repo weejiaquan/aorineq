@@ -66,4 +66,23 @@ public class SettingsTests : IDisposable
         _out.WriteLine("loaded while file locked (FileShare.None): " + loaded);
         Assert.Equal(Settings.Default, loaded);
     }
+
+    [Fact]
+    public void Load_v1_file_without_RunAsAdmin_defaults_false()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":73,\"Muted\":true}"); // v1 format
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded: {s}");
+        Assert.Equal(73, s.Percent);
+        Assert.True(s.Muted);
+        Assert.False(s.RunAsAdmin);
+    }
+
+    [Fact]
+    public void RunAsAdmin_roundtrips()
+    {
+        new Settings(40, false, RunAsAdmin: true).Save(_path);
+        Assert.True(Settings.Load(_path).RunAsAdmin);
+    }
 }

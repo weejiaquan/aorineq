@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace ApoVolume.Core;
 
 /// <summary>Persisted app state. Autostart lives in the registry, not here.</summary>
-public sealed record Settings(int Percent, bool Muted)
+public sealed record Settings(int Percent, bool Muted, bool RunAsAdmin = false)
 {
     public static Settings Default { get; } = new(50, false);
 
