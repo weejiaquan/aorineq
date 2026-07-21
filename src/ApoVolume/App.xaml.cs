@@ -23,6 +23,7 @@ public partial class App : System.Windows.Application
     private SkinOsdWindow? _skinOsd;
     private bool _useSkinOsd;
     private string? _loadedSkinFolder;
+    private string? _loadedSkinStamp;
     private SettingsWindow? _settingsWindow;
     private VolumeState _state = new();
     private string _settingsPath = "";
@@ -561,7 +562,8 @@ public partial class App : System.Windows.Application
     /// changes: the standard <see cref="OsdWindow"/> (always kept up to date via ApplyConfig), or
     /// a skin-driven <see cref="SkinOsdWindow"/> when <c>OsdStyle == "skin"</c> and the named skin
     /// loads successfully. Safe to call repeatedly (e.g. whenever settings change) — the skin
-    /// window is only recreated when the folder it points at actually changes. On a missing or
+    /// window is only recreated when the folder it points at, or that folder's content (per
+    /// <see cref="GetSkinContentStamp"/>), actually changes. On a missing or
     /// invalid skin — including one that passes <see cref="SkinLoader"/>'s header-only validation
     /// but fails to actually decode (truncated/corrupt PNG data) — balloons the reason via the
     /// tray and falls back to dark-pill in memory only; <c>Settings.OsdStyle</c>/<c>SkinName</c>
@@ -575,6 +577,8 @@ public partial class App : System.Windows.Application
         if (s.OsdStyle != OsdStyles.Skin || string.IsNullOrEmpty(s.SkinName))
         {
             _useSkinOsd = false;
+            _loadedSkinFolder = null;
+            _loadedSkinStamp = null;
             _skinOsd?.Hide();
             return;
         }
@@ -584,11 +588,14 @@ public partial class App : System.Windows.Application
         {
             _tray?.ShowWarning(info.Error ?? "Skin not found.");
             _useSkinOsd = false; // in-memory fallback only — see remarks above
+            _loadedSkinFolder = null;
+            _loadedSkinStamp = null;
             _skinOsd?.Hide();
             return;
         }
 
-        if (_skinOsd is null || _loadedSkinFolder != info.Folder)
+        string? stamp = GetSkinContentStamp(info);
+        if (_skinOsd is null || _loadedSkinFolder != info.Folder || _loadedSkinStamp != stamp)
         {
             // SkinLoader only validates the PNG header (signature + IHDR), not the full image
             // data — a truncated/corrupt file still passes info.IsValid but can throw from
@@ -602,11 +609,14 @@ public partial class App : System.Windows.Application
                 _skinOsd = next;
                 _skinOsd.PercentChangedByUser += OnOsdPercentChanged;
                 _loadedSkinFolder = info.Folder;
+                _loadedSkinStamp = stamp;
             }
             catch (Exception ex)
             {
                 _tray?.ShowWarning(ex.Message);
                 _useSkinOsd = false; // in-memory fallback only — see remarks above
+                _loadedSkinFolder = null;
+                _loadedSkinStamp = null;
                 _skinOsd?.Hide();
                 return;
             }
@@ -615,6 +625,29 @@ public partial class App : System.Windows.Application
         _useSkinOsd = true;
         _osd!.Hide(); // symmetric with the skin->standard branches above: only one OSD window is
                       // ever visible at a time, so switching TO skin must hide the standard one too.
+    }
+
+    /// <summary>Content stamp for a skin folder: the max last-write-time (in ticks, as a string) across
+    /// empty.png, full.png, and skin.json (if present). Used alongside the folder path in
+    /// <see cref="ApplyOsdConfig"/> so in-place edits to a skin's files (via Rescan or a style
+    /// round-trip) are detected and the <see cref="SkinOsdWindow"/> is recreated instead of reused.
+    /// Returns null on any I/O failure, which forces a reload attempt on the next call.</summary>
+    private static string? GetSkinContentStamp(SkinInfo info)
+    {
+        try
+        {
+            long stamp = Math.Max(
+                File.GetLastWriteTimeUtc(info.EmptyPath).Ticks,
+                File.GetLastWriteTimeUtc(info.FullPath).Ticks);
+            string jsonPath = Path.Combine(info.Folder, "skin.json");
+            if (File.Exists(jsonPath))
+                stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(jsonPath).Ticks);
+            return stamp.ToString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Merges the live volume state into <see cref="_settings"/> and (coalesced) persists

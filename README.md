@@ -78,8 +78,9 @@ are available via Settings → Display:
 
 All styles (including custom skins) support:
 
-- **Position anchor** — Top-left, top-center, top-right, center-left, center, center-right,
-  bottom-left, bottom-center, bottom-right.
+- **Position anchor** — 8 positions: the four corners plus the four edge midpoints
+  (top-left, top-center, top-right, left-center, right-center, bottom-left, bottom-center,
+  bottom-right). Dead-center is intentionally not offered.
 - **Offset X, Y** — Pixel adjustments from the anchor (useful for multi-monitor or edge spacing).
 - **Hide delay** — Seconds until OSD fades automatically (0.5 to 5 seconds).
 - **Animation** — Toggle on/off. When on, fade-in and fade-out transitions apply.
@@ -92,29 +93,47 @@ Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
 
 - **empty.png** — Image representing 0% volume. Any size and shape (e.g. a cat, bar, circle).
 - **full.png** — Image representing 100% volume. Must be identical dimensions to empty.png.
-- **skin.json** (optional) — JSON configuration file. Supported fields:
+- **skin.json** (optional) — JSON configuration file. Field names are case-insensitive.
+  Supported fields:
   ```json
   {
-    "percentText": "show",  // or "hide" — display percentage number
-    "percentX": 10,         // pixel offset of text from left edge
-    "percentY": 5,          // pixel offset of text from top edge
-    "scale": 1.5            // zoom multiplier (1.0 = original size)
+    "percentText": {
+      "show": true,   // whether to display the percentage number
+      "x": 10,        // pixel offset of text from left edge
+      "y": 5          // pixel offset of text from top edge
+    },
+    "scale": 1.5        // zoom multiplier (1.0 = original size, clamped to 0.25–4.0)
   }
   ```
+  Omitting `percentText` hides the percentage number. Omitting `scale` defaults to `1.0`.
+  An invalid (unparseable) `skin.json` fails the whole skin, which then falls back per
+  [Fallback behavior](#fallback-behavior) below.
 
 ### How fill works
 
-The OSD fills from left to right as volume increases. At 50% volume, the full.png is revealed
-50% across its width; at 100%, fully visible. Transparent pixels in the images are click-through
-(dragging the OSD doesn't change volume). Opaque pixels respond to clicks and drags to set volume.
+The OSD fills from left to right as volume increases: full.png is revealed via a rectangular
+clip whose width is proportional to volume — at 50%, the left half of full.png is visible; at
+100%, all of it. This clip always follows the x-axis, regardless of the artwork's shape (a
+circular skin fills left-to-right, not radially like a pie chart). Transparent pixels in the
+images are click-through (clicks and drags pass through to whatever is beneath the OSD).
+Opaque pixels respond to clicks and drags to set volume — see below.
+
+The whole bar is clickable, not just the current fill: the clickable/draggable shape is the
+union of empty.png's and full.png's opaque pixels, independent of the current volume level.
+Clicking anywhere on that shape jumps the volume straight to that position, like a normal
+slider — it does not nudge the fill incrementally.
+
+Skins render in Windows' display-scaled units, the same as the rest of the UI: on a 150%-scaled
+display, a skin whose PNGs are 300px wide renders at 450 physical pixels. There is no
+pixel-perfect (unscaled) rendering mode yet; it's on the roadmap.
 
 ### Skin shape examples
 
 Skins are not limited to bars. Examples:
 - **Bar** — Classic horizontal or vertical progress bar.
 - **Cat** — A cat outline in empty.png, filled with color in full.png, lighting up as volume rises.
-- **Radial** — Circular OSD filling like a pie chart.
-- **Custom art** — Any PNG shape; the fill follows the x-axis regardless of shape.
+- **Custom art** — Any PNG shape; the fill always follows the x-axis regardless of shape (see
+  "How fill works" above — there is no radial/pie-chart fill mode).
 
 ### Fallback behavior
 
