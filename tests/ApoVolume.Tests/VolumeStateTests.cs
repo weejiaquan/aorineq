@@ -89,4 +89,65 @@ public class VolumeStateTests
         Assert.Equal(100, new VolumeState(300).Percent);
         Assert.Equal(0, new VolumeState(-1).Percent);
     }
+
+    [Fact]
+    public void Constructor_gains_stepPercent_with_default()
+    {
+        var s = new VolumeState(50);
+        Assert.Equal(2, s.StepPercent);
+    }
+
+    [Fact]
+    public void Constructor_stepPercent_clamps_invalid_to_default()
+    {
+        var s = new VolumeState(50, false, stepPercent: 3);
+        Assert.Equal(2, s.StepPercent);
+    }
+
+    [Fact]
+    public void Up_uses_stepPercent()
+    {
+        var s = new VolumeState(98, stepPercent: 5);
+        s.Up();
+        Assert.Equal(100, s.Percent);
+        s.Up();
+        Assert.Equal(100, s.Percent);
+
+        var t = new VolumeState(50, stepPercent: 1);
+        t.Up();
+        Assert.Equal(51, t.Percent);
+    }
+
+    [Fact]
+    public void Down_uses_stepPercent()
+    {
+        var s = new VolumeState(2, stepPercent: 1);
+        s.Down();
+        Assert.Equal(1, s.Percent);
+        s.Down();
+        Assert.Equal(0, s.Percent);
+    }
+
+    [Fact]
+    public void StepPercent_property_clamps_setter()
+    {
+        var s = new VolumeState();
+        s.StepPercent = 5;
+        Assert.Equal(5, s.StepPercent);
+        s.StepPercent = 3;
+        Assert.Equal(2, s.StepPercent);
+        s.StepPercent = 1;
+        Assert.Equal(1, s.StepPercent);
+    }
+
+    [Fact]
+    public void StepPercent_live_change_affects_up()
+    {
+        var s = new VolumeState(50, stepPercent: 1);
+        s.Up();
+        Assert.Equal(51, s.Percent);
+        s.StepPercent = 5;
+        s.Up();
+        Assert.Equal(56, s.Percent);
+    }
 }

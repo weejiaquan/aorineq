@@ -85,4 +85,53 @@ public class SettingsTests : IDisposable
         new Settings(40, false, RunAsAdmin: true).Save(_path);
         Assert.True(Settings.Load(_path).RunAsAdmin);
     }
+
+    [Fact]
+    public void Load_v11_file_without_new_fields_defaults_all()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":73,\"Muted\":true}"); // v1.1 format
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded v1.1: {s}");
+        Assert.Equal(73, s.Percent);
+        Assert.True(s.Muted);
+        Assert.False(s.RunAsAdmin);
+        Assert.Equal("dark-pill", s.OsdStyle);
+        Assert.Equal("", s.SkinName);
+        Assert.Equal("bottom-center", s.OsdAnchor);
+        Assert.Equal(0, s.OsdOffsetX);
+        Assert.Equal(0, s.OsdOffsetY);
+        Assert.Equal(1.5, s.HideDelaySeconds);
+        Assert.True(s.AnimationEnabled);
+        Assert.Equal(150, s.AnimationMs);
+        Assert.Equal(2, s.StepPercent);
+    }
+
+    [Fact]
+    public void Load_clamps_out_of_range_new_fields()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path,
+            "{\"Percent\":50,\"Muted\":false,\"HideDelaySeconds\":99,\"AnimationMs\":5,\"StepPercent\":3,\"OsdAnchor\":\"middle\",\"OsdStyle\":\"neon\"}");
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded with clamping: {s}");
+        Assert.Equal(5.0, s.HideDelaySeconds);
+        Assert.Equal(50, s.AnimationMs);
+        Assert.Equal(2, s.StepPercent);
+        Assert.Equal("bottom-center", s.OsdAnchor);
+        Assert.Equal("dark-pill", s.OsdStyle);
+    }
+
+    [Fact]
+    public void All_fields_roundtrip()
+    {
+        var orig = new Settings(
+            Percent: 73, Muted: true, RunAsAdmin: true,
+            OsdStyle: "fluent", SkinName: "custom", OsdAnchor: "top-left",
+            OsdOffsetX: 10, OsdOffsetY: 20,
+            HideDelaySeconds: 3.0, AnimationEnabled: false, AnimationMs: 300, StepPercent: 5);
+        orig.Save(_path);
+        var loaded = Settings.Load(_path);
+        Assert.Equal(orig, loaded);
+    }
 }
