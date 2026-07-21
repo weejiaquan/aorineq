@@ -14,6 +14,8 @@ public sealed class ScheduledTaskAutostart
 
     public ScheduledTaskAutostart(string taskName = "ApoVolume", bool highestRunLevel = true, string scheduleArgs = "/SC ONLOGON")
     {
+        if (taskName.Contains('"'))
+            throw new ArgumentException("Task name cannot contain double-quote characters.", nameof(taskName));
         _taskName = taskName;
         _highestRunLevel = highestRunLevel;
         _scheduleArgs = scheduleArgs;
@@ -23,6 +25,8 @@ public sealed class ScheduledTaskAutostart
 
     public void Enable(string exePath)
     {
+        if (exePath.Contains('"'))
+            throw new ArgumentException("Executable path cannot contain double-quote characters.", nameof(exePath));
         var runLevel = _highestRunLevel ? "HIGHEST" : "LIMITED";
         var result = Run($"/Create /F /TN \"{_taskName}\" /TR \"\\\"{exePath}\\\"\" {_scheduleArgs} /RL {runLevel}");
         if (result.ExitCode != 0)
@@ -55,9 +59,11 @@ public sealed class ScheduledTaskAutostart
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         })!;
+        // Read stdout asynchronously to avoid deadlock while reading stderr synchronously
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
         var error = p.StandardError.ReadToEnd();
-        p.StandardOutput.ReadToEnd();
         p.WaitForExit();
+        stdoutTask.Wait();
         return (p.ExitCode, error);
     }
 }
