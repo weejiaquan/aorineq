@@ -45,7 +45,7 @@ Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in
 - **Volume Up / Volume Down / Mute keys** (keyboard media keys or USB volume knobs) — 2% per
   press, instant, no debounce even when held.
 - **Tray icon**: left-click opens a draggable slider (scroll wheel works too); menu has
-  Mute, Settings…, Exit.
+  Mute, Settings… (hosts OSD style, position, and animation options), Exit.
 - Quitting the app restores normal (for these DACs: dead) Windows volume-key handling.
 
 ## Volume keys in games (run as administrator)
@@ -61,6 +61,66 @@ Known limitation: on laptops, Windows' scheduled-task defaults prevent the
 elevated autostart task from starting on battery power (desktop setups are
 unaffected). A fix is planned; until then, plug in before rebooting or start
 the app manually.
+
+## OSD styles and skins
+
+apo-volume displays volume changes as a floating on-screen indicator (OSD). Four display styles
+are available via Settings → Display:
+
+- **Dark pill** — Default. Dark rounded rectangle with white text percentage, positioned top-right
+  by default.
+- **Windows 11** — Follows your system theme and accent color. Rounded rectangle matching Windows
+  design language.
+- **Minimal bar** — Horizontal or vertical bar showing fill level only, no text.
+- **Custom skin** — Load a folder-based skin from `%APPDATA%\apo-volume\skins\`.
+
+### Position and appearance settings
+
+All styles (including custom skins) support:
+
+- **Position anchor** — Top-left, top-center, top-right, center-left, center, center-right,
+  bottom-left, bottom-center, bottom-right.
+- **Offset X, Y** — Pixel adjustments from the anchor (useful for multi-monitor or edge spacing).
+- **Hide delay** — Seconds until OSD fades automatically (0.5 to 5 seconds).
+- **Animation** — Toggle on/off. When on, fade-in and fade-out transitions apply.
+- **Animation duration** — Speed of fade transitions (100 ms to 1000 ms).
+- **Volume step** — Keys increment by 1%, 2%, or 5% per press.
+
+### Custom skin format
+
+Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
+
+- **empty.png** — Image representing 0% volume. Any size and shape (e.g. a cat, bar, circle).
+- **full.png** — Image representing 100% volume. Must be identical dimensions to empty.png.
+- **skin.json** (optional) — JSON configuration file. Supported fields:
+  ```json
+  {
+    "percentText": "show",  // or "hide" — display percentage number
+    "percentX": 10,         // pixel offset of text from left edge
+    "percentY": 5,          // pixel offset of text from top edge
+    "scale": 1.5            // zoom multiplier (1.0 = original size)
+  }
+  ```
+
+### How fill works
+
+The OSD fills from left to right as volume increases. At 50% volume, the full.png is revealed
+50% across its width; at 100%, fully visible. Transparent pixels in the images are click-through
+(dragging the OSD doesn't change volume). Opaque pixels respond to clicks and drags to set volume.
+
+### Skin shape examples
+
+Skins are not limited to bars. Examples:
+- **Bar** — Classic horizontal or vertical progress bar.
+- **Cat** — A cat outline in empty.png, filled with color in full.png, lighting up as volume rises.
+- **Radial** — Circular OSD filling like a pie chart.
+- **Custom art** — Any PNG shape; the fill follows the x-axis regardless of shape.
+
+### Fallback behavior
+
+If a custom skin folder is invalid or missing required images, apo-volume falls back to the
+Dark pill style and displays a warning in the system tray. Check `%APPDATA%\apo-volume\` for
+a log file if skins fail to load.
 
 ## Volume model
 
