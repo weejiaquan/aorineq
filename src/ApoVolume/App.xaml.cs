@@ -31,7 +31,16 @@ public partial class App : System.Windows.Application
 
         if (e.Args.Contains("--setup"))
         {
-            RunElevatedSetup();
+            try
+            {
+                RunElevatedSetup();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shutdown(1);
+                return;
+            }
             Shutdown();
             return;
         }
@@ -50,35 +59,38 @@ public partial class App : System.Windows.Application
         {
             configDir = ApoPaths.GetConfigDir();
             EnsureWritableOrElevate(configDir);
+
+            _settingsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "settings.json");
+            var settings = Settings.Load(_settingsPath);
+            _state = new VolumeState(settings.Percent, settings.Muted);
+
+            _writer = new ApoWriter(configDir);
+            _writer.EnsureInclude();
+            _writer.StartIncludeGuard();
+
+            _osd = new OsdWindow();
+            _osd.PercentChangedByUser += p => { _state.SetPercent(p); Render(interactive: true); };
+
+            _tray = new TrayIcon(new Autostart(), ExePath);
+            _tray.OpenRequested += () => Render(interactive: true);
+            _tray.MuteToggleRequested += () => { _state.ToggleMute(); Render(interactive: false); };
+            _tray.ExitRequested += () => Shutdown();
+
+            // Hook construction can fail (e.g. another process/policy blocks WH_KEYBOARD_LL);
+            // kept inside this try so that failure hits the same friendly fail-fast dialog below.
+            _hook = new KeyboardHook();
+            _hook.VolumeUp += () => { _state.Up(); Render(interactive: false); };
+            _hook.VolumeDown += () => { _state.Down(); Render(interactive: false); };
+            _hook.MuteToggle += () => { _state.ToggleMute(); Render(interactive: false); };
         }
-        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException)
+        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException
+            or System.ComponentModel.Win32Exception)
         {
             System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
             return;
         }
-
-        _settingsPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "settings.json");
-        var settings = Settings.Load(_settingsPath);
-        _state = new VolumeState(settings.Percent, settings.Muted);
-
-        _writer = new ApoWriter(configDir);
-        _writer.EnsureInclude();
-        _writer.StartIncludeGuard();
-
-        _osd = new OsdWindow();
-        _osd.PercentChangedByUser += p => { _state.SetPercent(p); Render(interactive: true); };
-
-        _tray = new TrayIcon(new Autostart(), ExePath);
-        _tray.OpenRequested += () => Render(interactive: true);
-        _tray.MuteToggleRequested += () => { _state.ToggleMute(); Render(interactive: false); };
-        _tray.ExitRequested += () => Shutdown();
-
-        _hook = new KeyboardHook();
-        _hook.VolumeUp += () => { _state.Up(); Render(interactive: false); };
-        _hook.VolumeDown += () => { _state.Down(); Render(interactive: false); };
-        _hook.MuteToggle += () => { _state.ToggleMute(); Render(interactive: false); };
 
         // second-instance listener
         var waiter = new Thread(() =>
