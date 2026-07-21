@@ -1,17 +1,18 @@
 namespace ApoVolume.UI;
 
 /// <summary>
-/// OSD style identifiers that <see cref="OsdWindow"/> renders directly by swapping its own
-/// visual tree. <c>Settings.OsdStyle</c> also allows "skin" (see
-/// <c>ApoVolume.Core.Settings</c>'s valid-styles list) — that belongs to another, not-yet-built
-/// rendering path (the custom SkinLoader-driven skin renderer). Until that exists, <see
-/// cref="OsdWindow"/> falls back to <see cref="DarkPill"/> for any style value other than <see
-/// cref="MinimalBar"/> and <see cref="Fluent"/>, so an unimplemented or corrupted style setting
-/// never leaves the OSD blank.
+/// OSD style identifiers. <see cref="DarkPill"/>, <see cref="MinimalBar"/>, and <see
+/// cref="Fluent"/> are rendered by <see cref="OsdWindow"/> swapping its own visual tree; <see
+/// cref="Skin"/> is rendered by a separate <see cref="SkinOsdWindow"/> instance instead (see
+/// <c>App</c>'s style-switching logic). <see cref="OsdWindow"/> falls back to <see
+/// cref="DarkPill"/> for any style value other than <see cref="MinimalBar"/> and <see
+/// cref="Fluent"/> (including <see cref="Skin"/>, and any corrupted setting), so it always
+/// renders something reasonable even while it isn't the active window.
 /// </summary>
 public static class OsdStyles
 {
     public const string DarkPill = "dark-pill";
     public const string MinimalBar = "minimal-bar";
     public const string Fluent = "fluent";
+    public const string Skin = "skin";
 }

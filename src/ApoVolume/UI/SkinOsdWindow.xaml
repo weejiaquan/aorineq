@@ -1,0 +1,25 @@
+<Window x:Class="ApoVolume.UI.SkinOsdWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
+        Background="Transparent" Topmost="True"
+        ShowInTaskbar="False" ShowActivated="False" SizeToContent="Manual">
+    <Grid>
+        <!-- Base layer: always visible, dimmed while muted. -->
+        <Image x:Name="EmptyImage" Stretch="Fill" />
+        <!-- Overlay layer: clipped to the fill width for the current percent; hidden while muted. -->
+        <Image x:Name="FullImage" Stretch="Fill">
+            <Image.Clip>
+                <RectangleGeometry x:Name="FillClip" />
+            </Image.Clip>
+        </Image>
+        <TextBlock x:Name="PercentTextBlock" Foreground="White" FontSize="14" FontWeight="SemiBold"
+                   HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed" />
+        <!-- Mute badge: small glyph chip, bottom-right, shown only while muted. -->
+        <Border x:Name="MuteBadge" Width="20" Height="20" CornerRadius="10" Background="#F2202020"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,4" Visibility="Collapsed">
+            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Text="&#xE74F;" />
+        </Border>
+    </Grid>
+</Window>

@@ -20,6 +20,9 @@ public partial class App : System.Windows.Application
     private ApoWriter? _writer;
     private TrayIcon? _tray;
     private OsdWindow? _osd;
+    private SkinOsdWindow? _skinOsd;
+    private bool _useSkinOsd;
+    private string? _loadedSkinFolder;
     private SettingsWindow? _settingsWindow;
     private VolumeState _state = new();
     private string _settingsPath = "";
@@ -121,14 +124,15 @@ public partial class App : System.Windows.Application
             _writer.StartIncludeGuard();
 
             _osd = new OsdWindow();
-            _osd.ApplyConfig(settings);
-            _osd.PercentChangedByUser += p => { _state.SetPercent(p); Render(interactive: true); };
+            _osd.PercentChangedByUser += OnOsdPercentChanged;
 
             _tray = new TrayIcon();
             _tray.OpenRequested += () => Render(interactive: true);
             _tray.MuteToggleRequested += () => { _state.ToggleMute(); Render(interactive: false); };
             _tray.SettingsRequested += OpenSettings;
             _tray.ExitRequested += () => Shutdown();
+
+            ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
 
             if (_uacDeclined)
                 _tray.ShowWarning(
@@ -491,9 +495,71 @@ public partial class App : System.Windows.Application
     private void Render(bool interactive)
     {
         _writer!.WriteVolume(_state.CurrentDb);
-        _osd!.ShowVolume(_state.Percent, _state.Muted, interactive);
+        if (_useSkinOsd && _skinOsd is not null)
+            _skinOsd.ShowVolume(_state.Percent, _state.Muted, interactive);
+        else
+            _osd!.ShowVolume(_state.Percent, _state.Muted, interactive);
         _tray!.Update(_state.Percent, _state.Muted);
         SaveSettings();
+    }
+
+    /// <summary>Shared handler for both OsdWindow's and SkinOsdWindow's PercentChangedByUser —
+    /// same contract either way: only ever raised by direct user interaction with the OSD, never
+    /// by ShowVolume's own programmatic updates.</summary>
+    private void OnOsdPercentChanged(int percent)
+    {
+        _state.SetPercent(percent);
+        Render(interactive: true);
+    }
+
+    /// <summary>
+    /// Applies OSD style/position/behavior settings and decides which window renders volume
+    /// changes: the standard <see cref="OsdWindow"/> (always kept up to date via ApplyConfig), or
+    /// a skin-driven <see cref="SkinOsdWindow"/> when <c>OsdStyle == "skin"</c> and the named skin
+    /// loads successfully. Safe to call repeatedly (e.g. whenever settings change) — the skin
+    /// window is only recreated when the folder it points at actually changes. On a missing or
+    /// invalid skin, balloons the reason via the tray and falls back to dark-pill in memory only;
+    /// <c>Settings.OsdStyle</c>/<c>SkinName</c> on disk are never touched here, so a later fix to
+    /// the skin folder (or a restart after Equalizer APO etc. becomes available) retries cleanly.
+    /// </summary>
+    private void ApplyOsdConfig(Settings s)
+    {
+        _osd!.ApplyConfig(s);
+
+        if (s.OsdStyle != OsdStyles.Skin || string.IsNullOrEmpty(s.SkinName))
+        {
+            _useSkinOsd = false;
+            _skinOsd?.Hide();
+            return;
+        }
+
+        var info = SkinLoader.Load(Path.Combine(GetSkinsRoot(), s.SkinName));
+        if (!info.IsValid)
+        {
+            _tray?.ShowWarning(info.Error ?? "Skin not found.");
+            _useSkinOsd = false; // in-memory fallback only — see remarks above
+            _skinOsd?.Hide();
+            return;
+        }
+
+        if (_skinOsd is null || _loadedSkinFolder != info.Folder)
+        {
+            _skinOsd?.Close(); // real teardown, unlike OsdWindow's Close-cancels-and-Hides pattern
+            _skinOsd = new SkinOsdWindow(info);
+            _skinOsd.PercentChangedByUser += OnOsdPercentChanged;
+            _loadedSkinFolder = info.Folder;
+        }
+        _skinOsd.ApplyConfig(s);
+        _useSkinOsd = true;
+    }
+
+    /// <summary>Resolves (and creates, if missing) the per-user skins root: %APPDATA%\apo-volume\skins.</summary>
+    private static string GetSkinsRoot()
+    {
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "skins");
+        Directory.CreateDirectory(root);
+        return root;
     }
 
     private void SaveSettings()
