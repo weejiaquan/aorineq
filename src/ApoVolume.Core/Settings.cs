@@ -19,6 +19,14 @@ public sealed record Settings(int Percent, bool Muted)
         {
             return Default;
         }
+        catch (IOException)
+        {
+            return Default;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Default;
+        }
     }
 
     public void Save(string path)

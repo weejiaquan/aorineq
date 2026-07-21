@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace ApoVolume.UI;
@@ -9,6 +11,7 @@ public partial class OsdWindow : Window
 {
     private const string GlyphVolume = "\uE767"; // Segoe MDL2 'Volume'
     private const string GlyphMute = "\uE74F";   // Segoe MDL2 'Mute'
+    private static readonly TimeSpan FadeDuration = TimeSpan.FromMilliseconds(150);
 
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
     private bool _updatingFromCode;
@@ -22,9 +25,12 @@ public partial class OsdWindow : Window
         {
             if (IsMouseOver) return; // user is interacting: stay open, timer keeps ticking
             _hideTimer.Stop();
-            Hide();
+            var fade = new DoubleAnimation(1, 0, FadeDuration);
+            fade.Completed += (_, _) => Hide();
+            BeginAnimation(OpacityProperty, fade);
         };
         SourceInitialized += (_, _) => MakeNoActivate();
+        MouseWheel += OnMouseWheel;
     }
 
     public void ShowVolume(int percent, bool muted, bool interactive)
@@ -40,16 +46,24 @@ public partial class OsdWindow : Window
         Left = wa.Left + (wa.Width - Width) / 2;
         Top = wa.Bottom - Height - 12;
 
+        BeginAnimation(OpacityProperty, null); // cancel any running fade-out
+        Opacity = 1;
         Show();
         _hideTimer.Stop();
-        if (!interactive) _hideTimer.Start();
-        else _hideTimer.Start(); // interactive also auto-hides, but IsMouseOver blocks it while hovered
+        _hideTimer.Start(); // both paths auto-hide; IsMouseOver blocks the tick while hovered
     }
 
     private void OnSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_updatingFromCode) return;
         PercentChangedByUser?.Invoke((int)Math.Round(e.NewValue));
+    }
+
+    private void OnMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        // Not marked as updating-from-code: the change flows through ValueChanged like any
+        // other user edit, and the slider itself clamps to its 0..100 range.
+        VolumeSlider.Value += e.Delta > 0 ? 2 : -2;
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

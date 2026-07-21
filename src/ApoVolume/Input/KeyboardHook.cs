@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 
@@ -28,8 +27,7 @@ public sealed class KeyboardHook : IDisposable
     public KeyboardHook()
     {
         _proc = Callback;
-        using var module = Process.GetCurrentProcess().MainModule!;
-        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(module.ModuleName), 0);
+        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
         if (_hook == IntPtr.Zero)
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to install low-level keyboard hook.");
     }
@@ -41,7 +39,7 @@ public sealed class KeyboardHook : IDisposable
             int vk = Marshal.ReadInt32(lParam); // vkCode is the first DWORD of KBDLLHOOKSTRUCT
             if (vk is VK_VOLUME_MUTE or VK_VOLUME_DOWN or VK_VOLUME_UP)
             {
-                int msg = wParam.ToInt32();
+                long msg = (long)wParam; // widen: never overflow regardless of pointer size
                 if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
                 {
                     var handler = vk switch
@@ -72,5 +70,5 @@ public sealed class KeyboardHook : IDisposable
     private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr GetModuleHandle(string lpModuleName);
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
 }

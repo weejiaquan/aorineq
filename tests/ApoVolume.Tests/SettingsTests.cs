@@ -56,4 +56,14 @@ public class SettingsTests : IDisposable
         File.WriteAllText(_path, "{\"Percent\": 999, \"Muted\": false}");
         Assert.Equal(100, Settings.Load(_path).Percent);
     }
+
+    [Fact]
+    public void Load_locked_file_returns_default()
+    {
+        new Settings(73, true).Save(_path);
+        using var locker = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.None);
+        var loaded = Settings.Load(_path);
+        _out.WriteLine("loaded while file locked (FileShare.None): " + loaded);
+        Assert.Equal(Settings.Default, loaded);
+    }
 }
