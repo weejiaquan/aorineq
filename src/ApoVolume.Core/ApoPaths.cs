@@ -22,4 +22,13 @@ public static class ApoPaths
                 "Install Equalizer APO (https://equalizerapo.com) and install it on your DAC's playback device.");
         return configDir;
     }
+
+    /// <summary>Resolves (and creates, if missing) the per-user skins root: %APPDATA%\apo-volume\skins.</summary>
+    public static string GetSkinsRoot()
+    {
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "skins");
+        Directory.CreateDirectory(root);
+        return root;
+    }
 }

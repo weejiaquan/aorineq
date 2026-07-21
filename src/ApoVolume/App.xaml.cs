@@ -26,7 +26,11 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private VolumeState _state = new();
     private string _settingsPath = "";
-    private bool _runAsAdmin;
+    // Single source of truth for everything persisted to settings.json. Every field (volume
+    // percent/mute, RunAsAdmin, all OSD fields) is updated here via `with { }` before SaveSettings
+    // serializes it — SaveSettings must never build a fresh Settings from a handful of fields, or
+    // every change clobbers the rest of what's on disk.
+    private Settings _settings = Settings.Default;
     private bool _uacDeclined;
     private bool _togglingRunAsAdmin;
     private bool _togglingAutostart;
@@ -58,7 +62,7 @@ public partial class App : System.Windows.Application
         _settingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "settings.json");
         var settings = Settings.Load(_settingsPath);
-        _runAsAdmin = settings.RunAsAdmin;
+        _settings = settings;
 
         // Cheap probe so a second launch doesn't pay for a pointless UAC prompt via the
         // elevated bounce below: if an instance is already running, its named event exists
@@ -139,7 +143,7 @@ public partial class App : System.Windows.Application
                     "Running without administrator rights — volume keys won't work while elevated games are focused.");
 
             // Elevated-startup reconciliation.
-            if (Elevation.IsElevated && _runAsAdmin)
+            if (Elevation.IsElevated && _settings.RunAsAdmin)
             {
                 if (new ScheduledTaskAutostart().IsEnabled())
                 {
@@ -166,7 +170,7 @@ public partial class App : System.Windows.Application
                     ApplyAutostart(true);
                 }
             }
-            else if (Elevation.IsElevated && !_runAsAdmin && new ScheduledTaskAutostart().IsEnabled())
+            else if (Elevation.IsElevated && !_settings.RunAsAdmin && new ScheduledTaskAutostart().IsEnabled())
             {
                 // Reverse case: RunAsAdmin is off (or was turned off) but a scheduled task
                 // from an earlier elevated/RunAsAdmin session is still registered. We're
@@ -221,7 +225,7 @@ public partial class App : System.Windows.Application
     /// </summary>
     private bool BounceToElevatedOrContinue(string[] args)
     {
-        if (!_runAsAdmin || Elevation.IsElevated || args.Contains("--no-elevate"))
+        if (!_settings.RunAsAdmin || Elevation.IsElevated || args.Contains("--no-elevate"))
             return false;
 
         if (TryRelaunchElevatedAndShutdown())
@@ -268,31 +272,31 @@ public partial class App : System.Windows.Application
         Shutdown(1);
     }
 
-    /// <summary>Raw, blocking mechanism call selected by <see cref="_runAsAdmin"/> — schtasks calls
+    /// <summary>Raw, blocking mechanism call selected by <see cref="_settings"/>.RunAsAdmin — schtasks calls
     /// can take ~100ms, so callers on the dispatcher thread must run this via Task.Run.</summary>
     private void ApplyAutostartMechanism(bool enable)
     {
         if (enable)
         {
-            if (_runAsAdmin) new ScheduledTaskAutostart().Enable(ExePath);
+            if (_settings.RunAsAdmin) new ScheduledTaskAutostart().Enable(ExePath);
             else new Autostart().Enable(ExePath);
         }
         else
         {
-            if (_runAsAdmin) new ScheduledTaskAutostart().Disable();
+            if (_settings.RunAsAdmin) new ScheduledTaskAutostart().Disable();
             else new Autostart().Disable();
         }
     }
 
-    /// <summary>Raw, blocking disable of the mechanism NOT selected by <see cref="_runAsAdmin"/>.</summary>
+    /// <summary>Raw, blocking disable of the mechanism NOT selected by <see cref="_settings"/>.RunAsAdmin.</summary>
     private void DisableOtherMechanism()
     {
-        if (_runAsAdmin) new Autostart().Disable();
+        if (_settings.RunAsAdmin) new Autostart().Disable();
         else new ScheduledTaskAutostart().Disable();
     }
 
     /// <summary>
-    /// Enables/disables autostart via whichever mechanism <see cref="_runAsAdmin"/> selects
+    /// Enables/disables autostart via whichever mechanism <see cref="_settings"/>.RunAsAdmin selects
     /// (scheduled task when elevated-on-logon is wanted, Run key otherwise). Enabling also
     /// disables the other mechanism, but only once the new one is confirmed registered — this is
     /// how migration between mechanisms happens (e.g. from <see cref="OnRunAsAdminToggled"/>)
@@ -379,15 +383,17 @@ public partial class App : System.Windows.Application
         _togglingRunAsAdmin = true;
         try
         {
-            _runAsAdmin = on;
+            _settings = _settings with { RunAsAdmin = on };
 
             // Synchronous, not coalesced: TryRelaunchElevatedAndShutdown below can call Shutdown(),
             // which disposes _settingsSaver before its debounce timer fires — the coalesced write
             // would be lost and the elevated child would start from stale settings. This write must
-            // land before we ever offer or perform that relaunch.
+            // land before we ever offer or perform that relaunch. Saves the full _settings (not a
+            // partial reconstruction), so every other persisted field — OSD style/position/etc. —
+            // survives an admin-toggle instead of being reset to defaults.
             try
             {
-                new Settings(_state.Percent, _state.Muted, _runAsAdmin).Save(_settingsPath);
+                _settings.Save(_settingsPath);
             }
             catch (IOException)
             {
@@ -424,7 +430,7 @@ public partial class App : System.Windows.Application
                         "apo-volume", MessageBoxButton.OK, MessageBoxImage.Information);
             }
 
-            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _runAsAdmin, Elevation.IsElevated);
+            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _settings.RunAsAdmin, Elevation.IsElevated, _settings);
         }
         finally
         {
@@ -444,7 +450,7 @@ public partial class App : System.Windows.Application
         try
         {
             await ApplyAutostartAsync(on);
-            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _runAsAdmin, Elevation.IsElevated);
+            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _settings.RunAsAdmin, Elevation.IsElevated, _settings);
         }
         finally
         {
@@ -476,13 +482,16 @@ public partial class App : System.Windows.Application
 
         if (_settingsWindow is null)
         {
-            _settingsWindow = new SettingsWindow(autostartEnabled, _runAsAdmin, Elevation.IsElevated, GetVersionString());
+            _settingsWindow = new SettingsWindow(
+                autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, GetVersionString(), _settings);
             _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
+            _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
         }
         else
         {
-            _settingsWindow.SyncState(autostartEnabled, _runAsAdmin, Elevation.IsElevated);
+            // Also rescans the skins folder (inside SyncState -> ApplyOsdSettings/PopulateSkins).
+            _settingsWindow.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, _settings);
         }
 
         _settingsWindow.Show();
@@ -495,12 +504,20 @@ public partial class App : System.Windows.Application
     private void Render(bool interactive)
     {
         _writer!.WriteVolume(_state.CurrentDb);
+        ShowOsd(interactive);
+        _tray!.Update(_state.Percent, _state.Muted);
+        SaveSettings();
+    }
+
+    /// <summary>Shows the currently active OSD window (skin-driven or the standard OsdWindow) for
+    /// the current volume state. Shared by Render (volume/mute changes) and OnOsdSettingsChanged
+    /// (so an OSD-only settings change is immediately visible without needing a volume keypress).</summary>
+    private void ShowOsd(bool interactive)
+    {
         if (_useSkinOsd && _skinOsd is not null)
             _skinOsd.ShowVolume(_state.Percent, _state.Muted, interactive);
         else
             _osd!.ShowVolume(_state.Percent, _state.Muted, interactive);
-        _tray!.Update(_state.Percent, _state.Muted);
-        SaveSettings();
     }
 
     /// <summary>Shared handler for both OsdWindow's and SkinOsdWindow's PercentChangedByUser —
@@ -510,6 +527,33 @@ public partial class App : System.Windows.Application
     {
         _state.SetPercent(percent);
         Render(interactive: true);
+    }
+
+    /// <summary>Handles the SettingsWindow OsdSettingsChanged event: merges the OSD-only fields
+    /// into <see cref="_settings"/> (Percent/Muted/RunAsAdmin are untouched — see <see
+    /// cref="OsdSettings"/>'s remarks), keeps VolumeState.StepPercent in sync so the global hotkeys
+    /// immediately use the new step size, applies the config live (style/position/animation, and
+    /// rebuilding the skin window when the skin selection changed), persists via the existing
+    /// coalesced save, and shows the OSD once non-interactively so the effect is visible without a
+    /// volume keypress.</summary>
+    private void OnOsdSettingsChanged(OsdSettings o)
+    {
+        _settings = _settings with
+        {
+            OsdStyle = o.Style,
+            SkinName = o.SkinName,
+            OsdAnchor = o.Anchor,
+            OsdOffsetX = o.OffsetX,
+            OsdOffsetY = o.OffsetY,
+            HideDelaySeconds = o.HideDelaySeconds,
+            AnimationEnabled = o.AnimationEnabled,
+            AnimationMs = o.AnimationMs,
+            StepPercent = o.StepPercent,
+        };
+        _state.StepPercent = _settings.StepPercent;
+        ApplyOsdConfig(_settings);
+        SaveSettings();
+        ShowOsd(interactive: false);
     }
 
     /// <summary>
@@ -535,7 +579,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var info = SkinLoader.Load(Path.Combine(GetSkinsRoot(), s.SkinName));
+        var info = SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), s.SkinName));
         if (!info.IsValid)
         {
             _tray?.ShowWarning(info.Error ?? "Skin not found.");
@@ -571,18 +615,13 @@ public partial class App : System.Windows.Application
         _useSkinOsd = true;
     }
 
-    /// <summary>Resolves (and creates, if missing) the per-user skins root: %APPDATA%\apo-volume\skins.</summary>
-    private static string GetSkinsRoot()
-    {
-        var root = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "skins");
-        Directory.CreateDirectory(root);
-        return root;
-    }
-
+    /// <summary>Merges the live volume state into <see cref="_settings"/> and (coalesced) persists
+    /// the full, up-to-date Settings — every field, not just Percent/Muted/RunAsAdmin, so an OSD
+    /// settings change followed shortly by a volume change (or vice versa) never loses the other.</summary>
     private void SaveSettings()
     {
-        var s = new Settings(_state.Percent, _state.Muted, _runAsAdmin);
+        _settings = _settings with { Percent = _state.Percent, Muted = _state.Muted, StepPercent = _state.StepPercent };
+        var s = _settings;
         _settingsSaver.Post(() =>
         {
             try
