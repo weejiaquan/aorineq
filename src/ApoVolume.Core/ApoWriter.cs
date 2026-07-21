@@ -12,11 +12,18 @@ public sealed class ApoWriter : IDisposable
     private readonly object _includeLock = new();
     private FileSystemWatcher? _watcher;
     private int _writeCount;
+    private int _consecutiveFailures;
     private volatile bool _disposed;
 
     public string VolumeFilePath { get; }
     public string ConfigTxtPath { get; }
     public int WriteCount => _writeCount;
+
+    /// <summary>
+    /// Raised once after 5 consecutive write failures (e.g. apo-volume.txt not writable),
+    /// so the UI can surface it. Not raised again until a success resets the streak.
+    /// </summary>
+    public event Action? WriteFailing;
 
     public ApoWriter(string configDir)
     {
@@ -39,10 +46,21 @@ public sealed class ApoWriter : IDisposable
             {
                 File.WriteAllText(VolumeFilePath, FormatPreamp(db) + Environment.NewLine);
                 Interlocked.Increment(ref _writeCount);
+                _consecutiveFailures = 0;
             }
-            catch (IOException) { }               // transient share violation/AV lock: next write retries
-            catch (UnauthorizedAccessException) { } // same: graceful degradation, no crash
+            catch (IOException) { OnWriteFailed(); }               // transient share violation/AV lock: next write retries
+            catch (UnauthorizedAccessException) { OnWriteFailed(); } // same: graceful degradation, no crash
         });
+
+    private void OnWriteFailed()
+    {
+        // Actions run one at a time (Coalescer serializes them), so a plain counter is safe.
+        _consecutiveFailures++;
+        if (_consecutiveFailures == 5)
+        {
+            WriteFailing?.Invoke();
+        }
+    }
 
     public bool EnsureInclude()
     {

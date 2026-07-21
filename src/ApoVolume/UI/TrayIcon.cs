@@ -61,6 +61,9 @@ public sealed class TrayIcon : IDisposable
         _muteItem.Checked = muted;
     }
 
+    public void ShowWarning(string text) =>
+        _icon.ShowBalloonTip(5000, "apo-volume", text, ToolTipIcon.Warning);
+
     private static Icon CreateGlyphIcon(string glyph)
     {
         using var bmp = new Bitmap(32, 32);

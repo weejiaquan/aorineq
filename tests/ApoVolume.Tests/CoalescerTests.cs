@@ -10,12 +10,21 @@ public class CoalescerTests
     public CoalescerTests(ITestOutputHelper output) => _out = output;
 
     [Fact]
-    public void First_post_runs_synchronously()
+    public void First_post_runs_promptly()
     {
         using var c = new Coalescer(TimeSpan.FromMilliseconds(50));
         int ran = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         c.Post(() => ran++);
-        Assert.Equal(1, ran); // leading edge: no latency on a single keypress
+
+        // Leading edge no longer runs synchronously on the caller (it runs on a ThreadPool
+        // thread), so poll briefly instead of asserting immediately.
+        while (sw.ElapsedMilliseconds < 500 && Volatile.Read(ref ran) != 1)
+        {
+            Thread.Sleep(5);
+        }
+        _out.WriteLine($"ran={ran} after {sw.ElapsedMilliseconds} ms");
+        Assert.Equal(1, ran); // no meaningful latency on a single keypress
     }
 
     [Fact]
@@ -54,7 +63,7 @@ public class CoalescerTests
     {
         using var c = new Coalescer(TimeSpan.FromMilliseconds(50));
 
-        // Leading edge: runs synchronously, starts cooldown.
+        // Leading edge: runs promptly on a pool thread, starts cooldown.
         c.Post(() => _out.WriteLine("leading action ran"));
 
         // Queued during cooldown; will run as the trailing action and throw.
@@ -68,8 +77,13 @@ public class CoalescerTests
         Thread.Sleep(200);
         int ran = 0;
         c.Post(() => ran++);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < 500 && Volatile.Read(ref ran) != 1)
+        {
+            Thread.Sleep(5);
+        }
         Assert.Equal(1, ran);
-        _out.WriteLine($"post-throw recovery post executed: ran={ran}");
+        _out.WriteLine($"post-throw recovery post executed after {sw.ElapsedMilliseconds} ms: ran={ran}");
     }
 
     [Fact]
@@ -116,23 +130,20 @@ public class CoalescerTests
 
         var leadingDone = new ManualResetEventSlim(false);
 
-        // Post the slow leading action from a background thread so the test thread
-        // isn't blocked and can immediately queue the trailing action.
-        _ = Task.Run(() =>
+        // Leading action now always runs on a pool thread (Post only arms the timer and
+        // returns), so no need to farm the Post call itself out to a background thread.
+        c.Post(() =>
         {
-            c.Post(() =>
+            TrackEnter();
+            try
             {
-                TrackEnter();
-                try
-                {
-                    Thread.Sleep(150); // longer than the 50ms interval
-                }
-                finally
-                {
-                    TrackExit();
-                    leadingDone.Set();
-                }
-            });
+                Thread.Sleep(150); // longer than the 50ms interval
+            }
+            finally
+            {
+                TrackExit();
+                leadingDone.Set();
+            }
         });
 
         // Give the leading action a moment to actually start running.

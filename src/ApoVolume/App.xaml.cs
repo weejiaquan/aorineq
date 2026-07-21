@@ -66,6 +66,8 @@ public partial class App : System.Windows.Application
             _state = new VolumeState(settings.Percent, settings.Muted);
 
             _writer = new ApoWriter(configDir);
+            _writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
+                _tray?.ShowWarning("Volume changes are not reaching Equalizer APO (apo-volume.txt is not writable)."));
             _writer.EnsureInclude();
             _writer.StartIncludeGuard();
 

@@ -30,13 +30,24 @@ public class ApoWriterTests : IDisposable
     }
 
     [Fact]
-    public void WriteVolume_creates_file_immediately_with_preamp_line()
+    public void WriteVolume_writes_preamp_line_promptly()
     {
         using var w = new ApoWriter(_dir);
         w.WriteVolume(-25.2525);
-        // leading edge is synchronous: file must exist right now
-        var content = File.ReadAllText(w.VolumeFilePath);
-        _out.WriteLine("file content: " + content.TrimEnd());
+
+        // leading edge now runs on a ThreadPool thread, not synchronously: poll briefly.
+        string? content = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < 500)
+        {
+            if (File.Exists(w.VolumeFilePath))
+            {
+                content = File.ReadAllText(w.VolumeFilePath);
+                if (content == "Preamp: -25.3 dB" + Environment.NewLine) break;
+            }
+            Thread.Sleep(10);
+        }
+        _out.WriteLine($"file content after {sw.ElapsedMilliseconds} ms: " + (content?.TrimEnd() ?? "<none>"));
         Assert.Equal("Preamp: -25.3 dB" + Environment.NewLine, content);
     }
 
@@ -96,6 +107,48 @@ public class ApoWriterTests : IDisposable
         var content = File.ReadAllText(w.VolumeFilePath);
         _out.WriteLine("content after unlock + retry: " + content.TrimEnd());
         Assert.Equal("Preamp: -10.0 dB" + Environment.NewLine, content);
+    }
+
+    [Fact]
+    public void WriteVolume_raises_WriteFailing_once_after_five_consecutive_failures()
+    {
+        using var w = new ApoWriter(_dir);
+        int firedCount = 0;
+        w.WriteFailing += () => Interlocked.Increment(ref firedCount);
+
+        // Each call is >60ms after the previous one (past the 50ms coalescer interval), so
+        // every WriteVolume call here is its own leading write attempt, not coalesced away.
+        using (new FileStream(w.VolumeFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                w.WriteVolume(-10);
+                Thread.Sleep(70);
+            }
+        }
+        _out.WriteLine($"WriteFailing fired {firedCount} time(s) after 6 consecutive failures");
+        Assert.Equal(1, firedCount);
+
+        // A successful write resets the streak.
+        Thread.Sleep(70);
+        w.WriteVolume(-10);
+        Thread.Sleep(70);
+        var content = File.ReadAllText(w.VolumeFilePath);
+        _out.WriteLine("content after recovery write: " + content.TrimEnd());
+        Assert.Equal("Preamp: -10.0 dB" + Environment.NewLine, content);
+        Assert.Equal(1, firedCount); // unchanged: no new failure streak yet
+
+        // Force 5 more consecutive failures: the event must be able to fire again.
+        using (new FileStream(w.VolumeFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                w.WriteVolume(-20);
+                Thread.Sleep(70);
+            }
+        }
+        _out.WriteLine($"WriteFailing fired {firedCount} time(s) total after second failure burst");
+        Assert.Equal(2, firedCount);
     }
 
     [Fact]

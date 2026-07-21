@@ -1,8 +1,9 @@
 namespace ApoVolume.Core;
 
 /// <summary>
-/// Runs the first action immediately (leading edge), then at most one action per interval,
-/// always executing the most recently posted action (trailing edge).
+/// Runs the first posted action near-immediately on a ThreadPool thread (never synchronously
+/// on the caller), then at most one action per interval, always executing the most recently
+/// posted action (trailing edge).
 /// </summary>
 public sealed class Coalescer : IDisposable
 {
@@ -28,18 +29,13 @@ public sealed class Coalescer : IDisposable
             {
                 return;
             }
+            _pending = action; // latest-wins: overwrites whatever hasn't run yet
             if (_cooldown)
             {
-                _pending = action;
-                return;
+                return; // already scheduled; will be picked up by the current cooldown cycle
             }
             _cooldown = true;
-            _timer.Change(_interval, Timeout.InfiniteTimeSpan);
-        }
-        // Leading-edge execution: exceptions propagate to the caller, which has context.
-        lock (_runLock)
-        {
-            action();
+            _timer.Change(TimeSpan.Zero, Timeout.InfiniteTimeSpan); // fire promptly, off the caller's thread
         }
     }
 
@@ -56,10 +52,9 @@ public sealed class Coalescer : IDisposable
             _pending = null;
             if (run is null)
             {
-                _cooldown = false;
+                _cooldown = false; // idle: nothing arrived during the last interval
                 return;
             }
-            _timer.Change(_interval, Timeout.InfiniteTimeSpan);
         }
         lock (_runLock)
         {
@@ -72,6 +67,15 @@ public sealed class Coalescer : IDisposable
                 // Actions own their error handling. This guard only prevents an unhandled
                 // exception on the ThreadPool timer thread from killing the process.
             }
+        }
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            // Re-arm for the cooldown window: catches anything posted while `run` executed.
+            _timer.Change(_interval, Timeout.InfiniteTimeSpan);
         }
     }
 
