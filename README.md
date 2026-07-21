@@ -57,6 +57,11 @@ elevated (one UAC prompt), and "Start with Windows" automatically switches
 from the registry Run key to a scheduled task so elevated autostart stays
 silent at boot.
 
+Known limitation: on laptops, Windows' scheduled-task defaults prevent the
+elevated autostart task from starting on battery power (desktop setups are
+unaffected). A fix is planned; until then, plug in before rebooting or start
+the app manually.
+
 ## Volume model
 
 0% = mute (−120 dB) · 1% = −50 dB · 100% = 0 dB, linear in dB (≈0.5 dB per %).

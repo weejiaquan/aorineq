@@ -61,11 +61,22 @@ public partial class App : System.Windows.Application
         // elevated bounce below: if an instance is already running, its named event exists
         // and we can just signal it and exit. The mutex below remains the authoritative
         // single-instance check — this is purely an optimization for the common case.
-        if (EventWaitHandle.TryOpenExisting(ShowEventName, out var existing))
+        try
         {
-            existing.Set();
-            existing.Dispose();
-            Shutdown();
+            if (EventWaitHandle.TryOpenExisting(ShowEventName, out var existing))
+            {
+                existing.Set();
+                existing.Dispose();
+                Shutdown();
+                return;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // TryOpenExisting throws (rather than returning false) when the named event
+            // exists but access is denied — same denial shape as the mutex/event creation
+            // below, so it gets the same fail-fast treatment instead of an unhandled crash.
+            ShowInstanceConflictDialogAndShutdown();
             return;
         }
 
@@ -89,12 +100,8 @@ public partial class App : System.Windows.Application
         {
             // A restrictive token-owner policy (e.g. the named objects already exist, owned
             // by a different account/integrity level) can deny access outright here. Fail
-            // fast with the same dialog + exit-code pattern used below, rather than letting
-            // this surface as an unhandled-exception crash.
-            System.Windows.MessageBox.Show(
-                "Another session or account is already running apo-volume.", "apo-volume",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(1);
+            // fast instead of letting this surface as an unhandled-exception crash.
+            ShowInstanceConflictDialogAndShutdown();
             return;
         }
 
@@ -241,6 +248,18 @@ public partial class App : System.Windows.Application
 
         Shutdown();
         return true;
+    }
+
+    /// <summary>Shown when a named single-instance object (mutex/event) already exists but is
+    /// owned by a different account/security context within this session — the no-prefix
+    /// object names here are session-local, so this is never literally "another session,"
+    /// just a same-session/different-token-owner denial.</summary>
+    private void ShowInstanceConflictDialogAndShutdown()
+    {
+        System.Windows.MessageBox.Show(
+            "apo-volume appears to be running under a different account or security context in this session.",
+            "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
+        Shutdown(1);
     }
 
     /// <summary>Raw, blocking mechanism call selected by <see cref="_runAsAdmin"/> — schtasks calls
