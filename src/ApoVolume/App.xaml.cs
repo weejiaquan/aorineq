@@ -613,6 +613,8 @@ public partial class App : System.Windows.Application
         }
         _skinOsd.ApplyConfig(s);
         _useSkinOsd = true;
+        _osd!.Hide(); // symmetric with the skin->standard branches above: only one OSD window is
+                      // ever visible at a time, so switching TO skin must hide the standard one too.
     }
 
     /// <summary>Merges the live volume state into <see cref="_settings"/> and (coalesced) persists

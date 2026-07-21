@@ -159,7 +159,16 @@ public partial class SettingsWindow : Window
         });
     }
 
-    private void OnRescanSkins(object sender, RoutedEventArgs e) => PopulateSkins(SelectedTag(SkinCombo) ?? "");
+    private void OnRescanSkins(object sender, RoutedEventArgs e)
+    {
+        PopulateSkins(SelectedTag(SkinCombo) ?? "");
+
+        // If the currently-selected skin is now valid (e.g. the user just fixed the skin folder),
+        // re-raise so App's ApplyOsdConfig retries loading it into the live OSD — fixing a skin
+        // and clicking Rescan should just work, without having to reselect the same skin.
+        if (SelectedTag(StyleCombo) == OsdStyles.Skin && SkinCombo.SelectedItem is ComboBoxItem { IsEnabled: true })
+            RaiseOsdSettingsChanged();
+    }
 
     /// <summary>Forces exactly one anchor ToggleButton checked: the one clicked. Uses Click
     /// (user-gesture only) rather than Checked/Unchecked so the programmatic IsChecked assignments

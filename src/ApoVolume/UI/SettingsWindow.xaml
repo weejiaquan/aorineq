@@ -39,8 +39,9 @@
             <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Margin="2" Click="OnAnchorClicked" />
             <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
             <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
-            <!-- Grid.Row=1, Grid.Column=1 (center) is intentionally left empty: the OSD can't be
-                 anchored to the screen center, only its 8 edges/corners. -->
+            <!-- Center cell: present but disabled/empty — the OSD can't be anchored to the screen
+                 center, only its 8 edges/corners, so this exists just to complete the 3x3 grid. -->
+            <ToggleButton Grid.Row="1" Grid.Column="1" Margin="2" IsEnabled="False" IsHitTestVisible="False" />
             <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
             <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
             <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Margin="2" Click="OnAnchorClicked" />
