@@ -30,3 +30,5 @@ Keys step 2% per press. Never exceeds 0 dB, so no digital clipping.
 
 - Exclusive-mode audio (ASIO / WASAPI exclusive) bypasses Equalizer APO and is unaffected.
 - Keys are intercepted system-wide while the app runs; quitting restores normal handling.
+- Peace's own pre-amp slider stacks additively with apo-volume's preamp (both `Preamp:` lines
+  apply) — keep Peace's pre-amp at 0 dB.
