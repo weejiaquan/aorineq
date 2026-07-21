@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/ApoVolume.Core/ApoVolume.Core.csproj" />
+    <Project Path="src/ApoVolume/ApoVolume.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ApoVolume.Tests/ApoVolume.Tests.csproj" />
