@@ -24,6 +24,7 @@ public partial class App : System.Windows.Application
     private string _settingsPath = "";
     private bool _runAsAdmin;
     private bool _uacDeclined;
+    private bool _togglingRunAsAdmin;
     private readonly Coalescer _settingsSaver = new(TimeSpan.FromMilliseconds(50));
 
     private static string ExePath => Environment.ProcessPath!;
@@ -162,9 +163,10 @@ public partial class App : System.Windows.Application
     /// Returns false, having taken no action, if UAC was declined.</summary>
     private bool TryRelaunchElevatedAndShutdown()
     {
+        System.Diagnostics.Process? proc;
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ExePath)
+            proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ExePath)
             {
                 UseShellExecute = true,
                 Verb = "runas",
@@ -175,44 +177,66 @@ public partial class App : System.Windows.Application
             return false; // UAC declined
         }
 
+        if (proc is null)
+            return false; // couldn't start — treat like a decline, stay running non-elevated
+
         Shutdown();
         return true;
+    }
+
+    /// <summary>Raw, blocking mechanism call selected by <see cref="_runAsAdmin"/> — schtasks calls
+    /// can take ~100ms, so callers on the dispatcher thread must run this via Task.Run.</summary>
+    private void ApplyAutostartMechanism(bool enable)
+    {
+        if (enable)
+        {
+            if (_runAsAdmin) new ScheduledTaskAutostart().Enable(ExePath);
+            else new Autostart().Enable(ExePath);
+        }
+        else
+        {
+            if (_runAsAdmin) new ScheduledTaskAutostart().Disable();
+            else new Autostart().Disable();
+        }
+    }
+
+    /// <summary>Raw, blocking disable of the mechanism NOT selected by <see cref="_runAsAdmin"/>.</summary>
+    private void DisableOtherMechanism()
+    {
+        if (_runAsAdmin) new Autostart().Disable();
+        else new ScheduledTaskAutostart().Disable();
     }
 
     /// <summary>
     /// Enables/disables autostart via whichever mechanism <see cref="_runAsAdmin"/> selects
     /// (scheduled task when elevated-on-logon is wanted, Run key otherwise). Enabling also
-    /// disables the other mechanism so only one autostart registration ever exists — this is how
-    /// migration between mechanisms happens (e.g. from <see cref="OnRunAsAdminToggled"/>). Every
-    /// operation is best-effort: schtasks operations can fail without elevation, and failures are
-    /// reported via a tray balloon rather than thrown.
+    /// disables the other mechanism, but only once the new one is confirmed registered — this is
+    /// how migration between mechanisms happens (e.g. from <see cref="OnRunAsAdminToggled"/>)
+    /// without ever losing a working autostart entry if the new one couldn't be created (e.g. no
+    /// elevation yet). Every operation is best-effort: schtasks operations can fail without
+    /// elevation, and failures are reported via a tray balloon rather than thrown.
     /// </summary>
+    /// <remarks>Synchronous — only safe to call before the dispatcher message loop is pumping
+    /// (i.e. from <see cref="OnStartup"/>). UI-triggered call sites must use
+    /// <see cref="ApplyAutostartAsync"/> instead so schtasks work doesn't block the UI thread.</remarks>
     private void ApplyAutostart(bool enable)
     {
+        bool enabled = true;
         try
         {
-            if (enable)
-            {
-                if (_runAsAdmin) new ScheduledTaskAutostart().Enable(ExePath);
-                else new Autostart().Enable(ExePath);
-            }
-            else
-            {
-                if (_runAsAdmin) new ScheduledTaskAutostart().Disable();
-                else new Autostart().Disable();
-            }
+            ApplyAutostartMechanism(enable);
         }
         catch (InvalidOperationException ex)
         {
+            enabled = false;
             _tray?.ShowWarning(ex.Message);
         }
 
-        if (!enable) return;
+        if (!enable || !enabled) return; // don't touch the other mechanism unless the new one actually took
 
         try
         {
-            if (_runAsAdmin) new Autostart().Disable();
-            else new ScheduledTaskAutostart().Disable();
+            DisableOtherMechanism();
         }
         catch (InvalidOperationException ex)
         {
@@ -220,58 +244,120 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private bool IsAutostartEnabled() => new Autostart().IsEnabled() || new ScheduledTaskAutostart().IsEnabled();
+    /// <summary>Same contract as <see cref="ApplyAutostart"/>, but runs the blocking schtasks/registry
+    /// work on a thread-pool thread. Safe to call from dispatcher-thread event handlers: the awaits
+    /// resume back on the calling (UI) thread, so the catch blocks' tray balloons run there too.</summary>
+    private async Task ApplyAutostartAsync(bool enable)
+    {
+        bool enabled = true;
+        try
+        {
+            await Task.Run(() => ApplyAutostartMechanism(enable));
+        }
+        catch (InvalidOperationException ex)
+        {
+            enabled = false;
+            _tray?.ShowWarning(ex.Message);
+        }
+
+        if (!enable || !enabled) return; // don't touch the other mechanism unless the new one actually took
+
+        try
+        {
+            await Task.Run(DisableOtherMechanism);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _tray?.ShowWarning(ex.Message);
+        }
+    }
+
+    /// <summary>Blocking — only safe pre-loop (see <see cref="ApplyAutostart"/>'s remarks).</summary>
+    private static bool IsAutostartEnabled() => new Autostart().IsEnabled() || new ScheduledTaskAutostart().IsEnabled();
+
+    private static Task<bool> IsAutostartEnabledAsync() => Task.Run(IsAutostartEnabled);
 
     /// <summary>Handles the SettingsWindow RunAsAdminChanged event: persists the choice, offers an
     /// immediate elevated relaunch when turning on, migrates the autostart mechanism to match, and
     /// suggests a restart when turning off while currently elevated.</summary>
-    private void OnRunAsAdminToggled(bool on)
+    private async void OnRunAsAdminToggled(bool on)
     {
-        _runAsAdmin = on;
-        SaveSettings();
-        bool autostartEnabled = IsAutostartEnabled();
-
-        if (on)
+        // The modal MessageBox below pumps messages, so a second checkbox click can re-enter this
+        // handler before the first call finishes; defuse that instead of racing two toggles.
+        if (_togglingRunAsAdmin) return;
+        _togglingRunAsAdmin = true;
+        try
         {
-            if (!Elevation.IsElevated)
+            _runAsAdmin = on;
+
+            // Synchronous, not coalesced: TryRelaunchElevatedAndShutdown below can call Shutdown(),
+            // which disposes _settingsSaver before its debounce timer fires — the coalesced write
+            // would be lost and the elevated child would start from stale settings. This write must
+            // land before we ever offer or perform that relaunch.
+            try
             {
-                var choice = System.Windows.MessageBox.Show(
-                    "Restart apo-volume elevated now?", "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (choice == MessageBoxResult.Yes && TryRelaunchElevatedAndShutdown())
-                    return;
+                new Settings(_state.Percent, _state.Muted, _runAsAdmin).Save(_settingsPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
 
-            // Migrate Run-key -> scheduled task. If we're still not elevated this is best-effort;
-            // ApplyAutostart balloons the failure and it will self-correct on the next elevated start.
-            if (autostartEnabled) ApplyAutostart(true);
+            bool autostartEnabled = await IsAutostartEnabledAsync();
+
+            if (on)
+            {
+                if (!Elevation.IsElevated)
+                {
+                    var choice = System.Windows.MessageBox.Show(
+                        "Restart apo-volume elevated now?", "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (choice == MessageBoxResult.Yes && TryRelaunchElevatedAndShutdown())
+                        return;
+                }
+
+                // Migrate Run-key -> scheduled task. If we're still not elevated this is
+                // best-effort: ApplyAutostartAsync balloons the failure and leaves the Run key
+                // registration intact (see its remarks), so it self-corrects on the next elevated start.
+                if (autostartEnabled) await ApplyAutostartAsync(true);
+            }
+            else
+            {
+                // Migrate scheduled task -> Run key. Deleting the task may need elevation; best-effort.
+                if (autostartEnabled) await ApplyAutostartAsync(true);
+
+                if (Elevation.IsElevated)
+                    System.Windows.MessageBox.Show(
+                        "Restart apo-volume without elevation for this change to take full effect.",
+                        "apo-volume", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+
+            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _runAsAdmin, Elevation.IsElevated);
         }
-        else
+        finally
         {
-            // Migrate scheduled task -> Run key. Deleting the task may need elevation; best-effort.
-            if (autostartEnabled) ApplyAutostart(true);
-
-            if (Elevation.IsElevated)
-                System.Windows.MessageBox.Show(
-                    "Restart apo-volume without elevation for this change to take full effect.",
-                    "apo-volume", MessageBoxButton.OK, MessageBoxImage.Information);
+            _togglingRunAsAdmin = false;
         }
-
-        _settingsWindow?.SyncState(IsAutostartEnabled(), _runAsAdmin, Elevation.IsElevated);
     }
 
-    /// <summary>Lazily creates (or re-syncs and shows) the single SettingsWindow instance.</summary>
-    private void OpenSettings()
+    /// <summary>Lazily creates (or re-syncs and shows) the single SettingsWindow instance.
+    /// Queries autostart state off the dispatcher thread since ScheduledTaskAutostart.IsEnabled()
+    /// shells out to schtasks (~100ms); the await resumes back here on the UI thread.</summary>
+    private async void OpenSettings()
     {
+        bool autostartEnabled = await IsAutostartEnabledAsync();
+
         if (_settingsWindow is null)
         {
             var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev";
-            _settingsWindow = new SettingsWindow(IsAutostartEnabled(), _runAsAdmin, Elevation.IsElevated, version);
-            _settingsWindow.AutostartChanged += on => ApplyAutostart(on);
+            _settingsWindow = new SettingsWindow(autostartEnabled, _runAsAdmin, Elevation.IsElevated, version);
+            _settingsWindow.AutostartChanged += async on => await ApplyAutostartAsync(on);
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
         }
         else
         {
-            _settingsWindow.SyncState(IsAutostartEnabled(), _runAsAdmin, Elevation.IsElevated);
+            _settingsWindow.SyncState(autostartEnabled, _runAsAdmin, Elevation.IsElevated);
         }
 
         _settingsWindow.Show();
