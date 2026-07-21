@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Windows.Forms;
-using ApoVolume.Core;
 
 namespace ApoVolume.UI;
 
@@ -11,33 +10,23 @@ public sealed class TrayIcon : IDisposable
     private readonly Icon _normalIcon;
     private readonly Icon _mutedIcon;
     private readonly ToolStripMenuItem _muteItem;
-    private readonly ToolStripMenuItem _autostartItem;
 
     public event Action? OpenRequested;
     public event Action? MuteToggleRequested;
+    public event Action? SettingsRequested;
     public event Action? ExitRequested;
 
-    public TrayIcon(Autostart autostart, string exePath)
+    public TrayIcon()
     {
         _normalIcon = CreateGlyphIcon("\uE767");
         _mutedIcon = CreateGlyphIcon("\uE74F");
 
         _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
-        _autostartItem = new ToolStripMenuItem("Start with Windows")
-        {
-            Checked = autostart.IsEnabled(),
-            CheckOnClick = true,
-        };
-        _autostartItem.CheckedChanged += (_, _) =>
-        {
-            if (_autostartItem.Checked) autostart.Enable(exePath);
-            else autostart.Disable();
-        };
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("Open volume slider", null, (_, _) => OpenRequested?.Invoke()));
         menu.Items.Add(_muteItem);
-        menu.Items.Add(_autostartItem);
+        menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => SettingsRequested?.Invoke()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
 
