@@ -112,6 +112,7 @@ public partial class App : System.Windows.Application
             EnsureWritableOrElevate(configDir);
 
             _state = new VolumeState(settings.Percent, settings.Muted);
+            _state.StepPercent = settings.StepPercent;
 
             _writer = new ApoWriter(configDir);
             _writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
@@ -120,6 +121,7 @@ public partial class App : System.Windows.Application
             _writer.StartIncludeGuard();
 
             _osd = new OsdWindow();
+            _osd.ApplyConfig(settings);
             _osd.PercentChangedByUser += p => { _state.SetPercent(p); Render(interactive: true); };
 
             _tray = new TrayIcon();

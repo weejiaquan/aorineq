@@ -5,20 +5,50 @@
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
         Background="Transparent" Topmost="True"
         ShowInTaskbar="False" ShowActivated="False">
-    <Border CornerRadius="12" Background="#F2202020" Padding="16,0">
-        <Grid VerticalAlignment="Center">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="32" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="48" />
-            </Grid.ColumnDefinitions>
-            <TextBlock x:Name="GlyphText" FontFamily="Segoe MDL2 Assets" FontSize="18"
-                       Foreground="White" VerticalAlignment="Center" Text="&#xE767;" />
-            <Slider x:Name="VolumeSlider" Grid.Column="1" Minimum="0" Maximum="100"
-                    IsMoveToPointEnabled="True" VerticalAlignment="Center"
-                    ValueChanged="OnSliderValueChanged" />
-            <TextBlock x:Name="PercentText" Grid.Column="2" Foreground="White" FontSize="16"
-                       HorizontalAlignment="Right" VerticalAlignment="Center" Text="50" />
+    <Grid>
+        <!-- dark-pill style: rounded pill, glyph + slider + percent, drop shadow -->
+        <Border x:Name="DarkPillRoot" CornerRadius="12" Background="#F2202020" Padding="16,10">
+            <Border.Effect>
+                <DropShadowEffect Opacity="0.4" BlurRadius="16" ShadowDepth="0" />
+            </Border.Effect>
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="48" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="GlyphText" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                           Foreground="White" VerticalAlignment="Center" Text="&#xE767;" />
+                <Slider x:Name="VolumeSlider" Grid.Column="1" Minimum="0" Maximum="100"
+                        IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                        ValueChanged="OnSliderValueChanged" />
+                <TextBlock x:Name="PercentText" Grid.Column="2" Foreground="White" FontSize="16"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" Text="50" />
+            </Grid>
+        </Border>
+
+        <!-- minimal-bar style: thin track + percent chip toward screen center, no glyph -->
+        <Grid x:Name="MinimalBarRoot" Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Border x:Name="MinimalChip" Grid.Row="0" HorizontalAlignment="Center"
+                    Margin="0,0,0,4" CornerRadius="8" Background="#F2202020" Padding="8,2">
+                <TextBlock x:Name="MinimalPercentText" Foreground="White" FontSize="12"
+                           FontWeight="SemiBold" Text="50" />
+            </Border>
+            <Grid x:Name="MinimalTrackHost" Grid.Row="1">
+                <Border Height="6" VerticalAlignment="Center" CornerRadius="3" Background="#40FFFFFF" />
+                <Border x:Name="MinimalFill" Height="6" Width="0" VerticalAlignment="Center"
+                        HorizontalAlignment="Left" CornerRadius="3" Background="White" />
+                <!-- Fully transparent but still hit-testable: gives the thin decorative bar
+                     above a real, default-behaved Slider (drag / click-to-jump / keyboard) for
+                     the interactive surface, without hand-rolling a custom ControlTemplate. -->
+                <Slider x:Name="MinimalSlider" Minimum="0" Maximum="100" Opacity="0"
+                        IsMoveToPointEnabled="True" ValueChanged="OnSliderValueChanged" />
+            </Grid>
         </Grid>
-    </Border>
+    </Grid>
 </Window>
