@@ -45,8 +45,17 @@ Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in
 - **Volume Up / Volume Down / Mute keys** (keyboard media keys or USB volume knobs) — 2% per
   press, instant, no debounce even when held.
 - **Tray icon**: left-click opens a draggable slider (scroll wheel works too); menu has
-  Mute, Start with Windows, Exit.
+  Mute, Settings…, Exit.
 - Quitting the app restores normal (for these DACs: dead) Windows volume-key handling.
+
+## Volume keys in games (run as administrator)
+
+Windows does not deliver keystrokes to normal apps while an elevated (admin)
+window — many games and anticheats — has focus, so volume keys appear dead
+in-game. Fix: Settings → "Run as administrator". apo-volume relaunches
+elevated (one UAC prompt), and "Start with Windows" automatically switches
+from the registry Run key to a scheduled task so elevated autostart stays
+silent at boot.
 
 ## Volume model
 
