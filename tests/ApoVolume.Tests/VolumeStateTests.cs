@@ -12,12 +12,12 @@ public class VolumeStateTests
     [Theory]
     [InlineData(1, -50.0)]      // spec: 1% = -50 dB
     [InlineData(100, 0.0)]      // spec: 100% = 0 dB
-    [InlineData(50, -25.252525252525253)]  // -50 * 50 / 99
+    [InlineData(50, -25.2525)]  // -50 * 50 / 99
     public void CurrentDb_maps_percent_linearly_in_dB(int percent, double expectedDb)
     {
         var s = new VolumeState(percent);
         _out.WriteLine($"percent={percent} -> {s.CurrentDb} dB (expected {expectedDb})");
-        Assert.Equal(expectedDb, s.CurrentDb, 3);
+        Assert.Equal(expectedDb, s.CurrentDb, 4);
     }
 
     [Fact]
