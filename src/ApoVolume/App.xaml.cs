@@ -55,6 +55,18 @@ public partial class App : System.Windows.Application
         var settings = Settings.Load(_settingsPath);
         _runAsAdmin = settings.RunAsAdmin;
 
+        // Cheap probe so a second launch doesn't pay for a pointless UAC prompt via the
+        // elevated bounce below: if an instance is already running, its named event exists
+        // and we can just signal it and exit. The mutex below remains the authoritative
+        // single-instance check — this is purely an optimization for the common case.
+        if (EventWaitHandle.TryOpenExisting(ShowEventName, out var existing))
+        {
+            existing.Set();
+            existing.Dispose();
+            Shutdown();
+            return;
+        }
+
         // Must run before the mutex is created: the elevated child claims the mutex itself,
         // so the exiting (non-elevated) parent must not hold it.
         if (BounceToElevatedOrContinue(e.Args))
@@ -101,6 +113,14 @@ public partial class App : System.Windows.Application
             // create needless schtasks churn on every elevated launch.
             if (Elevation.IsElevated && _runAsAdmin
                 && new Autostart().IsEnabled() && !new ScheduledTaskAutostart().IsEnabled())
+            {
+                ApplyAutostart(true);
+            }
+            // Reverse case: RunAsAdmin is off (or was turned off) but a scheduled task from an
+            // earlier elevated/RunAsAdmin session is still registered. We're elevated right now,
+            // so we have the rights to remove it — register the Run key instead, under the
+            // current (non-admin) mode.
+            else if (Elevation.IsElevated && !_runAsAdmin && new ScheduledTaskAutostart().IsEnabled())
             {
                 ApplyAutostart(true);
             }
@@ -213,8 +233,10 @@ public partial class App : System.Windows.Application
     /// disables the other mechanism, but only once the new one is confirmed registered — this is
     /// how migration between mechanisms happens (e.g. from <see cref="OnRunAsAdminToggled"/>)
     /// without ever losing a working autostart entry if the new one couldn't be created (e.g. no
-    /// elevation yet). Every operation is best-effort: schtasks operations can fail without
-    /// elevation, and failures are reported via a tray balloon rather than thrown.
+    /// elevation yet). Disabling always attempts both mechanisms, independently, so that turning
+    /// autostart off actually turns it off regardless of which one is currently registered. Every
+    /// operation is best-effort: schtasks operations can fail without elevation, and failures are
+    /// reported via a tray balloon rather than thrown.
     /// </summary>
     /// <remarks>Synchronous — only safe to call before the dispatcher message loop is pumping
     /// (i.e. from <see cref="OnStartup"/>). UI-triggered call sites must use
@@ -232,7 +254,10 @@ public partial class App : System.Windows.Application
             _tray?.ShowWarning(ex.Message);
         }
 
-        if (!enable || !enabled) return; // don't touch the other mechanism unless the new one actually took
+        // Enabling: only touch the other mechanism once the new one is confirmed registered.
+        // Disabling: always attempt the other mechanism too, regardless of whether the first
+        // disable succeeded — each is independent and best-effort.
+        if (enable && !enabled) return;
 
         try
         {
@@ -260,7 +285,9 @@ public partial class App : System.Windows.Application
             _tray?.ShowWarning(ex.Message);
         }
 
-        if (!enable || !enabled) return; // don't touch the other mechanism unless the new one actually took
+        // See ApplyAutostart's remarks: enabling only cascades on success; disabling always
+        // attempts both mechanisms.
+        if (enable && !enabled) return;
 
         try
         {
