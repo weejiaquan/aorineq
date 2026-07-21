@@ -1,3 +1,5 @@
+<img width="329" height="77" alt="Screenshot 2026-07-21 015704" src="https://github.com/user-attachments/assets/a0461ee7-8981-4633-9e07-9892f67d0496" />
+
 # apo-volume
 
 Native Windows tray volume control for USB DACs that ignore Windows volume (e.g. HiBy FC5),
