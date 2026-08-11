@@ -157,7 +157,14 @@ public sealed class EndpointVolume : IDisposable
         try
         {
             var enumerator = (AudioEndpoint.IMMDeviceEnumerator)new AudioEndpoint.MMDeviceEnumerator();
-            enumerator.RegisterEndpointNotificationCallback(_notificationClient);
+            // Only cache WITH the callback registered: an enumerator cached after a failed
+            // registration would work for reads/sets but silently never track default-device
+            // changes for the rest of the session.
+            if (enumerator.RegisterEndpointNotificationCallback(_notificationClient) < 0)
+            {
+                Marshal.ReleaseComObject(enumerator);
+                return;
+            }
             _enumerator = enumerator;
         }
         catch (COMException) { }

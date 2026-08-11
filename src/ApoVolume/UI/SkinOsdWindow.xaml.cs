@@ -17,10 +17,14 @@ namespace ApoVolume.UI;
 public partial class SkinOsdWindow : Window
 {
     private readonly SkinInfo _info;
-    // Hit shape = ONE union map of the opaque pixels across ALL frames of BOTH layers, so an
-    // element that is transparent in one animation frame stays clickable throughout — at the
-    // memory cost of a single static skin regardless of frame count.
+    // Hit shape = a union map of the opaque pixels across ALL frames of the layers CURRENTLY
+    // conveying the skin, so an element that is transparent in one animation frame stays
+    // clickable throughout. Normal display hit-tests empty∪full; while dedicated muted artwork
+    // replaces those layers, only ITS pixels are hittable — the hidden bar must not swallow
+    // clicks that should fall through to whatever is beneath the window.
     private readonly AlphaMap _hitMap;
+    private readonly AlphaMap? _mutedHitMap;
+    private bool _mutedLayerShowing;
     private readonly SkinFrames _emptyFrames;
     private readonly SkinFrames _fullFrames;
     private readonly SkinFrames? _mutedFrames; // optional dedicated muted-state artwork
@@ -61,10 +65,8 @@ public partial class SkinOsdWindow : Window
         _mutedFrames = info.MutedPath is null
             ? null
             : SkinFrames.Load(info.MutedPath, info.MutedFrames, info.Fps);
-        var hitFrames = _emptyFrames.Frames.Concat(_fullFrames.Frames);
-        if (_mutedFrames is not null)
-            hitFrames = hitFrames.Concat(_mutedFrames.Frames); // muted-only art must stay clickable
-        _hitMap = AlphaMap.Union(hitFrames);
+        _hitMap = AlphaMap.Union(_emptyFrames.Frames.Concat(_fullFrames.Frames));
+        _mutedHitMap = _mutedFrames is null ? null : AlphaMap.Union(_mutedFrames.Frames);
 
         EmptyImage.Source = _emptyFrames.Frames[0];
         FullImage.Source = _fullFrames.Frames[0];
@@ -214,6 +216,7 @@ public partial class SkinOsdWindow : Window
         // Muted with dedicated artwork: the muted layer alone conveys mute (no badge, no dim).
         // Muted without one: the classic dimmed empty + badge, dimmed by the skin's mutedDim.
         bool useMutedLayer = muted && _mutedFrames is not null;
+        _mutedLayerShowing = useMutedLayer; // hit-testing follows what's actually displayed
         MutedImage.Visibility = useMutedLayer ? Visibility.Visible : Visibility.Collapsed;
         EmptyImage.Visibility = useMutedLayer ? Visibility.Hidden : Visibility.Visible;
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
@@ -268,7 +271,8 @@ public partial class SkinOsdWindow : Window
     {
         int px = (int)(windowPoint.X / _info.Scale);
         int py = (int)(windowPoint.Y / _info.Scale);
-        return _hitMap.IsOpaque(px, py);
+        var map = _mutedLayerShowing && _mutedHitMap is not null ? _mutedHitMap : _hitMap;
+        return map.IsOpaque(px, py);
     }
 
     private void RaisePercentFromWindowPoint(System.Windows.Point windowPoint)
