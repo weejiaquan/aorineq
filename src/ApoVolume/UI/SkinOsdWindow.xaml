@@ -5,8 +5,13 @@
         Background="Transparent" Topmost="True"
         ShowInTaskbar="False" ShowActivated="False" SizeToContent="Manual">
     <Grid>
-        <!-- Base layer: always visible, dimmed while muted. -->
-        <Image x:Name="EmptyImage" Stretch="Fill" />
+        <!-- Base layer: shows only the UNFILLED portion (clipped complementary to the fill) so it
+             never stacks under a translucent full layer and double-darkens. Full canvas while muted. -->
+        <Image x:Name="EmptyImage" Stretch="Fill">
+            <Image.Clip>
+                <RectangleGeometry x:Name="EmptyClip" />
+            </Image.Clip>
+        </Image>
         <!-- Overlay layer: clipped to the fill width for the current percent; hidden while muted. -->
         <Image x:Name="FullImage" Stretch="Fill">
             <Image.Clip>

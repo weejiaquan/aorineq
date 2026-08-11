@@ -67,7 +67,11 @@
                         <Grid x:Name="PreviewCanvas"
                               MouseLeftButtonDown="OnPreviewMouseDown" MouseMove="OnPreviewMouseMove"
                               MouseLeftButtonUp="OnPreviewMouseUp">
-                            <Image x:Name="EmptyImage" Stretch="Fill" />
+                            <Image x:Name="EmptyImage" Stretch="Fill">
+                                <Image.Clip>
+                                    <RectangleGeometry x:Name="EmptyClip" />
+                                </Image.Clip>
+                            </Image>
                             <Image x:Name="FullImage" Stretch="Fill">
                                 <Image.Clip>
                                     <RectangleGeometry x:Name="FillClip" />
@@ -184,7 +188,10 @@
                             <ColumnDefinition Width="44" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="Font" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                        <ComboBox x:Name="FontCombo" Grid.Column="1" SelectionChanged="OnControlChanged" />
+                        <!-- Editable so a skin's font that isn't installed here is preserved verbatim
+                             rather than silently rewritten. -->
+                        <ComboBox x:Name="FontCombo" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="True"
+                                  SelectionChanged="OnControlChanged" LostFocus="OnControlChanged" />
                         <TextBlock Grid.Column="3" Text="Size" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
                         <TextBox x:Name="FontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
                     </Grid>

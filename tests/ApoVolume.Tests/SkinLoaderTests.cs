@@ -404,7 +404,7 @@ public class SkinLoaderTests : IDisposable
         Assert.Equal("#FFFFFFFF", t!.Color);
         Assert.Equal("Segoe UI", t.FontFamily);
         Assert.Equal(14, t.FontSize);
-        Assert.True(t.Bold);
+        Assert.False(t.Bold);          // default is the SemiBold baseline (Bold=false), not heavy Bold
         Assert.Null(t.OutlineColor);   // no outline
         Assert.Null(t.ShadowColor);    // no shadow
     }

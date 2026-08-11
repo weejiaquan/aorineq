@@ -178,6 +178,11 @@ public partial class SkinOsdWindow : Window
         double fillWidth = SkinMath.FillWidth(_info.Width, percent, _info.FillStartX, _info.FillEndX)
             * _info.Scale; // already clamped >= 0
         FillClip.Rect = new Rect(0, 0, fillWidth, Height);
+        // Empty shows only the unfilled remainder (complement of the fill) so it never stacks
+        // under the full layer. Muted: full is hidden, so empty covers the whole canvas.
+        EmptyClip.Rect = muted
+            ? new Rect(0, 0, Width, Height)
+            : new Rect(fillWidth, 0, Math.Max(0, Width - fillWidth), Height);
 
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
         EmptyImage.Opacity = muted ? 0.6 : 1.0;

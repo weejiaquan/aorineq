@@ -7,7 +7,7 @@ namespace ApoVolume.Core;
 /// which falls back gracefully on malformed values; a null OutlineColor/ShadowColor means that
 /// effect is off. Defaults reproduce the pre-styling look (white, 14px, bold-ish).</summary>
 public sealed record SkinText(bool Show, int X, int Y,
-    string Color = "#FFFFFFFF", string FontFamily = "Segoe UI", double FontSize = 14, bool Bold = true,
+    string Color = "#FFFFFFFF", string FontFamily = "Segoe UI", double FontSize = 14, bool Bold = false,
     string? OutlineColor = null, double OutlineWidth = 0,
     string? ShadowColor = null, double ShadowBlur = 4, double ShadowDepth = 2);
 
@@ -92,7 +92,7 @@ public static class SkinLoader
                         Color: EmptyToDefault(pt.Color, "#FFFFFFFF"),
                         FontFamily: EmptyToDefault(pt.FontFamily, "Segoe UI"),
                         FontSize: Math.Clamp(pt.FontSize ?? 14, MinFontSize, MaxFontSize),
-                        Bold: pt.Bold ?? true,
+                        Bold: pt.Bold ?? false,
                         OutlineColor: NullIfBlank(pt.OutlineColor),
                         OutlineWidth: Math.Clamp(pt.OutlineWidth ?? 0, 0, MaxOutlineWidth),
                         ShadowColor: NullIfBlank(pt.ShadowColor),
