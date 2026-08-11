@@ -25,6 +25,7 @@ public partial class OnboardingWindow : Window
     }
 
     private readonly bool _blocking;
+    private readonly bool _startedOnModeChoice;
     private Step _step;
     private string? _selectedMode; // the mode the user confirmed on the mode page, if any
     private System.Threading.CancellationTokenSource? _downloadCancel;
@@ -42,6 +43,7 @@ public partial class OnboardingWindow : Window
     public OnboardingWindow(bool blocking, string? modeChoice = null)
     {
         _blocking = blocking;
+        _startedOnModeChoice = modeChoice is not null;
         InitializeComponent();
         if (modeChoice is not null)
             ShowModeChoice(modeChoice);
@@ -329,10 +331,15 @@ public partial class OnboardingWindow : Window
         _downloadCancel?.Cancel();
         // Real close (not hide): the wizard is cheap to recreate. A raw close (X) that skipped
         // Finish still reports once — proceed if the confirmed choice was system mode (which
-        // needs no EAPO), or if EAPO actually ended up usable.
+        // needs no EAPO), or if EAPO is usable AND no unanswered mode page is being skipped:
+        // X-ing the first-run mode choice without confirming anything is a decline, even on a
+        // machine where EAPO happens to be active.
         var handler = Completed;
         Completed = null;
-        handler?.Invoke(_selectedMode == VolumeModes.System || EapoDetection.Detect() == EapoStatus.Active);
+        bool proceed = _selectedMode == VolumeModes.System
+            || ((_selectedMode is not null || !_startedOnModeChoice)
+                && EapoDetection.Detect() == EapoStatus.Active);
+        handler?.Invoke(proceed);
         base.OnClosing(e);
     }
 }
