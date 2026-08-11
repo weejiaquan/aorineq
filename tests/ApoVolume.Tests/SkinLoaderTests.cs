@@ -204,6 +204,124 @@ public class SkinLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_gif_layers_resolve_when_png_absent()
+    {
+        var folder = NewSkinFolder("gif-skin");
+        TestPngs.WriteGif(Path.Combine(folder, "empty.gif"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "full.gif"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"gif skin: valid={info.IsValid} {info.Width}x{info.Height} emptyGif={info.EmptyIsGif} fullGif={info.FullIsGif} err={info.Error}");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(300, info.Width);
+        Assert.Equal(100, info.Height);
+        Assert.True(info.EmptyIsGif);
+        Assert.True(info.FullIsGif);
+        Assert.EndsWith("empty.gif", info.EmptyPath);
+        Assert.EndsWith("full.gif", info.FullPath);
+    }
+
+    [Fact]
+    public void Load_png_takes_precedence_over_gif()
+    {
+        var folder = NewSkinFolder("both-formats");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "empty.gif"), 999, 999); // must be ignored
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"precedence: {info.EmptyPath} valid={info.IsValid}");
+
+        Assert.True(info.IsValid);
+        Assert.EndsWith("empty.png", info.EmptyPath);
+        Assert.False(info.EmptyIsGif);
+    }
+
+    [Fact]
+    public void Load_sprite_sheet_uses_logical_frame_size()
+    {
+        var folder = NewSkinFolder("sheet");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);      // static, 1 frame
+        WritePng(Path.Combine(folder, "full.png"), 300, 800);       // 8 frames of 100
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fullFrames\": 8, \"fps\": 12 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"sheet: valid={info.IsValid} logical={info.Width}x{info.Height} fullFrames={info.FullFrames} fps={info.Fps} err={info.Error}");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(300, info.Width);
+        Assert.Equal(100, info.Height);   // logical, not the 800px sheet height
+        Assert.Equal(8, info.FullFrames);
+        Assert.Equal(1, info.EmptyFrames);
+        Assert.Equal(12.0, info.Fps);
+    }
+
+    [Fact]
+    public void Load_sheet_height_not_divisible_by_frames_sets_error()
+    {
+        var folder = NewSkinFolder("bad-sheet");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 790); // not divisible by 8
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fullFrames\": 8 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"bad sheet error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.Contains("divisible", info.Error);
+    }
+
+    [Fact]
+    public void Load_logical_size_mismatch_between_static_and_gif_sets_error()
+    {
+        var folder = NewSkinFolder("logical-mismatch");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "full.gif"), 300, 120);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"logical mismatch error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.Contains("120", info.Error);
+        Assert.Contains("100", info.Error);
+    }
+
+    [Theory]
+    [InlineData(0.5, 1.0)]    // below min, clamps up
+    [InlineData(24.0, 24.0)]  // within range
+    [InlineData(240.0, 60.0)] // above max, clamps down
+    public void Load_fps_is_clamped_1_to_60(double rawFps, double expected)
+    {
+        var folder = NewSkinFolder("fps-" + rawFps.ToString(System.Globalization.CultureInfo.InvariantCulture).Replace('.', '_'));
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            $"{{ \"fps\": {rawFps.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"rawFps={rawFps} -> Fps={info.Fps} (expected {expected})");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(expected, info.Fps);
+    }
+
+    [Fact]
+    public void Load_defaults_fps_10_and_single_frames()
+    {
+        var folder = NewSkinFolder("defaults");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"defaults: fps={info.Fps} ef={info.EmptyFrames} ff={info.FullFrames}");
+
+        Assert.Equal(10.0, info.Fps);
+        Assert.Equal(1, info.EmptyFrames);
+        Assert.Equal(1, info.FullFrames);
+    }
+
+    [Fact]
     public void Load_missing_folder_sets_error_and_never_throws()
     {
         var folder = Path.Combine(_dir, "does-not-exist");
