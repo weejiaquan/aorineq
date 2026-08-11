@@ -44,6 +44,10 @@ public sealed class VolumeState
         if (Percent > 0) Muted = false;
     }
 
+    /// <summary>Adopts an externally-observed mute state (e.g. the Windows endpoint changed
+    /// outside the app) without the unmute-on-positive coupling of <see cref="SetPercent"/>.</summary>
+    public void SetMuted(bool muted) => Muted = muted;
+
     public double CurrentDb =>
         Muted || Percent == 0 ? MuteDb : MinDb * (100 - Percent) / 99.0;
 }

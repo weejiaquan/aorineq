@@ -2,13 +2,22 @@ using System.Text.Json;
 
 namespace ApoVolume.Core;
 
+/// <summary>How volume keys change loudness: through Equalizer APO's preamp, or the real
+/// Windows endpoint volume. String constants (not an enum) so the persisted json stays
+/// human-readable and unknown values normalize gracefully.</summary>
+public static class VolumeModes
+{
+    public const string Eapo = "eapo";
+    public const string System = "system";
+}
+
 /// <summary>Persisted app state. Autostart lives in the registry, not here.</summary>
 public sealed record Settings(
     int Percent, bool Muted, bool RunAsAdmin = false,
     string OsdStyle = "dark-pill", string SkinName = "",
     string OsdAnchor = "bottom-center", int OsdOffsetX = 0, int OsdOffsetY = 0,
     double HideDelaySeconds = 1.5, bool AnimationEnabled = true, int AnimationMs = 150,
-    int StepPercent = 2)
+    int StepPercent = 2, string VolumeMode = VolumeModes.Eapo)
 {
     public static Settings Default { get; } = new(50, false);
 
@@ -17,10 +26,12 @@ public sealed record Settings(
         var validAnchors = new[] { "top-left", "top-center", "top-right", "left-center", "right-center", "bottom-left", "bottom-center", "bottom-right" };
         var validStyles = new[] { "dark-pill", "fluent", "minimal-bar", "skin" };
         var validSteps = new[] { 1, 2, 5 };
+        var validModes = new[] { VolumeModes.Eapo, VolumeModes.System };
 
         var clampedAnchor = Array.Exists(validAnchors, x => x == s.OsdAnchor) ? s.OsdAnchor : "bottom-center";
         var clampedStyle = Array.Exists(validStyles, x => x == s.OsdStyle) ? s.OsdStyle : "dark-pill";
         var clampedStep = Array.Exists(validSteps, x => x == s.StepPercent) ? s.StepPercent : 2;
+        var clampedMode = Array.Exists(validModes, x => x == s.VolumeMode) ? s.VolumeMode : VolumeModes.Eapo;
 
         return s with
         {
@@ -29,7 +40,8 @@ public sealed record Settings(
             AnimationMs = Math.Clamp(s.AnimationMs, 50, 500),
             StepPercent = clampedStep,
             OsdAnchor = clampedAnchor,
-            OsdStyle = clampedStyle
+            OsdStyle = clampedStyle,
+            VolumeMode = clampedMode
         };
     }
 
