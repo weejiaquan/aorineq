@@ -12,6 +12,12 @@ public sealed class Coalescer : IDisposable
     private readonly object _lock = new();
     private readonly object _runLock = new();
     private Action? _pending;
+    // Monotonic post ordering: _pendingSeq (under _lock) stamps each posted action, _lastRunSeq
+    // (under _runLock) records the newest stamp that has executed. A dequeued action only runs if
+    // its stamp is newer — so when Flush() races the timer thread, whichever runs second sees the
+    // other's newer stamp and skips, and an older action can never overwrite a newer one's effect.
+    private long _pendingSeq;
+    private long _lastRunSeq;
     private bool _cooldown;
     private bool _disposed;
 
@@ -30,6 +36,7 @@ public sealed class Coalescer : IDisposable
                 return;
             }
             _pending = action; // latest-wins: overwrites whatever hasn't run yet
+            _pendingSeq++;
             if (_cooldown)
             {
                 return; // already scheduled; will be picked up by the current cooldown cycle
@@ -42,6 +49,7 @@ public sealed class Coalescer : IDisposable
     private void OnTimer()
     {
         Action? run;
+        long seq;
         lock (_lock)
         {
             if (_disposed)
@@ -49,6 +57,7 @@ public sealed class Coalescer : IDisposable
                 return;
             }
             run = _pending;
+            seq = _pendingSeq;
             _pending = null;
             if (run is null)
             {
@@ -56,18 +65,7 @@ public sealed class Coalescer : IDisposable
                 return;
             }
         }
-        lock (_runLock)
-        {
-            try
-            {
-                run();
-            }
-            catch (Exception)
-            {
-                // Actions own their error handling. This guard only prevents an unhandled
-                // exception on the ThreadPool timer thread from killing the process.
-            }
-        }
+        RunIfNewest(run, seq);
         lock (_lock)
         {
             if (_disposed)
@@ -89,25 +87,53 @@ public sealed class Coalescer : IDisposable
     public void Flush()
     {
         Action? pending;
+        long seq;
         lock (_lock)
         {
             pending = _pending;
+            seq = _pendingSeq;
             _pending = null;
         }
-        lock (_runLock) // taken even when pending is null: waits out an in-flight timer action
+        if (pending is not null)
         {
-            if (pending is null)
+            RunIfNewest(pending, seq);
+            return;
+        }
+        // Nothing to dequeue, but the newest posted action (stamp `seq`) may be in flight on the
+        // timer thread — dequeued from _pending yet not executed. Merely acquiring _runLock isn't
+        // enough (the timer thread may not hold it yet), so wait until that stamp has actually run.
+        lock (_runLock)
+        {
+            while (_lastRunSeq < seq)
             {
-                return;
+                Monitor.Wait(_runLock);
             }
-            try
+        }
+    }
+
+    /// <summary>Runs the dequeued action under <see cref="_runLock"/> unless an action with a
+    /// newer stamp already ran — the timer thread and <see cref="Flush"/> can dequeue in one order
+    /// and reach <see cref="_runLock"/> in the other, and this check keeps a stale action from
+    /// executing (and overwriting the newer one's effect) after that reordering.</summary>
+    private void RunIfNewest(Action run, long seq)
+    {
+        lock (_runLock)
+        {
+            if (seq > _lastRunSeq)
             {
-                pending();
+                // Advanced before run() so a throwing action still releases Flush waiters.
+                _lastRunSeq = seq;
+                try
+                {
+                    run();
+                }
+                catch (Exception)
+                {
+                    // Actions own their error handling. This guard only prevents an unhandled
+                    // exception on the ThreadPool timer thread from killing the process.
+                }
             }
-            catch (Exception)
-            {
-                // Same contract as OnTimer: actions own their error handling.
-            }
+            Monitor.PulseAll(_runLock); // wake Flush waiters on the run and skip paths alike
         }
     }
 
