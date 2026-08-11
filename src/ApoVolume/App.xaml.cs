@@ -26,6 +26,7 @@ public partial class App : System.Windows.Application
     private string? _loadedSkinFolder;
     private string? _loadedSkinStamp;
     private SettingsWindow? _settingsWindow;
+    private SkinDesignerWindow? _skinDesigner;
     private VolumeState _state = new();
     private string _settingsPath = "";
     // Single source of truth for everything persisted to settings.json. Every field (volume
@@ -245,6 +246,9 @@ public partial class App : System.Windows.Application
         // both fields or returns before reaching here.
         _writer!.WriteVolume(_state.CurrentDb);
         _tray!.Update(_state.Percent, _state.Muted);
+
+        if (e.Args.Contains("--settings"))
+            OpenSettings(); // deep-link straight into Settings (also used by E2E automation)
     }
 
     /// <summary>
@@ -533,6 +537,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
+            _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
@@ -542,6 +547,32 @@ public partial class App : System.Windows.Application
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>Lazily creates (or re-shows) the single skin designer window.</summary>
+    private void OpenSkinDesigner()
+    {
+        if (_skinDesigner is null)
+        {
+            _skinDesigner = new SkinDesignerWindow(() => _settings);
+            _skinDesigner.SkinSaved += OnSkinSaved;
+        }
+        _skinDesigner.Show();
+        _skinDesigner.Activate();
+    }
+
+    /// <summary>A designer save refreshes the Settings picker, and — when the saved skin is the
+    /// one currently rendering — hot-reloads the live OSD (ApplyOsdConfig's content stamp sees
+    /// the new file timestamps and rebuilds the window) with a non-interactive show for feedback.</summary>
+    private void OnSkinSaved(string name)
+    {
+        _settingsWindow?.RefreshSkins();
+        if (_settings.OsdStyle == OsdStyles.Skin
+            && string.Equals(_settings.SkinName, name, StringComparison.OrdinalIgnoreCase))
+        {
+            ApplyOsdConfig(_settings);
+            ShowOsd(interactive: false);
+        }
     }
 
     /// <summary>One render path for every change: APO file, OSD, tray, settings.</summary>

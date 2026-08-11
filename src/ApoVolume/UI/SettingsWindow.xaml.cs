@@ -21,6 +21,9 @@ public partial class SettingsWindow : Window
     /// snapshot into its persisted Settings — see <see cref="OsdSettings"/>'s remarks.</summary>
     public event Action<OsdSettings>? OsdSettingsChanged;
 
+    /// <summary>Raised when the user clicks "Skin designer…" — App owns the designer window.</summary>
+    public event Action? SkinDesignerRequested;
+
     public SettingsWindow(bool autostartEnabled, bool runAsAdmin, bool isElevated, string version, Settings settings)
     {
         InitializeComponent();
@@ -158,6 +161,12 @@ public partial class SettingsWindow : Window
             UseShellExecute = true,
         });
     }
+
+    private void OnOpenSkinDesigner(object sender, RoutedEventArgs e) => SkinDesignerRequested?.Invoke();
+
+    /// <summary>Rescans the skins folder preserving the current selection. Called by App after
+    /// the skin designer saves, so the picker reflects new/renamed skins immediately.</summary>
+    public void RefreshSkins() => PopulateSkins(SelectedTag(SkinCombo) ?? "");
 
     private void OnRescanSkins(object sender, RoutedEventArgs e)
     {
