@@ -634,10 +634,11 @@ public partial class SkinDesignerWindow : Window
             StatusText.Text = "Showing on desktop — click/drag/scroll it like the real OSD.";
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException
-            or IOException or NotSupportedException or FileFormatException)
+            or IOException or NotSupportedException or FileFormatException or OutOfMemoryException)
         {
             // Imaging exceptions: corrupt file passed the header check but failed to decode
             // inside the SkinOsdWindow constructor — same containment policy as App.ApplyOsdConfig.
+            // OutOfMemoryException: same untrusted-input policy as the preview decode path.
             StatusText.Text = ex.Message;
         }
     }
