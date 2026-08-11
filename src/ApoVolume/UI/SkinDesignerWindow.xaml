@@ -67,8 +67,10 @@
                         <Grid x:Name="PreviewCanvas"
                               MouseLeftButtonDown="OnPreviewMouseDown" MouseMove="OnPreviewMouseMove"
                               MouseLeftButtonUp="OnPreviewMouseUp">
-                            <Image x:Name="EmptyImage" Stretch="Fill" />
-                            <Image x:Name="FullImage" Stretch="Fill">
+                            <!-- EdgeMode=Aliased: same seam fix as SkinOsdWindow — AA'd
+                                 complementary clips leak the backdrop through the boundary column. -->
+                            <Image x:Name="EmptyImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased" />
+                            <Image x:Name="FullImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased">
                                 <Image.Clip>
                                     <RectangleGeometry x:Name="FillClip" />
                                 </Image.Clip>

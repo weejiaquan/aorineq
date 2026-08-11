@@ -7,10 +7,14 @@
     <Grid>
         <!-- Base layer. Its Clip is set in code to everything EXCEPT the filled bar region, so it
              never stacks under a translucent full layer (no double-darkening) while decoration
-             outside the fill range still shows. Full canvas while muted. -->
-        <Image x:Name="EmptyImage" Stretch="Fill" />
+             outside the fill range still shows. Full canvas while muted.
+             EdgeMode=Aliased on both layers: their clips are complementary, and anti-aliased clip
+             edges each cover the shared boundary column at ~50% — the desktop bleeds through as a
+             dark seam line at the fill edge. Aliased edges rasterize both clips to the same pixel
+             cutoff, so the layers tile exactly. -->
+        <Image x:Name="EmptyImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased" />
         <!-- Overlay layer: clipped to the fill width for the current percent; hidden while muted. -->
-        <Image x:Name="FullImage" Stretch="Fill">
+        <Image x:Name="FullImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased">
             <Image.Clip>
                 <RectangleGeometry x:Name="FillClip" />
             </Image.Clip>
