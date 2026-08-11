@@ -653,11 +653,16 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>The setup guide closed: if eapo mode is still waiting on a writer (it was
-    /// selected while EAPO was missing), retry now that the wizard may have installed it.</summary>
+    /// selected while EAPO was missing), retry now that the wizard may have installed it —
+    /// including the mute handover the immediate-switch path runs, or a mute latched on the
+    /// endpoint would keep eapo mode silent after the user unmutes in apo-volume.</summary>
     private void OnOnboardingClosed()
     {
         if (_settings.VolumeMode == VolumeModes.Eapo && _writer is null && TryBuildEapoPipeline())
+        {
             _writer!.WriteVolume(_state.CurrentDb);
+            HandMuteBackToPreamp();
+        }
     }
 
     /// <summary>Lazily creates (or re-shows) the single skin designer window.</summary>
@@ -799,6 +804,22 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>Reverse mute handover (system → eapo): a muted endpoint would keep eapo mode
+    /// silent no matter what the preamp says, so it unmutes here — but only once the -120 dB
+    /// mute preamp is PROVEN on disk (Flush is just a run barrier, not a success proof). On a
+    /// missing writer or a failed write the endpoint stays muted: silence, never an audible
+    /// leak. Runs on the immediate switch AND on the deferred completion after the setup guide
+    /// installs EAPO (see <see cref="OnOnboardingClosed"/>).</summary>
+    private void HandMuteBackToPreamp()
+    {
+        if (_state.Muted && _writer is not null && _endpointVolume?.TryRead() is { Muted: true })
+        {
+            _writer.Flush();
+            if (PreampFileReads(_state.CurrentDb))
+                _endpointVolume.SetMuted(false);
+        }
+    }
+
     /// <summary>Whether apo-volume.txt currently reads exactly the preamp line for
     /// <paramref name="db"/> — the proof gate for handing mute duty back from the endpoint.</summary>
     private bool PreampFileReads(double db)
@@ -873,16 +894,7 @@ public partial class App : System.Windows.Application
                 OpenOnboarding();
             }
             _writer?.WriteVolume(_state.CurrentDb); // re-apply the saved percent to the preamp
-            // Reverse mute handover: a muted endpoint would keep eapo mode silent no matter what
-            // the preamp says. The endpoint may only unmute once the -120 dB mute preamp is
-            // PROVEN on disk (Flush is just a run barrier, not a success proof) — on a missing
-            // writer or a failed write it stays muted: silence, never an audible leak.
-            if (_state.Muted && _writer is not null && _endpointVolume?.TryRead() is { Muted: true })
-            {
-                _writer.Flush();
-                if (PreampFileReads(_state.CurrentDb))
-                    _endpointVolume.SetMuted(false);
-            }
+            HandMuteBackToPreamp();
         }
         SaveSettings();
     }
