@@ -28,6 +28,7 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private SkinDesignerWindow? _skinDesigner;
     private OnboardingWindow? _onboarding;
+    private OnboardingWindow? _startupWizard; // blocking first-run wizard, while it's up
     private VolumeState _state = new();
     private string _settingsPath = "";
     // Single source of truth for everything persisted to settings.json. Every field (volume
@@ -140,15 +141,33 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // The second-instance listener starts as soon as the named event exists: a second launch
+        // during first-run onboarding must activate the wizard (not vanish into a signal nobody
+        // hears). The dispatch target is dynamic — wizard while one is up, the OSD once built.
+        var waiter = new Thread(() =>
+        {
+            try
+            {
+                while (_showEvent.WaitOne())
+                {
+                    if (Dispatcher.HasShutdownStarted) break;
+                    Dispatcher.BeginInvoke(OnSecondLaunchSignal);
+                }
+            }
+            catch (Exception) { } // shutdown races (disposed handle / stopped dispatcher) must not crash the process
+        }) { IsBackground = true };
+        waiter.Start();
+
         // First-run onboarding: without Equalizer APO the app cannot function at all, so a
         // missing install gets the guided wizard instead of the old fail-fast error box. The
         // wizard downloads/starts the official installer and verifies; declining exits.
         if (EapoDetection.Detect() == EapoStatus.NotInstalled)
         {
             bool proceed = false;
-            var wizard = new OnboardingWindow(blocking: true);
-            wizard.Completed += p => proceed = p;
-            wizard.ShowDialog();
+            _startupWizard = new OnboardingWindow(blocking: true);
+            _startupWizard.Completed += p => proceed = p;
+            _startupWizard.ShowDialog();
+            _startupWizard = null;
             if (!proceed)
             {
                 Shutdown();
@@ -247,23 +266,6 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        // second-instance listener
-        var waiter = new Thread(() =>
-        {
-            try
-            {
-                while (_showEvent.WaitOne())
-                {
-                    if (Dispatcher.HasShutdownStarted) break;
-                    // Same as the tray's OpenRequested: a second launch just wants the slider
-                    // visible — no state changed, so no Render.
-                    Dispatcher.BeginInvoke(() => ShowOsd(interactive: true));
-                }
-            }
-            catch (Exception) { } // shutdown races (disposed handle / stopped dispatcher) must not crash the process
-        }) { IsBackground = true };
-        waiter.Start();
-
         // apply persisted volume to APO immediately at startup. Null-forgiving: same
         // construction-order guarantee as Render() above — the try block either assigns
         // both fields or returns before reaching here.
@@ -290,7 +292,9 @@ public partial class App : System.Windows.Application
         if (!_settings.RunAsAdmin || Elevation.IsElevated || args.Contains("--no-elevate"))
             return false;
 
-        if (TryRelaunchElevatedAndShutdown(forwardSettingsFlag: args.Contains("--settings")))
+        // Whitelisted flags survive the bounce (no argument-quoting concerns by construction).
+        var forwarded = string.Join(' ', args.Where(a => a is "--settings" or "--onboarding"));
+        if (TryRelaunchElevatedAndShutdown(forwarded))
             return true;
 
         _uacDeclined = true;
@@ -298,10 +302,10 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>Relaunches this executable elevated via UAC and shuts this instance down.
-    /// Returns false, having taken no action, if UAC was declined. Only the --settings flag is
-    /// forwarded (whitelisted, so no argument-quoting concerns) — the elevated child otherwise
+    /// Returns false, having taken no action, if UAC was declined. Only whitelisted flags are
+    /// ever passed through <paramref name="forwardedArgs"/> — the elevated child otherwise
     /// starts normally.</summary>
-    private bool TryRelaunchElevatedAndShutdown(bool forwardSettingsFlag = false)
+    private bool TryRelaunchElevatedAndShutdown(string forwardedArgs = "")
     {
         System.Diagnostics.Process? proc;
         try
@@ -310,7 +314,7 @@ public partial class App : System.Windows.Application
             {
                 UseShellExecute = true,
                 Verb = "runas",
-                Arguments = forwardSettingsFlag ? "--settings" : "",
+                Arguments = forwardedArgs,
             });
         }
         catch (System.ComponentModel.Win32Exception)
@@ -617,6 +621,20 @@ public partial class App : System.Windows.Application
             ApplyOsdConfig(_settings);
             ShowOsd(interactive: false);
         }
+    }
+
+    /// <summary>A second launch signaled the show event. Same contract as the tray's
+    /// OpenRequested — nothing changed, just bring the right surface forward: the first-run
+    /// wizard while onboarding, otherwise the OSD (a no-op before the OSD exists).</summary>
+    private void OnSecondLaunchSignal()
+    {
+        if (_startupWizard is { IsVisible: true })
+        {
+            _startupWizard.Activate();
+            return;
+        }
+        if (_osd is not null)
+            ShowOsd(interactive: true);
     }
 
     /// <summary>One render path for every change: APO file, OSD, tray, settings.</summary>

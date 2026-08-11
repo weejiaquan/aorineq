@@ -78,6 +78,7 @@ public class EapoOnboardingTests
         // Real HTTP against an in-process listener — no external network, no mocks.
         var payload = new byte[300_000];
         new Random(42).NextBytes(payload);
+        payload[0] = (byte)'M'; payload[1] = (byte)'Z'; // must look like a PE executable
         var prefix = $"http://localhost:{FreePort()}/";
         using var listener = new HttpListener();
         listener.Prefixes.Add(prefix);
@@ -131,6 +132,90 @@ public class EapoOnboardingTests
         _out.WriteLine("error: " + ex.Message);
         Assert.Contains("404", ex.Message);
         Assert.False(File.Exists(dest));
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task Download_rejects_html_content_type_and_non_pe_payloads()
+    {
+        // Two listeners, two rejection modes: an HTML content-type (the SourceForge
+        // interstitial shape) and a non-PE payload with a binary content-type.
+        foreach (var (contentType, body, expectFragment) in new[]
+        {
+            ("text/html", "<html>Your download will start shortly…</html>", "web page"),
+            ("application/octet-stream", "definitely not an exe", "not a Windows installer"),
+        })
+        {
+            var prefix = $"http://localhost:{FreePort()}/";
+            using var listener = new HttpListener();
+            listener.Prefixes.Add(prefix);
+            listener.Start();
+            var serve = Task.Run(async () =>
+            {
+                var ctx = await listener.GetContextAsync();
+                ctx.Response.ContentType = contentType;
+                var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+                ctx.Response.ContentLength64 = bytes.Length;
+                await ctx.Response.OutputStream.WriteAsync(bytes);
+                ctx.Response.Close();
+            });
+
+            var dest = Path.Combine(Path.GetTempPath(), "apo-dl-test-" + Guid.NewGuid().ToString("N") + ".bin");
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => InstallerDownload.DownloadAsync(prefix, dest));
+            await serve;
+            _out.WriteLine($"{contentType}: {ex.Message}");
+            Assert.Contains(expectFragment, ex.Message);
+            Assert.False(File.Exists(dest)); // rejected file must not linger for Process.Start
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task ResolveLatestUrl_builds_direct_download_url_from_release_metadata()
+    {
+        var prefix = $"http://localhost:{FreePort()}/";
+        using var listener = new HttpListener();
+        listener.Prefixes.Add(prefix);
+        listener.Start();
+        var serve = Task.Run(async () =>
+        {
+            var ctx = await listener.GetContextAsync();
+            var json = "{\"release\": {\"filename\": \"/1.4.2/EqualizerAPO-x64-1.4.2.exe\", \"url\": \"ignored\"}}";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+            ctx.Response.ContentLength64 = bytes.Length;
+            await ctx.Response.OutputStream.WriteAsync(bytes);
+            ctx.Response.Close();
+        });
+
+        var url = await InstallerDownload.ResolveLatestUrlAsync(prefix);
+        await serve;
+        _out.WriteLine("resolved: " + url);
+        Assert.Equal("https://downloads.sourceforge.net/project/equalizerapo/1.4.2/EqualizerAPO-x64-1.4.2.exe", url);
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task ResolveLatestUrl_bad_metadata_throws_readable_message()
+    {
+        var prefix = $"http://localhost:{FreePort()}/";
+        using var listener = new HttpListener();
+        listener.Prefixes.Add(prefix);
+        listener.Start();
+        var serve = Task.Run(async () =>
+        {
+            var ctx = await listener.GetContextAsync();
+            var bytes = System.Text.Encoding.UTF8.GetBytes("{\"unexpected\": true}");
+            ctx.Response.ContentLength64 = bytes.Length;
+            await ctx.Response.OutputStream.WriteAsync(bytes);
+            ctx.Response.Close();
+        });
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => InstallerDownload.ResolveLatestUrlAsync(prefix));
+        await serve;
+        _out.WriteLine("error: " + ex.Message);
+        Assert.Contains("equalizerapo.com", ex.Message);
         listener.Stop();
     }
 

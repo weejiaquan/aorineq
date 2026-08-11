@@ -132,7 +132,9 @@ public partial class OnboardingWindow : Window
         _downloadCancel = new System.Threading.CancellationTokenSource();
         try
         {
-            await InstallerDownload.DownloadAsync(InstallerDownload.OfficialUrl, dest,
+            var url = await InstallerDownload.ResolveLatestUrlAsync(
+                InstallerDownload.BestReleaseUrl, _downloadCancel.Token);
+            await InstallerDownload.DownloadAsync(url, dest,
                 new Progress<double>(p =>
                 {
                     if (p < 0) { DownloadProgress.IsIndeterminate = true; return; }
@@ -225,16 +227,36 @@ public partial class OnboardingWindow : Window
         SecondaryButton.IsEnabled = false;
         try
         {
-            var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
-                "/c net stop /y AudioEndpointBuilder && net start AudioEndpointBuilder && net start Audiosrv")
+            // Restart-Service -Force takes dependent services (Audiosrv depends on
+            // AudioEndpointBuilder) down and up in the right order; Audiosrv is started
+            // explicitly afterwards in case -Force left it stopped.
+            var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                "powershell.exe",
+                "-NoProfile -ExecutionPolicy Bypass -Command "
+                + "\"Restart-Service AudioEndpointBuilder -Force -ErrorAction Stop; "
+                + "Start-Service Audiosrv -ErrorAction SilentlyContinue\"")
             {
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
             });
-            if (proc is not null)
-                await proc.WaitForExitAsync();
-            BodyText.Text = "Audio restarted. Equalizer APO is now processing your playback device.";
+            if (proc is null)
+            {
+                ErrorText.Text = "Couldn't start the elevated helper — restart your PC instead.";
+                ErrorText.Visibility = Visibility.Visible;
+                return;
+            }
+            await proc.WaitForExitAsync();
+            if (proc.ExitCode == 0)
+            {
+                BodyText.Text = "Audio restarted. Equalizer APO is now processing your playback device.";
+            }
+            else
+            {
+                ErrorText.Text = "The audio services could not be restarted (helper exit code "
+                    + proc.ExitCode + ") — restart your PC instead to finish the setup.";
+                ErrorText.Visibility = Visibility.Visible;
+            }
         }
         catch (System.ComponentModel.Win32Exception)
         {
