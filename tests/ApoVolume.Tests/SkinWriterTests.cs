@@ -174,6 +174,31 @@ public class SkinWriterTests : IDisposable
     }
 
     [Fact]
+    public void Save_text_styling_roundtrips_and_plain_text_omits_style_fields()
+    {
+        var styled = new SkinText(true, 10, 5,
+            Color: "#FF00FF00", FontFamily: "Consolas", FontSize: 28, Bold: false,
+            OutlineColor: "#FF000000", OutlineWidth: 3,
+            ShadowColor: "#80000000", ShadowBlur: 6, ShadowDepth: 4);
+        var folder = SkinWriter.Save(_root, "styled", _emptySrc, _fullSrc, new SkinConfig(styled, 1.0));
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"roundtrip: {t}");
+        Assert.Equal(styled, t);
+
+        // A plain positioned number writes just show/x/y — no styling keys.
+        var plainFolder = SkinWriter.Save(_root, "plain", _emptySrc, _fullSrc,
+            new SkinConfig(new SkinText(true, 12, 8), 1.0));
+        var json = File.ReadAllText(Path.Combine(plainFolder, "skin.json"));
+        _out.WriteLine("plain json: " + json);
+        Assert.DoesNotContain("color", json);
+        Assert.DoesNotContain("fontFamily", json);
+        Assert.DoesNotContain("outlineColor", json);
+        Assert.DoesNotContain("shadowColor", json);
+        var back = SkinLoader.Load(plainFolder).Text;
+        Assert.Equal(new SkinText(true, 12, 8), back); // defaults reconstruct the plain text
+    }
+
+    [Fact]
     public void Save_with_all_defaults_omits_skin_json_even_with_animation_defaults()
     {
         var folder = SkinWriter.Save(_root, "plain", _emptySrc, _fullSrc,

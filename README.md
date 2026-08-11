@@ -111,7 +111,16 @@ Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
     "percentText": {
       "show": true,   // whether to display the percentage number
       "x": 10,        // pixel offset of text from left edge
-      "y": 5          // pixel offset of text from top edge
+      "y": 5,         // pixel offset of text from top edge
+      "color": "#FFFFFFFF",     // text color (#AARRGGBB or #RRGGBB); default white
+      "fontFamily": "Segoe UI", // any installed font
+      "fontSize": 14,           // clamped 4–200
+      "bold": true,
+      "outlineColor": "#FF000000", // omit for no outline
+      "outlineWidth": 2,           // clamped 0–20
+      "shadowColor": "#80000000",  // omit for no shadow
+      "shadowBlur": 4,             // clamped 0–50
+      "shadowDepth": 2             // clamped 0–50
     },
     "scale": 1.5,       // zoom multiplier (1.0 = original size, clamped to 0.25–4.0)
     "fps": 12,          // sprite-sheet playback rate (default 10, clamped to 1–60)

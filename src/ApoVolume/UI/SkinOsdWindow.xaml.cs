@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -89,8 +90,8 @@ public partial class SkinOsdWindow : Window
 
         if (info.Text is { Show: true } text)
         {
-            PercentTextBlock.Visibility = Visibility.Visible;
-            PercentTextBlock.Margin = new Thickness(text.X * info.Scale, text.Y * info.Scale, 0, 0);
+            PercentPath.Visibility = Visibility.Visible;
+            PercentPath.Margin = new Thickness(text.X * info.Scale, text.Y * info.Scale, 0, 0);
         }
 
         _hideTimer.Tick += (_, _) =>
@@ -170,8 +171,9 @@ public partial class SkinOsdWindow : Window
     public void ShowVolume(int percent, bool muted, bool interactive)
     {
         _lastPercent = percent;
-        if (_info.Text is { Show: true })
-            PercentTextBlock.Text = percent.ToString();
+        if (_info.Text is { Show: true } text)
+            PercentTextRenderer.Update(PercentPath, text, percent.ToString(), _info.Scale,
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
 
         double fillWidth = SkinMath.FillWidth(_info.Width, percent, _info.FillStartX, _info.FillEndX)
             * _info.Scale; // already clamped >= 0

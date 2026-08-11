@@ -364,6 +364,52 @@ public class SkinLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_percent_text_styling_parses_and_clamps()
+    {
+        var folder = NewSkinFolder("styled-text");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"percentText\": { \"show\": true, \"x\": 10, \"y\": 5, \"color\": \"#FF00FF00\", " +
+            "\"fontFamily\": \"Consolas\", \"fontSize\": 999, \"bold\": false, " +
+            "\"outlineColor\": \"#FF000000\", \"outlineWidth\": 99, " +
+            "\"shadowColor\": \"#80000000\", \"shadowBlur\": 99, \"shadowDepth\": -5 } }");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"styled: {t}");
+        Assert.NotNull(t);
+        Assert.Equal("#FF00FF00", t!.Color);
+        Assert.Equal("Consolas", t.FontFamily);
+        Assert.Equal(200, t.FontSize);      // clamped from 999
+        Assert.False(t.Bold);
+        Assert.Equal("#FF000000", t.OutlineColor);
+        Assert.Equal(20, t.OutlineWidth);   // clamped from 99
+        Assert.Equal("#80000000", t.ShadowColor);
+        Assert.Equal(50, t.ShadowBlur);     // clamped from 99
+        Assert.Equal(0, t.ShadowDepth);     // clamped from -5
+    }
+
+    [Fact]
+    public void Load_plain_percent_text_uses_style_defaults()
+    {
+        var folder = NewSkinFolder("plain-text");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"percentText\": { \"show\": true, \"x\": 10, \"y\": 5 } }");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"defaults: {t}");
+        Assert.NotNull(t);
+        Assert.Equal("#FFFFFFFF", t!.Color);
+        Assert.Equal("Segoe UI", t.FontFamily);
+        Assert.Equal(14, t.FontSize);
+        Assert.True(t.Bold);
+        Assert.Null(t.OutlineColor);   // no outline
+        Assert.Null(t.ShadowColor);    // no shadow
+    }
+
+    [Fact]
     public void Load_missing_folder_sets_error_and_never_throws()
     {
         var folder = Path.Combine(_dir, "does-not-exist");
