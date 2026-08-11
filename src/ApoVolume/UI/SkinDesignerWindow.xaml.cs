@@ -143,6 +143,7 @@ public partial class SkinDesignerWindow : Window
         EmptyPathText.Text = "—";
         FullPathText.Text = "—";
         ImageErrorText.Text = "";
+        RestartAnimationTimers(); // no frames -> stops both
         RefreshPreview();
         Validate();
         StatusText.Text = "Pick two images to start a new skin.";
@@ -253,6 +254,7 @@ public partial class SkinDesignerWindow : Window
     {
         _emptyFrames = null;
         _fullFrames = null;
+        RestartAnimationTimers(); // stale timers from the previous skin must not keep ticking
 
         var emptyMeta = ReadLayerMeta(_emptySource, ParseFrames(EmptyFramesBox));
         var fullMeta = ReadLayerMeta(_fullSource, ParseFrames(FullFramesBox));
@@ -287,8 +289,10 @@ public partial class SkinDesignerWindow : Window
             _fullFrames = SkinFrames.Load(_fullSource!, ParseFrames(FullFramesBox), fps);
         }
         catch (Exception ex) when (ex is NotSupportedException or IOException
-            or FileFormatException or ArgumentException)
+            or FileFormatException or ArgumentException or OutOfMemoryException)
         {
+            // OutOfMemoryException: untrusted shared skins — a decode blowing the budget must
+            // surface as an error, not take the app down.
             _emptyFrames = null;
             _fullFrames = null;
             ImageErrorText.Text = "Image failed to decode: " + ex.Message;

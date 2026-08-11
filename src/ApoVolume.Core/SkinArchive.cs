@@ -40,9 +40,11 @@ public static class SkinArchive
 
     /// <summary>Extracts a skin zip into <c>skinsRoot\name</c> and validates the result via
     /// <see cref="SkinLoader"/>. Accepts the known files at the archive root or nested exactly one
-    /// folder deep (people re-zip folders); everything else in the archive is ignored. On an
-    /// invalid result the created folder is deleted and the loader's reason is thrown. Returns the
-    /// folder written.</summary>
+    /// folder deep (people re-zip folders); everything else in the archive is ignored. The import
+    /// is STAGED: the zip extracts into a scratch folder, validates there, and only then replaces
+    /// the target — a failed import never touches an existing skin, and a successful overwrite is
+    /// exactly the zip's contents (no stale files from the previous skin surviving to hybridize
+    /// it via the loader's png-over-gif precedence). Returns the folder written.</summary>
     public static string Import(string zipPath, string skinsRoot, string name)
     {
         var nameError = SkinWriter.ValidateName(name);
@@ -50,11 +52,12 @@ public static class SkinArchive
             throw new ArgumentException(nameError, nameof(name));
 
         var folder = Path.Combine(skinsRoot, name.Trim());
+        var staging = Path.Combine(skinsRoot, ".import-" + Guid.NewGuid().ToString("N"));
         try
         {
             using (var archive = ZipFile.OpenRead(zipPath))
             {
-                Directory.CreateDirectory(folder);
+                Directory.CreateDirectory(staging);
                 foreach (var entry in archive.Entries)
                 {
                     // Normalize separators; skip directory entries.
@@ -66,21 +69,31 @@ public static class SkinArchive
                     if (!AllowedFiles.Contains(fileName, StringComparer.OrdinalIgnoreCase))
                         continue;
                     // Output path is built from OUR whitelist name, never the entry's path.
-                    entry.ExtractToFile(Path.Combine(folder, fileName.ToLowerInvariant()), overwrite: true);
+                    entry.ExtractToFile(Path.Combine(staging, fileName.ToLowerInvariant()), overwrite: true);
                 }
             }
 
-            var info = SkinLoader.Load(folder);
+            var info = SkinLoader.Load(staging);
             if (!info.IsValid)
-            {
-                Directory.Delete(folder, recursive: true);
                 throw new InvalidOperationException($"The zip is not a valid skin: {info.Error}");
-            }
+
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
+            Directory.Move(staging, folder);
             return folder;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             throw new InvalidOperationException($"Failed to import skin: {ex.Message}", ex);
+        }
+        finally
+        {
+            if (Directory.Exists(staging))
+            {
+                try { Directory.Delete(staging, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 }

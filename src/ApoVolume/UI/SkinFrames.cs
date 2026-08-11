@@ -11,6 +11,11 @@ namespace ApoVolume.UI;
 /// All frames are frozen and sized to the layer's logical frame size.</summary>
 internal sealed class SkinFrames
 {
+    /// <summary>Upper bound per layer: shared skins are untrusted input, and every decoded frame
+    /// is held in memory (plus one union alpha map) — a runaway GIF/sheet must fail with a clear
+    /// message instead of allocating without limit.</summary>
+    public const int MaxFrames = 120;
+
     public IReadOnlyList<BitmapSource> Frames { get; }
     public IReadOnlyList<TimeSpan> Delays { get; }
     public bool IsAnimated => Frames.Count > 1;
@@ -32,6 +37,9 @@ internal sealed class SkinFrames
 
     private static SkinFrames LoadSheet(string path, int declaredFrames, double fps)
     {
+        if (declaredFrames > MaxFrames)
+            throw new NotSupportedException(
+                $"{Path.GetFileName(path)} declares {declaredFrames} frames — the limit is {MaxFrames}.");
         var bmp = SkinOsdWindow.LoadBitmap(path);
         var delay = TimeSpan.FromSeconds(1.0 / fps);
         if (declaredFrames <= 1)
@@ -59,6 +67,9 @@ internal sealed class SkinFrames
             BitmapCacheOption.OnLoad);
         if (decoder.Frames.Count == 0)
             throw new NotSupportedException($"{Path.GetFileName(path)} contains no frames.");
+        if (decoder.Frames.Count > MaxFrames)
+            throw new NotSupportedException(
+                $"{Path.GetFileName(path)} has {decoder.Frames.Count} frames — the limit is {MaxFrames}.");
 
         // Logical screen size; fall back to the first frame's size when metadata is absent.
         int width = decoder.Frames[0].PixelWidth;
@@ -73,7 +84,7 @@ internal sealed class SkinFrames
 
         var frames = new List<BitmapSource>(decoder.Frames.Count);
         var delays = new List<TimeSpan>(decoder.Frames.Count);
-        BitmapSource? canvas = null;
+        BitmapSource? canvas = null; // the base the NEXT frame composites onto
         foreach (var frame in decoder.Frames)
         {
             var meta = frame.Metadata as BitmapMetadata;
@@ -88,36 +99,57 @@ internal sealed class SkinFrames
                 left = Convert.ToInt32(meta.GetQuery("/imgdesc/Left"));
             if (meta is not null && meta.ContainsQuery("/imgdesc/Top"))
                 top = Convert.ToInt32(meta.GetQuery("/imgdesc/Top"));
+            // GIF disposal method (GCE packed field): 0/1 keep, 2 restore-to-background
+            // (clear the frame's rect), 3 restore-to-previous (revert the whole frame).
+            int disposal = 0;
+            if (meta is not null && meta.ContainsQuery("/grctlext/Disposal"))
+                disposal = Convert.ToInt32(meta.GetQuery("/grctlext/Disposal"));
 
-            BitmapSource composed;
+            var frameRect = new Rect(left, top, frame.PixelWidth, frame.PixelHeight);
             bool coversCanvas = left == 0 && top == 0
                 && frame.PixelWidth == width && frame.PixelHeight == height;
-            if (coversCanvas)
-            {
-                // Full-canvas frame: treat as a replacement. (GIF disposal modes are approximated:
-                // partial frames composite over the previous canvas, full frames replace it —
-                // correct for the overwhelming majority of real GIFs, and "restore to background"
-                // is not distinguished. Documented limitation.)
-                composed = frame;
-            }
-            else
-            {
-                var visual = new DrawingVisual();
-                using (var dc = visual.RenderOpen())
+
+            // What the viewer sees for this frame: the frame over the current base.
+            BitmapSource composed = coversCanvas && canvas is null
+                ? frame
+                : Render(width, height, dc =>
                 {
                     if (canvas is not null)
                         dc.DrawImage(canvas, new Rect(0, 0, width, height));
-                    dc.DrawImage(frame, new Rect(left, top, frame.PixelWidth, frame.PixelHeight));
-                }
-                var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-                target.Render(visual);
-                target.Freeze();
-                composed = target;
-            }
+                    dc.DrawImage(frame, frameRect);
+                });
             frames.Add(composed);
             delays.Add(TimeSpan.FromMilliseconds(delayCentiseconds * 10));
-            canvas = composed;
+
+            // The base for the NEXT frame, per this frame's disposal method.
+            canvas = disposal switch
+            {
+                // Restore to background: GIF "background" is transparent for our purposes —
+                // clear this frame's rect out of the composed image.
+                2 => Render(width, height, dc =>
+                {
+                    dc.PushClip(new CombinedGeometry(GeometryCombineMode.Exclude,
+                        new RectangleGeometry(new Rect(0, 0, width, height)),
+                        new RectangleGeometry(frameRect)));
+                    dc.DrawImage(composed, new Rect(0, 0, width, height));
+                    dc.Pop();
+                }),
+                // Restore to previous: the next frame composites onto what was there BEFORE this one.
+                3 => canvas,
+                _ => composed, // 0/1: keep what the viewer saw
+            };
         }
         return new SkinFrames(frames, delays);
+    }
+
+    private static BitmapSource Render(int width, int height, Action<DrawingContext> draw)
+    {
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+            draw(dc);
+        var target = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        target.Render(visual);
+        target.Freeze();
+        return target;
     }
 }
