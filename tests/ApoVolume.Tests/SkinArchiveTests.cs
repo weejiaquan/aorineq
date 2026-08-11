@@ -168,6 +168,35 @@ public class SkinArchiveTests : IDisposable
     }
 
     [Fact]
+    public void Overwrite_import_that_fails_at_replace_time_preserves_the_existing_skin()
+    {
+        // Existing valid skin...
+        var src = MakeSkinFolder("lock-src", withJson: true);
+        var zip = Path.Combine(_dir, "lock.zip");
+        SkinArchive.Export(src, zip);
+        var existing = SkinArchive.Import(zip, _root, "target");
+
+        // ...with an open handle inside it: the rename-aside step must fail, which has to throw
+        // WITHOUT destroying the existing skin (the pre-fix code deleted it before installing).
+        using (File.Open(Path.Combine(existing, "empty.png"), FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => SkinArchive.Import(zip, _root, "target"));
+            _out.WriteLine("replace-time failure surfaced: " + ex.Message);
+        }
+
+        var info = SkinLoader.Load(existing);
+        _out.WriteLine($"existing skin after failed replace: valid={info.IsValid}");
+        Assert.True(info.IsValid); // byte-for-byte survivor
+        Assert.True(File.Exists(Path.Combine(existing, "skin.json")));
+        // No staging or backup debris.
+        Assert.Empty(Directory.GetDirectories(_root).Where(d =>
+        {
+            var n = Path.GetFileName(d)!;
+            return n.StartsWith(".import-") || n.StartsWith(".backup-");
+        }));
+    }
+
+    [Fact]
     public void Import_with_invalid_name_throws()
     {
         var skin = MakeSkinFolder("name-src", withJson: false);

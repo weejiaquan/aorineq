@@ -77,9 +77,31 @@ public static class SkinArchive
             if (!info.IsValid)
                 throw new InvalidOperationException($"The zip is not a valid skin: {info.Error}");
 
+            // Replace without a data-loss window: the existing skin is RENAMED aside (nothing
+            // destroyed), the staged skin moves into place, and only then is the backup deleted.
+            // If the install move fails, the original is renamed back.
+            string? backup = null;
             if (Directory.Exists(folder))
-                Directory.Delete(folder, recursive: true);
-            Directory.Move(staging, folder);
+            {
+                backup = Path.Combine(skinsRoot, ".backup-" + Guid.NewGuid().ToString("N"));
+                Directory.Move(folder, backup);
+            }
+            try
+            {
+                Directory.Move(staging, folder);
+            }
+            catch
+            {
+                if (backup is not null && !Directory.Exists(folder))
+                    Directory.Move(backup, folder);
+                throw;
+            }
+            if (backup is not null)
+            {
+                try { Directory.Delete(backup, recursive: true); }
+                catch (IOException) { }              // leftover .backup-* is inert: Scan skips
+                catch (UnauthorizedAccessException) { } // dot-folders, and the import succeeded
+            }
             return folder;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
