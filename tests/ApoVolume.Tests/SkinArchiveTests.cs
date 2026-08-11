@@ -197,6 +197,43 @@ public class SkinArchiveTests : IDisposable
     }
 
     [Fact]
+    public void Export_then_import_carries_the_muted_png_layer()
+    {
+        var skin = MakeSkinFolder("muted-share", withJson: false);
+        TestPngs.Write(Path.Combine(skin, "muted.png"), 300, 100);
+        var zip = Path.Combine(_dir, "muted-share.zip");
+
+        SkinArchive.Export(skin, zip);
+        var imported = SkinArchive.Import(zip, _root, "muted-imported");
+        var info = SkinLoader.Load(imported);
+        _out.WriteLine($"imported: valid={info.IsValid} hasMuted={info.HasMuted} path={info.MutedPath}");
+        Assert.True(info.IsValid);
+        Assert.True(info.HasMuted);
+        Assert.True(File.Exists(Path.Combine(imported, "muted.png")));
+    }
+
+    [Fact]
+    public void Import_accepts_muted_gif_from_the_whitelist()
+    {
+        var skin = MakeSkinFolder("muted-gif-src", withJson: false);
+        TestPngs.WriteGif(Path.Combine(skin, "muted.gif"), 300, 100);
+        var zip = Path.Combine(_dir, "muted-gif.zip");
+        using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+        {
+            archive.CreateEntryFromFile(Path.Combine(skin, "empty.png"), "empty.png");
+            archive.CreateEntryFromFile(Path.Combine(skin, "full.png"), "full.png");
+            archive.CreateEntryFromFile(Path.Combine(skin, "muted.gif"), "muted.gif");
+        }
+
+        var imported = SkinArchive.Import(zip, _root, "muted-gif-imported");
+        var info = SkinLoader.Load(imported);
+        _out.WriteLine($"imported: valid={info.IsValid} hasMuted={info.HasMuted} gif={info.MutedIsGif}");
+        Assert.True(info.IsValid);
+        Assert.True(info.HasMuted);
+        Assert.True(info.MutedIsGif);
+    }
+
+    [Fact]
     public void Import_with_invalid_name_throws()
     {
         var skin = MakeSkinFolder("name-src", withJson: false);

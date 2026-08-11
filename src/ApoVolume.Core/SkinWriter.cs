@@ -2,12 +2,13 @@ using System.Text.Json;
 
 namespace ApoVolume.Core;
 
-/// <summary>Everything a skin save carries besides the two images. Defaults mirror
-/// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers, and a null
-/// fill range meaning "the bar spans the full image width".</summary>
+/// <summary>Everything a skin save carries besides the images. Defaults mirror
+/// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers, a null
+/// fill range meaning "the bar spans the full image width", and the 0.6 mute dim.</summary>
 public sealed record SkinConfig(SkinText? Text, double Scale,
     double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1,
-    int? FillStartX = null, int? FillEndX = null);
+    int? FillStartX = null, int? FillEndX = null,
+    int MutedFrames = 1, double MutedDim = 0.6);
 
 /// <summary>Writes a skin folder (empty.png + full.png + optional skin.json) for the skin
 /// designer. Image content validation stays with the caller (PngHeader before save,
@@ -46,13 +47,14 @@ public static class SkinWriter
     }
 
     /// <summary>Creates or overwrites <c>skinsRoot\name</c>: copies each source image to
-    /// empty/full keeping the SOURCE's extension (.png or .gif) and deletes the stale
+    /// empty/full/muted keeping the SOURCE's extension (.png or .gif) and deletes the stale
     /// other-extension variant — the loader prefers .png over .gif, so a leftover file must
-    /// never resurrect an old skin. A source that already IS the destination is left in place
-    /// (editing an existing skin without replacing its images). skin.json is written only when
-    /// any config field is non-default; a stale one is deleted otherwise. Returns the folder.</summary>
+    /// never resurrect an old skin. A null <paramref name="mutedSourcePath"/> clears the optional
+    /// muted layer (both extensions deleted). A source that already IS the destination is left in
+    /// place (editing an existing skin without replacing its images). skin.json is written only
+    /// when any config field is non-default; a stale one is deleted otherwise. Returns the folder.</summary>
     public static string Save(string skinsRoot, string name, string emptySourcePath, string fullSourcePath,
-        SkinConfig config)
+        SkinConfig config, string? mutedSourcePath = null)
     {
         var nameError = ValidateName(name);
         if (nameError is not null)
@@ -64,11 +66,16 @@ public static class SkinWriter
             Directory.CreateDirectory(folder);
             CopyLayer(emptySourcePath, folder, "empty");
             CopyLayer(fullSourcePath, folder, "full");
+            if (mutedSourcePath is not null)
+                CopyLayer(mutedSourcePath, folder, "muted");
+            else
+                DeleteLayer(folder, "muted");
 
             var jsonPath = Path.Combine(folder, "skin.json");
             bool showText = config.Text is { Show: true };
             if (showText || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
+                || config.MutedFrames != 1 || config.MutedDim != 0.6
                 || config.FillStartX is not null || config.FillEndX is not null)
             {
                 // Anonymous shape matches SkinLoader's SkinJson (case-insensitive on read);
@@ -82,6 +89,8 @@ public static class SkinWriter
                     fps = config.Fps,
                     emptyFrames = config.EmptyFrames,
                     fullFrames = config.FullFrames,
+                    mutedFrames = config.MutedFrames,
+                    mutedDim = config.MutedDim == 0.6 ? (double?)null : config.MutedDim,
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,
                 }, JsonWriteOptions);
@@ -116,6 +125,7 @@ public static class SkinWriter
         shadowColor = t.ShadowColor,
         shadowBlur = t.ShadowColor is null || t.ShadowBlur == 4 ? (double?)null : t.ShadowBlur,
         shadowDepth = t.ShadowColor is null || t.ShadowDepth == 2 ? (double?)null : t.ShadowDepth,
+        align = t.Align == "left" ? null : t.Align,
     };
 
     private static void CopyLayer(string source, string folder, string layer)
@@ -128,5 +138,16 @@ public static class SkinWriter
             File.Copy(source, destination, overwrite: true);
         if (File.Exists(staleVariant))
             File.Delete(staleVariant);
+    }
+
+    /// <summary>Removes both extension variants of an optional layer (clearing the muted layer).</summary>
+    private static void DeleteLayer(string folder, string layer)
+    {
+        foreach (var ext in new[] { ".png", ".gif" })
+        {
+            var path = Path.Combine(folder, layer + ext);
+            if (File.Exists(path))
+                File.Delete(path);
+        }
     }
 }

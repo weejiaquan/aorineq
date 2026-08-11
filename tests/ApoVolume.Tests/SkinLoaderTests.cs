@@ -409,6 +409,143 @@ public class SkinLoaderTests : IDisposable
         Assert.Null(t.ShadowColor);    // no shadow
     }
 
+    [Theory]
+    [InlineData("\"left\"", "left")]
+    [InlineData("\"Center\"", "center")]   // case-insensitive
+    [InlineData("\"RIGHT\"", "right")]
+    [InlineData("\"banana\"", "left")]     // invalid -> left
+    public void Load_percent_text_align_parses_case_insensitively(string rawAlign, string expected)
+    {
+        var folder = NewSkinFolder("align-" + expected + rawAlign.Length);
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            $"{{ \"percentText\": {{ \"show\": true, \"x\": 10, \"y\": 5, \"align\": {rawAlign} }} }}");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"raw={rawAlign} -> align={t?.Align} (expected {expected})");
+        Assert.NotNull(t);
+        Assert.Equal(expected, t!.Align);
+    }
+
+    [Fact]
+    public void Load_percent_text_align_defaults_left_when_absent()
+    {
+        var folder = NewSkinFolder("align-default");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"percentText\": { \"show\": true, \"x\": 10, \"y\": 5 } }");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"align={t?.Align}");
+        Assert.Equal("left", t!.Align);
+    }
+
+    [Theory]
+    [InlineData(null, 0.6)]   // absent -> current hardcoded default
+    [InlineData(-0.5, 0.0)]   // clamps up
+    [InlineData(0.3, 0.3)]
+    [InlineData(7.0, 1.0)]    // clamps down
+    public void Load_mutedDim_clamps_into_0_1_and_defaults_to_0_6(double? raw, double expected)
+    {
+        var folder = NewSkinFolder("muteddim-" + (raw?.ToString(System.Globalization.CultureInfo.InvariantCulture).Replace('.', '_').Replace("-", "m") ?? "none"));
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        if (raw is not null)
+            File.WriteAllText(Path.Combine(folder, "skin.json"),
+                $"{{ \"mutedDim\": {raw.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"raw={raw} -> MutedDim={info.MutedDim} (expected {expected})");
+        Assert.True(info.IsValid);
+        Assert.Equal(expected, info.MutedDim);
+    }
+
+    [Fact]
+    public void Load_muted_png_resolves_optional_layer()
+    {
+        var folder = NewSkinFolder("muted-png");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        WritePng(Path.Combine(folder, "muted.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted: has={info.HasMuted} path={info.MutedPath} gif={info.MutedIsGif} frames={info.MutedFrames}");
+        Assert.True(info.IsValid);
+        Assert.True(info.HasMuted);
+        Assert.Equal(Path.Combine(folder, "muted.png"), info.MutedPath);
+        Assert.False(info.MutedIsGif);
+        Assert.Equal(1, info.MutedFrames);
+    }
+
+    [Fact]
+    public void Load_muted_gif_resolves_when_png_absent()
+    {
+        var folder = NewSkinFolder("muted-gif");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "muted.gif"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted gif: has={info.HasMuted} path={info.MutedPath} gif={info.MutedIsGif}");
+        Assert.True(info.IsValid);
+        Assert.True(info.HasMuted);
+        Assert.True(info.MutedIsGif);
+        Assert.EndsWith("muted.gif", info.MutedPath);
+    }
+
+    [Fact]
+    public void Load_without_muted_layer_has_none()
+    {
+        var folder = NewSkinFolder("muted-absent");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"no muted layer: has={info.HasMuted} path={info.MutedPath ?? "<null>"}");
+        Assert.True(info.IsValid);
+        Assert.False(info.HasMuted);
+        Assert.Null(info.MutedPath);
+    }
+
+    [Fact]
+    public void Load_muted_sheet_uses_mutedFrames_and_rejects_indivisible()
+    {
+        var folder = NewSkinFolder("muted-sheet");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        WritePng(Path.Combine(folder, "muted.png"), 300, 400); // 4 frames of 100
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"mutedFrames\": 4 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted sheet: valid={info.IsValid} frames={info.MutedFrames} err={info.Error}");
+        Assert.True(info.IsValid);
+        Assert.Equal(4, info.MutedFrames);
+
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"mutedFrames\": 3 }"); // 400 % 3 != 0
+        var bad = SkinLoader.Load(folder);
+        _out.WriteLine($"indivisible: valid={bad.IsValid} err={bad.Error}");
+        Assert.False(bad.IsValid);
+        Assert.Contains("divisible", bad.Error);
+    }
+
+    [Fact]
+    public void Load_muted_size_mismatch_sets_error_like_empty_full_mismatch()
+    {
+        var folder = NewSkinFolder("muted-mismatch");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        WritePng(Path.Combine(folder, "muted.png"), 300, 140);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted mismatch error: {info.Error}");
+        Assert.False(info.IsValid);
+        Assert.Contains("muted", info.Error);
+        Assert.Contains("140", info.Error);
+        Assert.Contains("100", info.Error);
+    }
+
     [Fact]
     public void Load_missing_folder_sets_error_and_never_throws()
     {

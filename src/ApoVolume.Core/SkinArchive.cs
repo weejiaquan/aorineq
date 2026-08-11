@@ -8,7 +8,7 @@ namespace ApoVolume.Core;
 public static class SkinArchive
 {
     private static readonly string[] AllowedFiles =
-        { "empty.png", "empty.gif", "full.png", "full.gif", "skin.json" };
+        { "empty.png", "empty.gif", "full.png", "full.gif", "muted.png", "muted.gif", "skin.json" };
 
     /// <summary>Suggested skin name for a zip: its filename without extension.</summary>
     public static string DefaultName(string zipPath) => Path.GetFileNameWithoutExtension(zipPath);

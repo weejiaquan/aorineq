@@ -65,6 +65,21 @@ public class SkinMathTests
     }
 
     [Theory]
+    [InlineData(100.0, 40.0, "left", 100.0)]    // left: x IS the left edge
+    [InlineData(100.0, 40.0, "center", 80.0)]   // center: x is the midpoint
+    [InlineData(100.0, 40.0, "right", 60.0)]    // right: x is the right edge
+    [InlineData(100.0, 0.0, "center", 100.0)]   // zero width: all alignments collapse to x
+    [InlineData(100.0, 0.0, "right", 100.0)]
+    [InlineData(100.0, 40.0, "banana", 100.0)]  // unknown align falls back to left
+    [InlineData(0.0, 30.0, "right", -30.0)]     // anchors may push the left edge negative
+    public void AlignedTextX_maps_anchor_to_left_edge(double x, double textWidth, string align, double expected)
+    {
+        var result = SkinMath.AlignedTextX(x, textWidth, align);
+        _out.WriteLine($"AlignedTextX({x}, {textWidth}, '{align}') = {result} (expected {expected})");
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
     [InlineData(10, 10, false)] // exactly at default threshold -> not opaque
     [InlineData(11, 10, true)]  // one above default threshold -> opaque
     [InlineData(0, 10, false)]
