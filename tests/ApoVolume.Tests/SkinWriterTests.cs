@@ -90,6 +90,8 @@ public class SkinWriterTests : IDisposable
     [InlineData("bad:name", false)]
     [InlineData("con", false)]
     [InlineData("COM1", false)]
+    [InlineData("NUL.txt", false)]
+    [InlineData("com1.png", false)]
     [InlineData("trailing.", false)]
     [InlineData("ok-name", true)]
     [InlineData("My Skin 2", true)]
