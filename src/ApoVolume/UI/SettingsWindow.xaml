@@ -103,6 +103,15 @@
         </CheckBox>
         <TextBlock x:Name="ElevationStateText" Margin="24,0,0,0" FontSize="11" Foreground="Gray" />
         <Separator Margin="0,16" />
+        <TextBlock Text="Equalizer APO" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+        <TextBlock x:Name="EapoStatusText" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+            <Button x:Name="OpenConfiguratorButton" Content="Open Configurator"
+                    Click="OnOpenConfigurator" Padding="8,2" Margin="0,0,8,0" />
+            <Button x:Name="SetupGuideButton" Content="Setup guide…"
+                    Click="OnOpenSetupGuide" Padding="8,2" />
+        </StackPanel>
+        <Separator Margin="0,16" />
         <TextBlock Text="About" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
         <TextBlock x:Name="VersionText" FontSize="12" Foreground="Gray" />
         <TextBlock FontSize="12" Margin="0,2,0,0">

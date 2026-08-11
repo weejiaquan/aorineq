@@ -25,6 +25,9 @@ public partial class SettingsWindow : Window
     /// <summary>Raised when the user clicks "Skin designer…" — App owns the designer window.</summary>
     public event Action? SkinDesignerRequested;
 
+    /// <summary>Raised when the user clicks "Setup guide…" — App owns the onboarding window.</summary>
+    public event Action? SetupGuideRequested;
+
     public SettingsWindow(bool autostartEnabled, bool runAsAdmin, bool isElevated, string version, Settings settings)
     {
         InitializeComponent();
@@ -47,9 +50,47 @@ public partial class SettingsWindow : Window
 
         ApplyOsdSettings(settings);
         PopulateSkins(settings.SkinName);
+        RefreshEapoStatus();
 
         _initializing = false;
     }
+
+    /// <summary>Live Equalizer APO status line + Configurator button state. Called at
+    /// construction and on every SyncState (Settings reopen), so plugging in headphones or
+    /// running the Configurator is reflected the next time the window is looked at.</summary>
+    private void RefreshEapoStatus()
+    {
+        var status = EapoDetection.Detect();
+        EapoStatusText.Text = status switch
+        {
+            EapoStatus.Active => "Active on the current playback device.",
+            EapoStatus.InstalledInactive =>
+                "Installed, but not enabled on the current playback device — volume changes won't be audible there.",
+            _ => "Not installed.",
+        };
+        OpenConfiguratorButton.IsEnabled = EapoDetection.GetConfiguratorPath() is not null;
+    }
+
+    /// <summary>Launches EAPO's Configurator (elevated — it registers APOs on devices).</summary>
+    private void OnOpenConfigurator(object sender, RoutedEventArgs e)
+    {
+        var path = EapoDetection.GetConfiguratorPath();
+        if (path is null) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // UAC declined — nothing to do.
+        }
+    }
+
+    private void OnOpenSetupGuide(object sender, RoutedEventArgs e) => SetupGuideRequested?.Invoke();
 
     /// <summary>Re-syncs every control (General tab and OSD tab alike) from current app state.
     /// Called both after autostart/RunAsAdmin changes and every time Settings is (re)opened —
@@ -65,6 +106,7 @@ public partial class SettingsWindow : Window
 
         ApplyOsdSettings(settings);
         PopulateSkins(settings.SkinName);
+        RefreshEapoStatus();
 
         _initializing = false;
     }
