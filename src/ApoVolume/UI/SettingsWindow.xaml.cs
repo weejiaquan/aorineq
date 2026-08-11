@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -163,6 +164,46 @@ public partial class SettingsWindow : Window
     }
 
     private void OnOpenSkinDesigner(object sender, RoutedEventArgs e) => SkinDesignerRequested?.Invoke();
+
+    /// <summary>Installs a skin shared as a zip, without needing the designer: name from the zip
+    /// filename, overwrite confirmed, picker refreshed. If the ACTIVE skin was overwritten, the
+    /// change event re-fires so App hot-reloads the live OSD (content-stamp rebuild).</summary>
+    private void OnImportSkin(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "Skin zip (*.zip)|*.zip",
+            Title = "Import a shared skin",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        var name = SkinArchive.DefaultName(dialog.FileName).Trim();
+        try
+        {
+            if (SkinWriter.ValidateName(name) is { } nameError)
+            {
+                System.Windows.MessageBox.Show(
+                    $"The zip filename can't be used as the skin name: {nameError}",
+                    "apo-volume", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            if (Directory.Exists(Path.Combine(ApoPaths.GetSkinsRoot(), name)))
+            {
+                var choice = System.Windows.MessageBox.Show(
+                    $"A skin named '{name}' already exists. Overwrite it?",
+                    "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (choice != MessageBoxResult.Yes) return;
+            }
+            SkinArchive.Import(dialog.FileName, ApoPaths.GetSkinsRoot(), name);
+            PopulateSkins(SelectedTag(SkinCombo) ?? "");
+            if (SelectedTag(StyleCombo) == OsdStyles.Skin && SelectedTag(SkinCombo) == name)
+                RaiseOsdSettingsChanged();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 
     /// <summary>Rescans the skins folder preserving the current selection. Called by App after
     /// the skin designer saves, so the picker reflects new/renamed skins immediately.</summary>
