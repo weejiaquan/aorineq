@@ -19,6 +19,7 @@ public partial class App : System.Windows.Application
     private EventWaitHandle? _showEvent;
     private KeyboardHook? _hook;
     private ApoWriter? _writer;
+    private EndpointVolume? _endpointVolume;
     private TrayIcon? _tray;
     private OsdWindow? _osd;
     private SkinOsdWindow? _skinOsd;
@@ -70,6 +71,7 @@ public partial class App : System.Windows.Application
         // Settings must be loaded before the elevation bounce below decides whether to relaunch.
         _settingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "settings.json");
+        bool firstRun = !File.Exists(_settingsPath); // brand-new install: mode-choice onboarding below
         var settings = Settings.Load(_settingsPath);
         _settings = settings;
 
@@ -158,11 +160,37 @@ public partial class App : System.Windows.Application
         }) { IsBackground = true };
         waiter.Start();
 
-        // First-run onboarding: without Equalizer APO the app cannot function at all, so a
-        // missing install gets the guided wizard instead of the old fail-fast error box. The
-        // wizard downloads/starts the official installer and verifies; declining exits.
-        if (EapoDetection.Detect() == EapoStatus.NotInstalled)
+        // First-run onboarding: a brand-new install (no settings.json) chooses its volume mode
+        // first — preselected from EAPO detection — and flows into the install wizard only when
+        // APO preamp mode needs it. Existing installs keep their mode and only see the blocking
+        // install wizard when eapo mode requires an EAPO that's missing (system mode never
+        // needs EAPO, so it is never gated).
+        if (firstRun)
         {
+            bool proceed = false;
+            var preselect = EapoDetection.Detect() == EapoStatus.Active ? VolumeModes.Eapo : VolumeModes.System;
+            _startupWizard = new OnboardingWindow(blocking: true, modeChoice: preselect);
+            _startupWizard.ModeSelected += m => _settings = _settings with { VolumeMode = m };
+            _startupWizard.Completed += p => proceed = p;
+            _startupWizard.ShowDialog();
+            _startupWizard = null;
+            if (!proceed)
+            {
+                Shutdown();
+                return;
+            }
+            settings = _settings;
+            // The wizard just set the mode — same transition semantics as a live Settings
+            // switch: system mode parks the APO chain's preamp at 0 dB (when EAPO exists) so
+            // any EQ stays untouched while loudness moves to the Windows volume.
+            if (settings.VolumeMode == VolumeModes.System)
+                TryWriteTransparentPreamp();
+        }
+        else if (_settings.VolumeMode == VolumeModes.Eapo && EapoDetection.Detect() == EapoStatus.NotInstalled)
+        {
+            // eapo mode without Equalizer APO cannot function at all, so a missing install gets
+            // the guided wizard instead of the old fail-fast error box. The wizard downloads and
+            // starts the official installer and verifies; declining exits.
             bool proceed = false;
             _startupWizard = new OnboardingWindow(blocking: true);
             _startupWizard.Completed += p => proceed = p;
@@ -175,22 +203,16 @@ public partial class App : System.Windows.Application
             }
         }
 
-        string configDir;
+        bool systemMode = _settings.VolumeMode == VolumeModes.System;
         try
         {
-            configDir = ApoPaths.GetConfigDir();
-            _writer = new ApoWriter(configDir);
-            // The probe reuses _writer (its EnsureInclude doubles as the config.txt write check),
-            // so startup needs exactly one ApoWriter and one include pass. On the elevated-setup
-            // path the child process added the include line itself, so no retry is needed here.
-            EnsureWritableOrElevate(_writer);
-
             _state = new VolumeState(settings.Percent, settings.Muted);
             _state.StepPercent = settings.StepPercent;
 
-            _writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
-                _tray?.ShowWarning("Volume changes are not reaching Equalizer APO (apo-volume.txt is not writable)."));
-            _writer.StartIncludeGuard();
+            if (systemMode)
+                SetupEndpointVolume();
+            else
+                BuildEapoPipeline();
 
             _osd = new OsdWindow();
             _osd.PercentChangedByUser += OnOsdPercentChanged;
@@ -209,8 +231,9 @@ public partial class App : System.Windows.Application
                 _tray.ShowWarning("Not elevated — volume keys won't work in elevated games.");
 
             // Installed-but-inactive is NOT blocking (running EAPO on a non-default device is
-            // legitimate) — one balloon pointing at the Settings setup guide.
-            if (EapoDetection.Detect() == EapoStatus.InstalledInactive)
+            // legitimate) — one balloon pointing at the Settings setup guide. eapo mode only:
+            // in system mode volume changes are audible regardless of where EAPO is enabled.
+            if (!systemMode && EapoDetection.Detect() == EapoStatus.InstalledInactive)
                 _tray.ShowWarning("Equalizer APO isn't enabled on your current playback device — "
                     + "volume changes won't be audible there. See Settings → Setup guide.");
 
@@ -266,10 +289,15 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        // apply persisted volume to APO immediately at startup. Null-forgiving: same
-        // construction-order guarantee as Render() above — the try block either assigns
-        // both fields or returns before reaching here.
-        _writer!.WriteVolume(_state.CurrentDb);
+        // Apply persisted volume immediately at startup. System mode instead ADOPTS the device's
+        // current state (no startup volume jump); if the device is unreadable the saved percent
+        // stays and the first keypress pushes it via Render. Null-forgiving: same construction-
+        // order guarantee as Render() — the try block either assigns the mode's backend or
+        // returns before reaching here.
+        if (systemMode)
+            AdoptEndpointState();
+        else
+            _writer!.WriteVolume(_state.CurrentDb);
         _tray!.Update(_state.Percent, _state.Muted);
 
         // Fresh-launch flags only (also used by E2E automation): when an instance is already
@@ -570,6 +598,7 @@ public partial class App : System.Windows.Application
                 autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, GetVersionString(), _settings);
             _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
+            _settingsWindow.VolumeModeChanged += OnVolumeModeChanged;
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
             _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
             _settingsWindow.SetupGuideRequested += OpenOnboarding;
@@ -585,16 +614,38 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>Opens the setup wizard in informational mode (Settings "Setup guide…" and the
-    /// --onboarding flag). One window at a time; it closes for real, so no hide/show dance.</summary>
+    /// --onboarding flag), starting on the volume-mode page preselected with the current mode.
+    /// One window at a time; it closes for real, so no hide/show dance.</summary>
     private void OpenOnboarding()
     {
         if (_onboarding is null)
         {
-            _onboarding = new OnboardingWindow(blocking: false);
-            _onboarding.Closed += (_, _) => _onboarding = null;
+            _onboarding = new OnboardingWindow(blocking: false, modeChoice: _settings.VolumeMode);
+            _onboarding.ModeSelected += OnWizardModeSelected;
+            _onboarding.Closed += (_, _) =>
+            {
+                _onboarding = null;
+                OnOnboardingClosed();
+            };
             _onboarding.Show();
         }
         _onboarding.Activate();
+    }
+
+    /// <summary>The setup guide's mode page applied a choice: same live-switch path as the
+    /// Settings radios, plus a radio re-sync in case the Settings window is open.</summary>
+    private void OnWizardModeSelected(string mode)
+    {
+        OnVolumeModeChanged(mode);
+        _ = SyncSettingsWindowStateAsync();
+    }
+
+    /// <summary>The setup guide closed: if eapo mode is still waiting on a writer (it was
+    /// selected while EAPO was missing), retry now that the wizard may have installed it.</summary>
+    private void OnOnboardingClosed()
+    {
+        if (_settings.VolumeMode == VolumeModes.Eapo && _writer is null && TryBuildEapoPipeline())
+            _writer!.WriteVolume(_state.CurrentDb);
     }
 
     /// <summary>Lazily creates (or re-shows) the single skin designer window.</summary>
@@ -637,14 +688,152 @@ public partial class App : System.Windows.Application
             ShowOsd(interactive: true);
     }
 
-    /// <summary>One render path for every change: APO file, OSD, tray, settings.</summary>
-    // Null-forgiving below relies on OnStartup's construction order: _writer/_osd/_tray are all
-    // assigned before the keyboard hook, tray, or second-instance listener can dispatch into Render.
+    private bool SystemModeActive => _settings.VolumeMode == VolumeModes.System;
+
+    /// <summary>One render path for every change: volume backend (APO preamp file or Windows
+    /// endpoint volume, per mode), OSD, tray, settings.</summary>
+    // Null-forgiving below relies on OnStartup's construction order: the active mode's backend
+    // and _osd/_tray are all assigned before the keyboard hook, tray, or second-instance
+    // listener can dispatch into Render; OnVolumeModeChanged builds the endpoint backend
+    // BEFORE flipping the mode, so SystemModeActive implies _endpointVolume exists.
     private void Render(bool interactive)
     {
-        _writer!.WriteVolume(_state.CurrentDb);
+        if (SystemModeActive)
+        {
+            _endpointVolume!.SetPercent(_state.Percent);
+            _endpointVolume.SetMuted(_state.Muted);
+        }
+        else
+        {
+            // Null only when eapo mode was selected while EAPO is still missing — the
+            // onboarding-close hook builds the pipeline once EAPO exists.
+            _writer?.WriteVolume(_state.CurrentDb);
+        }
         ShowOsd(interactive);
         _tray!.Update(_state.Percent, _state.Muted);
+        SaveSettings();
+    }
+
+    /// <summary>Creates the Windows endpoint-volume backend (idempotent) and marshals its
+    /// external-change events onto the dispatcher, same pattern as KeyboardHook.</summary>
+    private void SetupEndpointVolume()
+    {
+        if (_endpointVolume is not null) return;
+        _endpointVolume = new EndpointVolume();
+        _endpointVolume.Changed += (p, m) => Dispatcher.BeginInvoke(() => OnEndpointVolumeChanged(p, m));
+    }
+
+    /// <summary>External endpoint change (another app, the Windows mixer, a device switch):
+    /// sync state/tray/settings SILENTLY — no OSD, matching the native Windows HUD, which only
+    /// appears for direct interaction. Never raised for our own sets (event-context filtered).</summary>
+    private void OnEndpointVolumeChanged(int percent, bool muted)
+    {
+        if (!SystemModeActive) return; // stale event raced a switch back to eapo mode
+        _state.SetPercent(percent);
+        _state.SetMuted(muted);
+        _tray?.Update(_state.Percent, _state.Muted);
+        SaveSettings();
+    }
+
+    /// <summary>Adopts the device's current volume/mute into VolumeState so entering system mode
+    /// never jumps the audible volume. When the device is unreadable the saved state stays and
+    /// the first Render pushes it to the device instead.</summary>
+    private void AdoptEndpointState()
+    {
+        if (_endpointVolume?.TryRead() is { } s)
+        {
+            _state.SetPercent(s.Percent);
+            _state.SetMuted(s.Muted);
+        }
+    }
+
+    /// <summary>Creates the ApoWriter against the EAPO config dir, probes writability (elevating
+    /// via --setup when needed), and starts the include guard. Throws the startup-dialog
+    /// exception family when EAPO is missing or unusable. The probe reuses the writer (its
+    /// EnsureInclude doubles as the config.txt write check), so exactly one ApoWriter and one
+    /// include pass per session; on the elevated-setup path the child added the include line
+    /// itself, so no retry is needed here.</summary>
+    private void BuildEapoPipeline()
+    {
+        var configDir = ApoPaths.GetConfigDir();
+        var writer = new ApoWriter(configDir);
+        try
+        {
+            EnsureWritableOrElevate(writer);
+        }
+        catch
+        {
+            writer.Dispose();
+            throw;
+        }
+        writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
+            _tray?.ShowWarning("Volume changes are not reaching Equalizer APO (apo-volume.txt is not writable)."));
+        writer.StartIncludeGuard();
+        _writer = writer;
+    }
+
+    /// <summary>Non-throwing <see cref="BuildEapoPipeline"/> for live mode switches.</summary>
+    private bool TryBuildEapoPipeline()
+    {
+        try
+        {
+            BuildEapoPipeline();
+            return true;
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException
+            or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Mode-transition write (eapo → system) when no writer exists yet: parks the APO
+    /// chain's preamp at 0 dB once so it is acoustically transparent — EQ/PEQ stay set in stone
+    /// while loudness moves to the Windows volume. Guarded: a missing EAPO or unwritable file
+    /// must never fail the switch.</summary>
+    private static void TryWriteTransparentPreamp()
+    {
+        try
+        {
+            if (EapoDetection.GetInstallPath() is not { } install) return;
+            File.WriteAllText(Path.Combine(install, "config", ApoWriter.VolumeFileName),
+                ApoWriter.FormatPreamp(0) + Environment.NewLine);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>Applies a volume-mode switch live (Settings radio or the setup guide's mode
+    /// page) with the transition semantics: eapo→system parks the preamp at 0 dB and ADOPTS the
+    /// device state (no jump); system→eapo re-applies the saved percent to the preamp, building
+    /// the writer pipeline on the fly when this session started without one.</summary>
+    private void OnVolumeModeChanged(string mode)
+    {
+        if (mode == _settings.VolumeMode) return;
+        if (mode == VolumeModes.System)
+        {
+            SetupEndpointVolume(); // before the mode flips: Render's invariant (see above)
+            _settings = _settings with { VolumeMode = mode };
+            // Park the preamp at 0 dB — through the writer's coalescer when one exists so it
+            // serializes AFTER any in-flight volume write (latest-wins), direct best-effort
+            // write otherwise. The EQ chain itself is never touched.
+            if (_writer is not null) _writer.WriteVolume(0);
+            else TryWriteTransparentPreamp();
+            AdoptEndpointState();
+            _tray?.Update(_state.Percent, _state.Muted);
+        }
+        else
+        {
+            _settings = _settings with { VolumeMode = mode };
+            if (_writer is null && !TryBuildEapoPipeline())
+            {
+                _tray?.ShowWarning("Equalizer APO isn't set up yet — volume keys won't change "
+                    + "loudness until the setup guide completes.");
+                OpenOnboarding();
+            }
+            _writer?.WriteVolume(_state.CurrentDb); // re-apply the saved percent to the preamp
+        }
         SaveSettings();
     }
 
@@ -895,6 +1084,7 @@ public partial class App : System.Windows.Application
         _hook?.Dispose();
         _tray?.Dispose();
         _writer?.Dispose();
+        _endpointVolume?.Dispose();
         // The show event must go away BEFORE the mutex is released: a relaunch probes the named
         // event first, and while it still exists the new process would signal this dying instance
         // and exit — leaving nothing running. With the event gone first, the relaunch falls

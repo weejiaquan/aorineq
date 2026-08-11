@@ -18,6 +18,10 @@ public partial class SettingsWindow : Window
     public event Action<bool>? AutostartChanged;
     public event Action<bool>? RunAsAdminChanged;
 
+    /// <summary>Raised with the chosen mode ("system" or "eapo") when the user switches the
+    /// Volume control radios. App applies the transition live and persists.</summary>
+    public event Action<string>? VolumeModeChanged;
+
     /// <summary>Raised whenever any OSD control changes (once fully initialized). App merges the
     /// snapshot into its persisted Settings — see <see cref="OsdSettings"/>'s remarks.</summary>
     public event Action<OsdSettings>? OsdSettingsChanged;
@@ -49,6 +53,7 @@ public partial class SettingsWindow : Window
         VersionText.Text = "apo-volume " + version;
 
         ApplyOsdSettings(settings);
+        ApplyVolumeMode(settings);
         PopulateSkins(settings.SkinName);
         RefreshEapoStatus();
 
@@ -105,10 +110,19 @@ public partial class SettingsWindow : Window
             : "Currently running without elevation.";
 
         ApplyOsdSettings(settings);
+        ApplyVolumeMode(settings);
         PopulateSkins(settings.SkinName);
         RefreshEapoStatus();
 
         _initializing = false;
+    }
+
+    /// <summary>Syncs the Volume control radios. Safe while _initializing (the guard is only
+    /// checked when raising VolumeModeChanged).</summary>
+    private void ApplyVolumeMode(Settings settings)
+    {
+        SystemModeRadio.IsChecked = settings.VolumeMode == VolumeModes.System;
+        EapoModeRadio.IsChecked = settings.VolumeMode != VolumeModes.System;
     }
 
     /// <summary>Populates every OSD control from the given settings. Safe to call while
@@ -186,6 +200,14 @@ public partial class SettingsWindow : Window
     private void OnRunAsAdminChanged(object sender, RoutedEventArgs e)
     {
         if (!_initializing) RunAsAdminChanged?.Invoke(RunAsAdminBox.IsChecked == true);
+    }
+
+    // Checked-only (never Unchecked): each user switch fires exactly once, for the new radio.
+    private void OnVolumeModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+            VolumeModeChanged?.Invoke(
+                SystemModeRadio.IsChecked == true ? VolumeModes.System : VolumeModes.Eapo);
     }
 
     private void OnStyleChanged(object sender, SelectionChangedEventArgs e)

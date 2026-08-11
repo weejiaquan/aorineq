@@ -93,6 +93,26 @@
 
         <Separator Margin="0,4,0,16" />
 
+        <TextBlock Text="Volume control" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+        <RadioButton x:Name="SystemModeRadio" GroupName="VolumeMode" Margin="0,4,0,8"
+                     Checked="OnVolumeModeChanged">
+            <StackPanel>
+                <TextBlock Text="Replace Windows volume" FontWeight="SemiBold" />
+                <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray"
+                           Text="Volume keys change the normal Windows volume and show your skinned OSD instead of the Windows one. Using Equalizer APO for EQ/PEQ? Your EQ is never touched — set it once, control loudness natively." />
+            </StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="EapoModeRadio" GroupName="VolumeMode" Margin="0,0,0,4"
+                     Checked="OnVolumeModeChanged">
+            <StackPanel>
+                <TextBlock Text="Equalizer APO preamp slider" FontWeight="SemiBold" />
+                <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray"
+                           Text="Volume keys write Equalizer APO's preamp; Windows volume stays parked. Attenuation happens inside the APO chain before your EQ — for setups where the Windows volume path is broken or you want pre-DAC level control. Requires Equalizer APO." />
+            </StackPanel>
+        </RadioButton>
+
+        <Separator Margin="0,12,0,16" />
+
         <TextBlock Text="General" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
         <CheckBox x:Name="AutostartBox" Content="Start with Windows" Margin="0,4"
                   Checked="OnAutostartChanged" Unchecked="OnAutostartChanged" />
