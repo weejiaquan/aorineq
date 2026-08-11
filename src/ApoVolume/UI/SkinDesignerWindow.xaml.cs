@@ -246,6 +246,8 @@ public partial class SkinDesignerWindow : Window
                 FullPathText.ToolTip = sheetPath;
                 FullFramesBox.Text = files.Length.ToString();
             }
+            FillStartBox.Text = ""; // new artwork: range resets to full width in ReloadPreviewData
+            FillEndBox.Text = "";
             _initializing = false;
             ReloadPreviewData();
             StatusText.Text = $"Assembled {files.Length} frames into a sprite sheet.";
@@ -414,6 +416,15 @@ public partial class SkinDesignerWindow : Window
             ReloadPreviewData();
             return;
         }
+        if (ReferenceEquals(sender, FillStartBox) || ReferenceEquals(sender, FillEndBox))
+        {
+            // Canonicalize: the box shows the value actually used (clamped into the image), so
+            // what the user sees is exactly what Save round-trips.
+            _initializing = true;
+            FillStartBox.Text = ParseFillStart().ToString();
+            FillEndBox.Text = ParseFillEnd().ToString();
+            _initializing = false;
+        }
         RefreshPreview();
         Validate();
     }
@@ -470,12 +481,16 @@ public partial class SkinDesignerWindow : Window
 
     /// <summary>Save/Test require both layers decoded, a valid name, and a sane fill range;
     /// Export requires a saved skin.</summary>
+    private const string RangeErrorMessage = "Fill range: the 0% position must be left of the 100% position.";
+
     private void Validate()
     {
         bool imagesOk = _emptyFrames is not null && _fullFrames is not null;
         bool rangeOk = !imagesOk || ParseFillStart() < ParseFillEnd();
         if (imagesOk && !rangeOk)
-            ImageErrorText.Text = "Fill range: the 0% position must be left of the 100% position.";
+            ImageErrorText.Text = RangeErrorMessage;
+        else if (ImageErrorText.Text == RangeErrorMessage)
+            ImageErrorText.Text = ""; // fixed without an image reload: stale error must clear
         string? nameError = SkinWriter.ValidateName(NameBox.Text);
         SaveButton.IsEnabled = imagesOk && rangeOk && nameError is null;
         TestButton.IsEnabled = imagesOk && rangeOk;
