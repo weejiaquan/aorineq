@@ -110,7 +110,7 @@ public static class SkinWriter
         color = t.Color == "#FFFFFFFF" ? null : t.Color,
         fontFamily = t.FontFamily == "Segoe UI" ? null : t.FontFamily,
         fontSize = t.FontSize == 14 ? (double?)null : t.FontSize,
-        bold = t.Bold ? (bool?)null : false,
+        bold = t.Bold ? (bool?)true : null,
         outlineColor = t.OutlineColor,
         outlineWidth = t.OutlineColor is null || t.OutlineWidth == 0 ? (double?)null : t.OutlineWidth,
         shadowColor = t.ShadowColor,

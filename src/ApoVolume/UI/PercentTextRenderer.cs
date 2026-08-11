@@ -21,7 +21,9 @@ internal static class PercentTextRenderer
         var typeface = new Typeface(
             new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
             FontStyles.Normal,
-            style.Bold ? FontWeights.Bold : FontWeights.Normal,
+            // Unbold baseline is SemiBold — the historical look of the percent number before
+            // styling existed, so plain {show,x,y} skins render exactly as they always did.
+            style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
             FontStretches.Normal);
 
         var formatted = new FormattedText(

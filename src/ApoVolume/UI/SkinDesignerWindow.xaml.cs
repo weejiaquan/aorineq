@@ -471,7 +471,13 @@ public partial class SkinDesignerWindow : Window
         bool muted = MuteCheck.IsChecked == true;
         int fillStart = ParseFillStart();
         int fillEnd = ParseFillEnd();
-        FillClip.Rect = new Rect(0, 0, SkinMath.FillWidth(_imgWidth, percent, fillStart, fillEnd) * scale, h);
+        double fillWidth = SkinMath.FillWidth(_imgWidth, percent, fillStart, fillEnd) * scale;
+        FillClip.Rect = new Rect(0, 0, fillWidth, h);
+        // Empty shows only the unfilled remainder so it doesn't double under the full layer
+        // (matches SkinOsdWindow). Muted: full hidden, empty covers the whole canvas.
+        EmptyClip.Rect = muted
+            ? new Rect(0, 0, w, h)
+            : new Rect(fillWidth, 0, Math.Max(0, w - fillWidth), h);
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
         EmptyImage.Opacity = muted ? 0.6 : 1.0;
 
@@ -520,7 +526,9 @@ public partial class SkinDesignerWindow : Window
             int.TryParse(NumberXBox.Text, out var x) ? x : 0,
             int.TryParse(NumberYBox.Text, out var y) ? y : 0,
             Color: _textColor,
-            FontFamily: FontCombo.SelectedItem as string ?? "Segoe UI",
+            // Editable combo: use the typed/selected text so an uninstalled authored font is
+            // preserved, not silently replaced with the fallback.
+            FontFamily: string.IsNullOrWhiteSpace(FontCombo.Text) ? "Segoe UI" : FontCombo.Text.Trim(),
             FontSize: double.TryParse(FontSizeBox.Text, out var fs) ? Math.Clamp(fs, 4, 200) : 14,
             Bold: BoldCheck.IsChecked == true,
             OutlineColor: OutlineCheck.IsChecked == true ? _outlineColor : null,
@@ -557,8 +565,10 @@ public partial class SkinDesignerWindow : Window
                 return;
             }
         }
-        // Unknown/absent family: show the name without a selection so it round-trips unchanged.
+        // Unknown/uninstalled family: keep the authored name as editable text so Save preserves
+        // it verbatim instead of rewriting it to the fallback.
         FontCombo.SelectedIndex = -1;
+        FontCombo.Text = family;
     }
 
     private void UpdateSwatches()
