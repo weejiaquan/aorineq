@@ -52,6 +52,21 @@ public class ApoWriterTests : IDisposable
     }
 
     [Fact]
+    public void Flush_is_a_synchronous_barrier_for_pending_writes()
+    {
+        using var w = new ApoWriter(_dir);
+        // Burst so a trailing write is still pending inside the coalescer window, then Flush:
+        // the LAST value must be on disk the moment Flush returns, with no polling.
+        for (int i = 0; i < 20; i++)
+            w.WriteVolume(-i);
+        w.WriteVolume(-120.0);
+        w.Flush();
+        var content = File.ReadAllText(w.VolumeFilePath);
+        _out.WriteLine("content immediately after Flush: " + content.TrimEnd());
+        Assert.Equal("Preamp: -120.0 dB" + Environment.NewLine, content);
+    }
+
+    [Fact]
     public void Spammed_writes_coalesce_and_final_value_wins()
     {
         using var w = new ApoWriter(_dir);

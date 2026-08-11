@@ -180,6 +180,15 @@ public partial class App : System.Windows.Application
                 return;
             }
             settings = _settings;
+            // Persist the choice NOW: nothing else writes settings.json until the first volume
+            // or settings change, and without the file this wizard would reappear every launch.
+            try
+            {
+                settings.Save(_settingsPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
             // The wizard just set the mode — same transition semantics as a live Settings
             // switch: system mode parks the APO chain's preamp at 0 dB (when EAPO exists) so
             // any EQ stays untouched while loudness moves to the Windows volume.
@@ -815,6 +824,10 @@ public partial class App : System.Windows.Application
         {
             SetupEndpointVolume(); // before the mode flips: Render's invariant (see above)
             _settings = _settings with { VolumeMode = mode };
+            // Mute duty hands over FIRST: parking the preamp at 0 dB would audibly unmute an
+            // eapo-muted session (preamp -120 was the only thing keeping it silent), so the
+            // endpoint takes the mute before the chain goes transparent.
+            if (_state.Muted) _endpointVolume!.SetMuted(true);
             // Park the preamp at 0 dB — through the writer's coalescer when one exists so it
             // serializes AFTER any in-flight volume write (latest-wins), direct best-effort
             // write otherwise. The EQ chain itself is never touched.
@@ -833,6 +846,14 @@ public partial class App : System.Windows.Application
                 OpenOnboarding();
             }
             _writer?.WriteVolume(_state.CurrentDb); // re-apply the saved percent to the preamp
+            // Reverse mute handover: a muted endpoint would keep eapo mode silent no matter what
+            // the preamp says. Flush first — the endpoint may only unmute once the preamp
+            // (-120 dB when muted) is actually on disk, or a muted switch would blip audio.
+            if (_state.Muted && _endpointVolume?.TryRead() is { Muted: true })
+            {
+                _writer?.Flush();
+                _endpointVolume.SetMuted(false);
+            }
         }
         SaveSettings();
     }

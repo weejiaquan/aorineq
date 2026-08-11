@@ -62,6 +62,11 @@ public sealed class ApoWriter : IDisposable
         }
     }
 
+    /// <summary>Synchronous barrier: returns once any pending <see cref="WriteVolume"/> has hit
+    /// the file. Lets mode transitions sequence the preamp write against other side effects
+    /// (e.g. unmuting the Windows endpoint only after the mute preamp is on disk).</summary>
+    public void Flush() => _coalescer.Flush();
+
     public bool EnsureInclude()
     {
         lock (_includeLock)
