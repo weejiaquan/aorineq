@@ -25,7 +25,10 @@ public static class SkinWriter
             return "Skin name contains characters not allowed in folder names.";
         if (trimmed.EndsWith('.'))
             return "Skin name cannot end with a dot.";
-        if (Array.Exists(ReservedNames, r => r.Equals(trimmed, StringComparison.OrdinalIgnoreCase)))
+        // Windows reserves device names both bare and with any extension (NUL, NUL.txt, COM1.png),
+        // so the check runs against the stem before the first dot.
+        var stem = trimmed.Split('.')[0];
+        if (Array.Exists(ReservedNames, r => r.Equals(stem, StringComparison.OrdinalIgnoreCase)))
             return $"'{trimmed}' is a reserved Windows device name.";
         return null;
     }

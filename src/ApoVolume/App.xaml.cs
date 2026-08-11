@@ -247,8 +247,10 @@ public partial class App : System.Windows.Application
         _writer!.WriteVolume(_state.CurrentDb);
         _tray!.Update(_state.Percent, _state.Muted);
 
+        // Fresh-launch flag only (also used by E2E automation): when an instance is already
+        // running, a second launch signals the OSD as usual — this is not an IPC command.
         if (e.Args.Contains("--settings"))
-            OpenSettings(); // deep-link straight into Settings (also used by E2E automation)
+            OpenSettings();
     }
 
     /// <summary>
@@ -263,7 +265,7 @@ public partial class App : System.Windows.Application
         if (!_settings.RunAsAdmin || Elevation.IsElevated || args.Contains("--no-elevate"))
             return false;
 
-        if (TryRelaunchElevatedAndShutdown())
+        if (TryRelaunchElevatedAndShutdown(forwardSettingsFlag: args.Contains("--settings")))
             return true;
 
         _uacDeclined = true;
@@ -271,8 +273,10 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>Relaunches this executable elevated via UAC and shuts this instance down.
-    /// Returns false, having taken no action, if UAC was declined.</summary>
-    private bool TryRelaunchElevatedAndShutdown()
+    /// Returns false, having taken no action, if UAC was declined. Only the --settings flag is
+    /// forwarded (whitelisted, so no argument-quoting concerns) — the elevated child otherwise
+    /// starts normally.</summary>
+    private bool TryRelaunchElevatedAndShutdown(bool forwardSettingsFlag = false)
     {
         System.Diagnostics.Process? proc;
         try
@@ -281,6 +285,7 @@ public partial class App : System.Windows.Application
             {
                 UseShellExecute = true,
                 Verb = "runas",
+                Arguments = forwardSettingsFlag ? "--settings" : "",
             });
         }
         catch (System.ComponentModel.Win32Exception)

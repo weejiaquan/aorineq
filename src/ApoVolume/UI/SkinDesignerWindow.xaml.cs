@@ -158,8 +158,21 @@ public partial class SkinDesignerWindow : Window
         ImageErrorText.Text = "";
         if (emptySize is not null && fullSize is not null)
         {
-            _emptyBitmap = SkinOsdWindow.LoadBitmap(_emptySource!);
-            _fullBitmap = SkinOsdWindow.LoadBitmap(_fullSource!);
+            // A truncated/corrupt PNG can pass the header check yet throw from WPF's decoder —
+            // same containment policy as App.ApplyOsdConfig: surface, don't crash the designer.
+            try
+            {
+                _emptyBitmap = SkinOsdWindow.LoadBitmap(_emptySource!);
+                _fullBitmap = SkinOsdWindow.LoadBitmap(_fullSource!);
+            }
+            catch (Exception ex) when (ex is NotSupportedException or IOException
+                or FileFormatException or ArgumentException) // FileFormatException: System.IO (WindowsBase)
+            {
+                _emptyBitmap = null;
+                _fullBitmap = null;
+                ImageErrorText.Text = "Image failed to decode: " + ex.Message;
+                return;
+            }
             _imgWidth = emptySize.Value.Width;
             _imgHeight = emptySize.Value.Height;
         }
