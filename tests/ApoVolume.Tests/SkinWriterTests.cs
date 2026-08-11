@@ -30,7 +30,7 @@ public class SkinWriterTests : IDisposable
     [Fact]
     public void Save_roundtrips_through_SkinLoader()
     {
-        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinText(true, 10, 5), 1.5);
+        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(new SkinText(true, 10, 5), 1.5));
         var info = SkinLoader.Load(folder);
         _out.WriteLine($"loaded: valid={info.IsValid} err={info.Error} {info.Width}x{info.Height} scale={info.Scale} text={info.Text}");
         Assert.True(info.IsValid);
@@ -43,10 +43,10 @@ public class SkinWriterTests : IDisposable
     [Fact]
     public void Save_with_defaults_omits_and_removes_stale_skin_json()
     {
-        SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinText(true, 10, 5), 1.5);
+        SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(new SkinText(true, 10, 5), 1.5));
         Assert.True(File.Exists(Path.Combine(_root, "my-skin", "skin.json")));
 
-        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, text: null, scale: 1.0);
+        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
         _out.WriteLine("second save with defaults; skin.json present: " + File.Exists(Path.Combine(folder, "skin.json")));
         Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
         Assert.True(SkinLoader.Load(folder).IsValid);
@@ -55,12 +55,12 @@ public class SkinWriterTests : IDisposable
     [Fact]
     public void Save_in_place_with_destination_paths_as_source_keeps_images()
     {
-        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, null, 1.0);
+        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
         var destEmpty = Path.Combine(folder, "empty.png");
         var destFull = Path.Combine(folder, "full.png");
 
         // Editing an existing skin without replacing its images: sources ARE the destinations.
-        var again = SkinWriter.Save(_root, "my-skin", destEmpty, destFull, new SkinText(true, 1, 2), 2.0);
+        var again = SkinWriter.Save(_root, "my-skin", destEmpty, destFull, new SkinConfig(new SkinText(true, 1, 2), 2.0));
         var info = SkinLoader.Load(again);
         _out.WriteLine($"in-place re-save: valid={info.IsValid} scale={info.Scale}");
         Assert.True(info.IsValid);
@@ -70,13 +70,13 @@ public class SkinWriterTests : IDisposable
     [Fact]
     public void Save_overwrites_existing_folder_images()
     {
-        SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, null, 1.0);
+        SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
         var biggerEmpty = Path.Combine(_dir, "src", "big-empty.png");
         var biggerFull = Path.Combine(_dir, "src", "big-full.png");
         TestPngs.Write(biggerEmpty, 500, 200);
         TestPngs.Write(biggerFull, 500, 200);
 
-        var folder = SkinWriter.Save(_root, "my-skin", biggerEmpty, biggerFull, null, 1.0);
+        var folder = SkinWriter.Save(_root, "my-skin", biggerEmpty, biggerFull, new SkinConfig(null, 1.0));
         var info = SkinLoader.Load(folder);
         _out.WriteLine($"after overwrite: {info.Width}x{info.Height}");
         Assert.Equal(500, info.Width);
@@ -106,14 +106,61 @@ public class SkinWriterTests : IDisposable
     public void Save_with_invalid_name_throws()
     {
         var ex = Assert.Throws<ArgumentException>(
-            () => SkinWriter.Save(_root, "bad/name", _emptySrc, _fullSrc, null, 1.0));
+            () => SkinWriter.Save(_root, "bad/name", _emptySrc, _fullSrc, new SkinConfig(null, 1.0)));
         _out.WriteLine("rejected: " + ex.Message);
+    }
+
+    [Fact]
+    public void Save_gif_source_lands_as_gif_and_removes_stale_png_variant()
+    {
+        // First save with PNG sources.
+        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
+        Assert.True(File.Exists(Path.Combine(folder, "full.png")));
+
+        // Replace the full layer with a GIF: full.gif must appear AND full.png must go away,
+        // or the loader's png-over-gif precedence would keep showing the old artwork.
+        var gifSrc = Path.Combine(_dir, "src", "anim.gif");
+        TestPngs.WriteGif(gifSrc, 300, 100);
+        SkinWriter.Save(_root, "my-skin", _emptySrc, gifSrc, new SkinConfig(null, 1.0));
+
+        _out.WriteLine($"full.gif={File.Exists(Path.Combine(folder, "full.gif"))} full.png={File.Exists(Path.Combine(folder, "full.png"))}");
+        Assert.True(File.Exists(Path.Combine(folder, "full.gif")));
+        Assert.False(File.Exists(Path.Combine(folder, "full.png")));
+
+        var info = SkinLoader.Load(folder);
+        Assert.True(info.IsValid);
+        Assert.True(info.FullIsGif);
+    }
+
+    [Fact]
+    public void Save_writes_animation_fields_and_roundtrips()
+    {
+        var sheetFull = Path.Combine(_dir, "src", "sheet-full.png");
+        TestPngs.Write(sheetFull, 300, 800); // 8 frames of 100
+        var folder = SkinWriter.Save(_root, "anim-skin", _emptySrc, sheetFull,
+            new SkinConfig(null, 1.0, Fps: 12, EmptyFrames: 1, FullFrames: 8));
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"roundtrip: valid={info.IsValid} fps={info.Fps} ff={info.FullFrames} logical={info.Width}x{info.Height} err={info.Error}");
+        Assert.True(info.IsValid);
+        Assert.Equal(12.0, info.Fps);
+        Assert.Equal(8, info.FullFrames);
+        Assert.Equal(100, info.Height); // logical
+    }
+
+    [Fact]
+    public void Save_with_all_defaults_omits_skin_json_even_with_animation_defaults()
+    {
+        var folder = SkinWriter.Save(_root, "plain", _emptySrc, _fullSrc,
+            new SkinConfig(null, 1.0, Fps: 10, EmptyFrames: 1, FullFrames: 1));
+        _out.WriteLine("skin.json present: " + File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
     }
 
     [Fact]
     public void Save_name_is_trimmed()
     {
-        var folder = SkinWriter.Save(_root, "  padded  ", _emptySrc, _fullSrc, null, 1.0);
+        var folder = SkinWriter.Save(_root, "  padded  ", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
         _out.WriteLine("folder: " + folder);
         Assert.Equal("padded", new DirectoryInfo(folder).Name);
     }

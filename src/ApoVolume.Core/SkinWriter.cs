@@ -2,6 +2,11 @@ using System.Text.Json;
 
 namespace ApoVolume.Core;
 
+/// <summary>Everything a skin save carries besides the two images. Defaults mirror
+/// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers.</summary>
+public sealed record SkinConfig(SkinText? Text, double Scale,
+    double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1);
+
 /// <summary>Writes a skin folder (empty.png + full.png + optional skin.json) for the skin
 /// designer. Image content validation stays with the caller (PngHeader before save,
 /// SkinLoader as the source of truth on read); this class owns name validation and file layout.</summary>
@@ -33,13 +38,14 @@ public static class SkinWriter
         return null;
     }
 
-    /// <summary>Creates or overwrites <c>skinsRoot\name</c>: copies the two source images to
-    /// empty.png/full.png (a source that already IS the destination is left in place, which is
-    /// how editing an existing skin without replacing its images works) and writes skin.json
-    /// only when non-default — a stale skin.json from an earlier save is deleted otherwise.
-    /// Returns the folder written.</summary>
+    /// <summary>Creates or overwrites <c>skinsRoot\name</c>: copies each source image to
+    /// empty/full keeping the SOURCE's extension (.png or .gif) and deletes the stale
+    /// other-extension variant — the loader prefers .png over .gif, so a leftover file must
+    /// never resurrect an old skin. A source that already IS the destination is left in place
+    /// (editing an existing skin without replacing its images). skin.json is written only when
+    /// any config field is non-default; a stale one is deleted otherwise. Returns the folder.</summary>
     public static string Save(string skinsRoot, string name, string emptySourcePath, string fullSourcePath,
-        SkinText? text, double scale)
+        SkinConfig config)
     {
         var nameError = ValidateName(name);
         if (nameError is not null)
@@ -49,18 +55,22 @@ public static class SkinWriter
         try
         {
             Directory.CreateDirectory(folder);
-            CopyUnlessSame(emptySourcePath, Path.Combine(folder, "empty.png"));
-            CopyUnlessSame(fullSourcePath, Path.Combine(folder, "full.png"));
+            CopyLayer(emptySourcePath, folder, "empty");
+            CopyLayer(fullSourcePath, folder, "full");
 
             var jsonPath = Path.Combine(folder, "skin.json");
-            bool showText = text is { Show: true };
-            if (showText || scale != 1.0)
+            bool showText = config.Text is { Show: true };
+            if (showText || config.Scale != 1.0 || config.Fps != 10.0
+                || config.EmptyFrames != 1 || config.FullFrames != 1)
             {
                 // Anonymous shape matches SkinLoader's SkinJson (case-insensitive on read).
                 var json = JsonSerializer.Serialize(new
                 {
-                    percentText = showText ? new { show = true, x = text!.X, y = text.Y } : null,
-                    scale,
+                    percentText = showText ? new { show = true, x = config.Text!.X, y = config.Text.Y } : null,
+                    scale = config.Scale,
+                    fps = config.Fps,
+                    emptyFrames = config.EmptyFrames,
+                    fullFrames = config.FullFrames,
                 });
                 File.WriteAllText(jsonPath, json);
             }
@@ -76,10 +86,15 @@ public static class SkinWriter
         }
     }
 
-    private static void CopyUnlessSame(string source, string destination)
+    private static void CopyLayer(string source, string folder, string layer)
     {
-        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
-            return;
-        File.Copy(source, destination, overwrite: true);
+        bool isGif = Path.GetExtension(source).Equals(".gif", StringComparison.OrdinalIgnoreCase);
+        var destination = Path.Combine(folder, layer + (isGif ? ".gif" : ".png"));
+        var staleVariant = Path.Combine(folder, layer + (isGif ? ".png" : ".gif"));
+
+        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
+            File.Copy(source, destination, overwrite: true);
+        if (File.Exists(staleVariant))
+            File.Delete(staleVariant);
     }
 }

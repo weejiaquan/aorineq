@@ -1,0 +1,86 @@
+using System.IO.Compression;
+
+namespace ApoVolume.Core;
+
+/// <summary>Shares skins as zip files. Import extracts by WHITELISTED FILE NAME only — archive
+/// entry paths are never used to build an output path, so hostile entries ("../evil", absolute
+/// paths) cannot escape the destination folder by construction.</summary>
+public static class SkinArchive
+{
+    private static readonly string[] AllowedFiles =
+        { "empty.png", "empty.gif", "full.png", "full.gif", "skin.json" };
+
+    /// <summary>Suggested skin name for a zip: its filename without extension.</summary>
+    public static string DefaultName(string zipPath) => Path.GetFileNameWithoutExtension(zipPath);
+
+    /// <summary>Zips a valid skin folder's files (whitelist, archive root, no folder prefix).
+    /// Refuses to export a skin the loader rejects — nobody should share a broken skin.</summary>
+    public static void Export(string skinFolder, string zipPath)
+    {
+        var info = SkinLoader.Load(skinFolder);
+        if (!info.IsValid)
+            throw new InvalidOperationException($"Cannot export an invalid skin: {info.Error}");
+
+        try
+        {
+            File.Delete(zipPath); // ZipArchiveMode.Create requires a fresh file
+            using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+            foreach (var fileName in AllowedFiles)
+            {
+                var source = Path.Combine(skinFolder, fileName);
+                if (File.Exists(source))
+                    archive.CreateEntryFromFile(source, fileName);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"Failed to export skin: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>Extracts a skin zip into <c>skinsRoot\name</c> and validates the result via
+    /// <see cref="SkinLoader"/>. Accepts the known files at the archive root or nested exactly one
+    /// folder deep (people re-zip folders); everything else in the archive is ignored. On an
+    /// invalid result the created folder is deleted and the loader's reason is thrown. Returns the
+    /// folder written.</summary>
+    public static string Import(string zipPath, string skinsRoot, string name)
+    {
+        var nameError = SkinWriter.ValidateName(name);
+        if (nameError is not null)
+            throw new ArgumentException(nameError, nameof(name));
+
+        var folder = Path.Combine(skinsRoot, name.Trim());
+        try
+        {
+            using (var archive = ZipFile.OpenRead(zipPath))
+            {
+                Directory.CreateDirectory(folder);
+                foreach (var entry in archive.Entries)
+                {
+                    // Normalize separators; skip directory entries.
+                    var parts = entry.FullName.Replace('\\', '/')
+                        .Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length is 0 or > 2)
+                        continue; // deeper nesting is not a skin layout
+                    var fileName = parts[^1];
+                    if (!AllowedFiles.Contains(fileName, StringComparer.OrdinalIgnoreCase))
+                        continue;
+                    // Output path is built from OUR whitelist name, never the entry's path.
+                    entry.ExtractToFile(Path.Combine(folder, fileName.ToLowerInvariant()), overwrite: true);
+                }
+            }
+
+            var info = SkinLoader.Load(folder);
+            if (!info.IsValid)
+            {
+                Directory.Delete(folder, recursive: true);
+                throw new InvalidOperationException($"The zip is not a valid skin: {info.Error}");
+            }
+            return folder;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new InvalidOperationException($"Failed to import skin: {ex.Message}", ex);
+        }
+    }
+}

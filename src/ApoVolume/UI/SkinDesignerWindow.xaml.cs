@@ -339,12 +339,13 @@ public partial class SkinDesignerWindow : Window
             var root = Path.Combine(Path.GetTempPath(), "apo-volume-skin-preview");
             var name = Guid.NewGuid().ToString("N");
             var folder = SkinWriter.Save(root, name, _emptySource, _fullSource,
-                ShowNumberCheck.IsChecked == true
-                    ? new SkinText(true,
-                        int.TryParse(NumberXBox.Text, out var x) ? x : 0,
-                        int.TryParse(NumberYBox.Text, out var y) ? y : 0)
-                    : null,
-                ScaleSlider.Value);
+                new SkinConfig(
+                    ShowNumberCheck.IsChecked == true
+                        ? new SkinText(true,
+                            int.TryParse(NumberXBox.Text, out var x) ? x : 0,
+                            int.TryParse(NumberYBox.Text, out var y) ? y : 0)
+                        : null,
+                    ScaleSlider.Value));
             var info = SkinLoader.Load(folder);
             if (!info.IsValid)
             {

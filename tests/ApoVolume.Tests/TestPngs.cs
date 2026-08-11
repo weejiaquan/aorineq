@@ -38,4 +38,20 @@ internal static class TestPngs
         Chunk("IDAT", new byte[] { 0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 });
         Chunk("IEND", Array.Empty<byte>());
     }
+
+    /// <summary>Writes a minimal GIF89a: header + logical screen descriptor + trailer. Enough
+    /// for GifHeader (which only reads the header) — carries no decodable image data.</summary>
+    public static void WriteGif(string path, int width, int height)
+    {
+        using var fs = File.Create(path);
+        var bytes = new List<byte>();
+        bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("GIF89a"));
+        bytes.Add((byte)(width & 0xFF)); bytes.Add((byte)(width >> 8));    // little-endian
+        bytes.Add((byte)(height & 0xFF)); bytes.Add((byte)(height >> 8));
+        bytes.Add(0x00); // packed: no global color table
+        bytes.Add(0x00); // background color index
+        bytes.Add(0x00); // pixel aspect ratio
+        bytes.Add(0x3B); // trailer
+        fs.Write(bytes.ToArray(), 0, bytes.Count);
+    }
 }
