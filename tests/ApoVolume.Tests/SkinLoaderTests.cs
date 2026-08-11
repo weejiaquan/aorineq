@@ -322,6 +322,48 @@ public class SkinLoaderTests : IDisposable
     }
 
     [Fact]
+    public void Load_fill_range_parses_and_defaults_to_full_width()
+    {
+        var folder = NewSkinFolder("fill-range");
+        WritePng(Path.Combine(folder, "empty.png"), 800, 100);
+        WritePng(Path.Combine(folder, "full.png"), 800, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fillStartX\": 120, \"fillEndX\": 680 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"range: {info.FillStartX}..{info.FillEndX} err={info.Error}");
+        Assert.True(info.IsValid);
+        Assert.Equal(120, info.FillStartX);
+        Assert.Equal(680, info.FillEndX);
+
+        var plain = NewSkinFolder("no-range");
+        WritePng(Path.Combine(plain, "empty.png"), 300, 100);
+        WritePng(Path.Combine(plain, "full.png"), 300, 100);
+        var plainInfo = SkinLoader.Load(plain);
+        Assert.Equal(0, plainInfo.FillStartX);
+        Assert.Equal(300, plainInfo.FillEndX);
+    }
+
+    [Fact]
+    public void Load_fill_range_clamps_into_image_and_rejects_inverted()
+    {
+        var folder = NewSkinFolder("range-clamp");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fillStartX\": -50, \"fillEndX\": 9999 }");
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"clamped: {info.FillStartX}..{info.FillEndX}");
+        Assert.True(info.IsValid);
+        Assert.Equal(0, info.FillStartX);
+        Assert.Equal(300, info.FillEndX);
+
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fillStartX\": 200, \"fillEndX\": 100 }");
+        var inverted = SkinLoader.Load(folder);
+        _out.WriteLine($"inverted error: {inverted.Error}");
+        Assert.False(inverted.IsValid);
+        Assert.Contains("fillStartX", inverted.Error);
+    }
+
+    [Fact]
     public void Load_missing_folder_sets_error_and_never_throws()
     {
         var folder = Path.Combine(_dir, "does-not-exist");

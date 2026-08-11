@@ -37,6 +37,34 @@ public class SkinMathTests
     }
 
     [Theory]
+    [InlineData(0, 120, 680, 120)]     // 0% sits at the bar's left edge
+    [InlineData(50, 120, 680, 400)]    // midpoint of the range
+    [InlineData(100, 120, 680, 680)]   // 100% sits at the bar's right edge
+    [InlineData(-5, 120, 680, 120)]    // percent clamps low
+    [InlineData(150, 120, 680, 680)]   // percent clamps high
+    [InlineData(25, 0, 300, 75)]       // full-width range behaves like the classic overload
+    public void FillWidth_with_range_maps_percent_onto_the_bar(int percent, int start, int end, int expected)
+    {
+        var result = SkinMath.FillWidth(800, percent, start, end);
+        _out.WriteLine($"FillWidth(800, {percent}, {start}, {end}) = {result} (expected {expected})");
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData(120.0, 120, 680, 0)]    // click at the bar's left edge -> 0
+    [InlineData(400.0, 120, 680, 50)]   // middle of the bar -> 50
+    [InlineData(680.0, 120, 680, 100)]  // right edge -> 100
+    [InlineData(10.0, 120, 680, 0)]     // decorative margin left of the bar clamps to 0
+    [InlineData(790.0, 120, 680, 100)]  // margin right of the bar clamps to 100
+    [InlineData(100.0, 100, 100, 0)]    // degenerate range never divides by zero
+    public void PercentFromX_with_range_maps_bar_pixels_to_percent(double x, int start, int end, int expected)
+    {
+        var result = SkinMath.PercentFromX(x, start, end);
+        _out.WriteLine($"PercentFromX({x}, {start}, {end}) = {result} (expected {expected})");
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
     [InlineData(10, 10, false)] // exactly at default threshold -> not opaque
     [InlineData(11, 10, true)]  // one above default threshold -> opaque
     [InlineData(0, 10, false)]

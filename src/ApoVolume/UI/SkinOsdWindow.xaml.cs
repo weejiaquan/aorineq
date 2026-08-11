@@ -173,7 +173,8 @@ public partial class SkinOsdWindow : Window
         if (_info.Text is { Show: true })
             PercentTextBlock.Text = percent.ToString();
 
-        double fillWidth = SkinMath.FillWidth(_info.Width, percent) * _info.Scale; // already clamped >= 0
+        double fillWidth = SkinMath.FillWidth(_info.Width, percent, _info.FillStartX, _info.FillEndX)
+            * _info.Scale; // already clamped >= 0
         FillClip.Rect = new Rect(0, 0, fillWidth, Height);
 
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
@@ -224,7 +225,7 @@ public partial class SkinOsdWindow : Window
 
     private void RaisePercentFromWindowPoint(System.Windows.Point windowPoint)
     {
-        int percent = SkinMath.PercentFromX(windowPoint.X / _info.Scale, _info.Width);
+        int percent = SkinMath.PercentFromX(windowPoint.X / _info.Scale, _info.FillStartX, _info.FillEndX);
         PercentChangedByUser?.Invoke(percent);
     }
 
