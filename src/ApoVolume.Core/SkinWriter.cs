@@ -89,7 +89,8 @@ public static class SkinWriter
                     fps = config.Fps,
                     emptyFrames = config.EmptyFrames,
                     fullFrames = config.FullFrames,
-                    mutedFrames = config.MutedFrames,
+                    // Both omitted at their defaults so a pre-1.8 skin resaves byte-identically.
+                    mutedFrames = config.MutedFrames == 1 ? (int?)null : config.MutedFrames,
                     mutedDim = config.MutedDim == 0.6 ? (double?)null : config.MutedDim,
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,

@@ -189,11 +189,6 @@ public partial class App : System.Windows.Application
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
             }
-            // The wizard just set the mode — same transition semantics as a live Settings
-            // switch: system mode parks the APO chain's preamp at 0 dB (when EAPO exists) so
-            // any EQ stays untouched while loudness moves to the Windows volume.
-            if (settings.VolumeMode == VolumeModes.System)
-                TryWriteTransparentPreamp();
         }
         else if (_settings.VolumeMode == VolumeModes.Eapo && EapoDetection.Detect() == EapoStatus.NotInstalled)
         {
@@ -219,9 +214,17 @@ public partial class App : System.Windows.Application
             _state.StepPercent = settings.StepPercent;
 
             if (systemMode)
+            {
                 SetupEndpointVolume();
+                // Idempotent repark: system mode's contract is a transparent (0 dB) APO chain.
+                // This covers the first-run wizard's transition AND repairs a crash that landed
+                // settings.json as "system" before the transition's preamp write reached disk.
+                TryWriteTransparentPreamp();
+            }
             else
+            {
                 BuildEapoPipeline();
+            }
 
             _osd = new OsdWindow();
             _osd.PercentChangedByUser += OnOsdPercentChanged;
@@ -796,6 +799,20 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>Whether apo-volume.txt currently reads exactly the preamp line for
+    /// <paramref name="db"/> — the proof gate for handing mute duty back from the endpoint.</summary>
+    private bool PreampFileReads(double db)
+    {
+        try
+        {
+            return File.ReadAllText(_writer!.VolumeFilePath).TrimEnd() == ApoWriter.FormatPreamp(db);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Mode-transition write (eapo → system) when no writer exists yet: parks the APO
     /// chain's preamp at 0 dB once so it is acoustically transparent — EQ/PEQ stay set in stone
     /// while loudness moves to the Windows volume. Guarded: a missing EAPO or unwritable file
@@ -829,10 +846,20 @@ public partial class App : System.Windows.Application
             // endpoint takes the mute before the chain goes transparent.
             if (_state.Muted) _endpointVolume!.SetMuted(true);
             // Park the preamp at 0 dB — through the writer's coalescer when one exists so it
-            // serializes AFTER any in-flight volume write (latest-wins), direct best-effort
-            // write otherwise. The EQ chain itself is never touched.
-            if (_writer is not null) _writer.WriteVolume(0);
-            else TryWriteTransparentPreamp();
+            // serializes AFTER any in-flight volume write (latest-wins), then Flush as a
+            // barrier: the park must be on disk before the coalesced settings save can record
+            // "system" (a crash between the two is additionally repaired by the idempotent
+            // repark at every system-mode startup). Direct best-effort write when no writer.
+            // The EQ chain itself is never touched.
+            if (_writer is not null)
+            {
+                _writer.WriteVolume(0);
+                _writer.Flush();
+            }
+            else
+            {
+                TryWriteTransparentPreamp();
+            }
             AdoptEndpointState();
             _tray?.Update(_state.Percent, _state.Muted);
         }
@@ -847,12 +874,14 @@ public partial class App : System.Windows.Application
             }
             _writer?.WriteVolume(_state.CurrentDb); // re-apply the saved percent to the preamp
             // Reverse mute handover: a muted endpoint would keep eapo mode silent no matter what
-            // the preamp says. Flush first — the endpoint may only unmute once the preamp
-            // (-120 dB when muted) is actually on disk, or a muted switch would blip audio.
-            if (_state.Muted && _endpointVolume?.TryRead() is { Muted: true })
+            // the preamp says. The endpoint may only unmute once the -120 dB mute preamp is
+            // PROVEN on disk (Flush is just a run barrier, not a success proof) — on a missing
+            // writer or a failed write it stays muted: silence, never an audible leak.
+            if (_state.Muted && _writer is not null && _endpointVolume?.TryRead() is { Muted: true })
             {
-                _writer?.Flush();
-                _endpointVolume.SetMuted(false);
+                _writer.Flush();
+                if (PreampFileReads(_state.CurrentDb))
+                    _endpointVolume.SetMuted(false);
             }
         }
         SaveSettings();
