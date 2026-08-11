@@ -777,6 +777,8 @@ public partial class App : System.Windows.Application
             long stamp = Math.Max(
                 File.GetLastWriteTimeUtc(info.EmptyPath).Ticks,
                 File.GetLastWriteTimeUtc(info.FullPath).Ticks);
+            if (info.MutedPath is not null)
+                stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(info.MutedPath).Ticks);
             string jsonPath = Path.Combine(info.Folder, "skin.json");
             if (File.Exists(jsonPath))
                 stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(jsonPath).Ticks);
