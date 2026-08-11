@@ -112,7 +112,7 @@ public partial class SkinOsdWindow : Window
     /// BitmapCreateOptions.IgnoreImageCache: WPF's process-wide bitmap cache otherwise keys on the
     /// URI alone, so reloading a skin whose PNGs were edited in place (same path, new bytes) would
     /// silently serve the stale cached image instead of the updated one.</summary>
-    private static BitmapImage LoadBitmap(string path)
+    internal static BitmapImage LoadBitmap(string path)
     {
         var bmp = new BitmapImage();
         bmp.BeginInit();
