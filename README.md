@@ -109,6 +109,17 @@ Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
   An invalid (unparseable) `skin.json` fails the whole skin, which then falls back per
   [Fallback behavior](#fallback-behavior) below.
 
+### Skin designer
+
+Settings → OSD → **Skin designer…** opens a studio for building skins without hand-editing
+files: pick the two PNGs, scrub a fill slider to preview any volume level, drag the percent
+number where you want it (or hide it), set the scale, and save under a name — the skin appears
+in the picker immediately, and if you edited the skin currently on screen the live OSD reloads
+on save. **Test on desktop** shows the draft as a real OSD window at your configured position:
+clicking, dragging and scrolling it behave exactly like the real thing and drive the designer's
+fill slider. Editing an existing skin: pick it in the designer's dropdown; change the name
+before saving to create a copy instead.
+
 ### How fill works
 
 The OSD fills from left to right as volume increases: full.png is revealed via a rectangular
