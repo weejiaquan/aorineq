@@ -24,6 +24,10 @@
             <Button x:Name="SkinDesignerButton" Content="Skin designer…"
                     Click="OnOpenSkinDesigner" Padding="8,2" Margin="8,0,0,0" />
         </StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="ImportSkinButton" Content="Import skin…" Click="OnImportSkin" Padding="8,2"
+                    ToolTip="Install a skin shared as a zip file" />
+        </StackPanel>
 
         <TextBlock Text="Position" Margin="0,0,0,4" />
         <Grid Width="120" Height="120" HorizontalAlignment="Left" Margin="0,0,0,10">

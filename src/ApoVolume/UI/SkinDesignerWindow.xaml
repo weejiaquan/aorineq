@@ -1,8 +1,8 @@
 <Window x:Class="ApoVolume.UI.SkinDesignerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="apo-volume skin designer" Width="860" Height="580"
-        MinWidth="700" MinHeight="480"
+        Title="apo-volume skin designer" Width="880" Height="640"
+        MinWidth="720" MinHeight="520"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True">
     <Grid Margin="12">
         <Grid.RowDefinitions>
@@ -11,27 +11,31 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- top bar: skin selector, name, save -->
+        <!-- top bar: skin selector, name, zip sharing, save -->
         <Grid Grid.Row="0" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="200" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="Skin:" VerticalAlignment="Center" Margin="0,0,6,0" />
             <ComboBox x:Name="SkinSelect" Grid.Column="1" SelectionChanged="OnSkinSelected" />
             <TextBlock Grid.Column="2" Text="Name:" VerticalAlignment="Center" Margin="12,0,6,0" />
             <TextBox x:Name="NameBox" Grid.Column="3" VerticalContentAlignment="Center" TextChanged="OnControlChanged" />
-            <Button x:Name="SaveButton" Grid.Column="4" Content="Save" Padding="16,4" Margin="12,0,0,0" Click="OnSave" />
+            <Button x:Name="ImportZipButton" Grid.Column="4" Content="Import…" Padding="10,4" Margin="12,0,0,0" Click="OnImportZip" />
+            <Button x:Name="ExportZipButton" Grid.Column="5" Content="Export…" Padding="10,4" Margin="6,0,0,0" Click="OnExportZip" />
+            <Button x:Name="SaveButton" Grid.Column="6" Content="Save" Padding="16,4" Margin="6,0,0,0" Click="OnSave" />
         </Grid>
 
         <!-- main: preview + controls -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="260" />
+                <ColumnDefinition Width="270" />
             </Grid.ColumnDefinitions>
 
             <Border BorderBrush="#40808080" BorderThickness="1">
@@ -78,20 +82,45 @@
             </Border>
 
             <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                <TextBlock Text="Images" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <TextBlock Text="empty.png — artwork at 0%" FontSize="11" />
+                <TextBlock Text="Images (PNG, sprite-sheet PNG, or GIF)" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock Text="empty — artwork at 0%" FontSize="11" />
                 <DockPanel Margin="0,2,0,6">
                     <Button DockPanel.Dock="Right" Content="Browse…" Padding="8,2" Click="OnBrowseEmpty" />
+                    <Button DockPanel.Dock="Right" Content="Frames…" Padding="8,2" Margin="0,0,4,0" Click="OnImportEmptyFrames"
+                            ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
                     <TextBlock x:Name="EmptyPathText" Text="—" FontSize="11" Foreground="Gray"
                                TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
                 </DockPanel>
-                <TextBlock Text="full.png — artwork at 100%" FontSize="11" />
+                <TextBlock Text="full — artwork at 100%" FontSize="11" />
                 <DockPanel Margin="0,2,0,4">
                     <Button DockPanel.Dock="Right" Content="Browse…" Padding="8,2" Click="OnBrowseFull" />
+                    <Button DockPanel.Dock="Right" Content="Frames…" Padding="8,2" Margin="0,0,4,0" Click="OnImportFullFrames"
+                            ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
                     <TextBlock x:Name="FullPathText" Text="—" FontSize="11" Foreground="Gray"
                                TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
                 </DockPanel>
                 <TextBlock x:Name="ImageErrorText" Foreground="#D32F2F" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" />
+
+                <Separator Margin="0,4,0,8" />
+                <TextBlock Text="Animation" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="fps" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                    <TextBox x:Name="FpsBox" Grid.Column="1" Text="10" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    <TextBlock Grid.Column="2" Text="empty" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
+                               ToolTip="Sprite-sheet frame count for the empty layer (GIFs are automatic)" />
+                    <TextBox x:Name="EmptyFramesBox" Grid.Column="3" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    <TextBlock Grid.Column="4" Text="full" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
+                               ToolTip="Sprite-sheet frame count for the full layer (GIFs are automatic)" />
+                    <TextBox x:Name="FullFramesBox" Grid.Column="5" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                </Grid>
 
                 <Separator Margin="0,4,0,8" />
                 <TextBlock Margin="0,0,0,2">
@@ -131,6 +160,6 @@
         </Grid>
 
         <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" FontSize="11" Foreground="Gray"
-                   Text="Pick two PNGs (or an existing skin) to start. Change the name before saving to create a copy." />
+                   Text="Pick two images (or an existing skin) to start. Change the name before saving to create a copy." />
     </Grid>
 </Window>

@@ -16,8 +16,15 @@ namespace ApoVolume.UI;
 public partial class SkinOsdWindow : Window
 {
     private readonly SkinInfo _info;
-    private readonly AlphaMap _emptyAlpha;
-    private readonly AlphaMap _fullAlpha;
+    // Hit shape = union of opaque pixels across ALL frames of BOTH layers, so an element that is
+    // transparent in one animation frame stays clickable throughout.
+    private readonly List<AlphaMap> _alphaMaps = new();
+    private readonly SkinFrames _emptyFrames;
+    private readonly SkinFrames _fullFrames;
+    private readonly DispatcherTimer _emptyAnimTimer = new();
+    private readonly DispatcherTimer _fullAnimTimer = new();
+    private int _emptyFrameIndex;
+    private int _fullFrameIndex;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
 
     // Behavior config, pushed in from Settings via ApplyConfig; same defaults as OsdWindow so the
@@ -44,15 +51,38 @@ public partial class SkinOsdWindow : Window
 
         InitializeComponent();
 
-        var emptyBitmap = LoadBitmap(info.EmptyPath);
-        var fullBitmap = LoadBitmap(info.FullPath);
-        // Hit shape is the UNION of both images' opaque pixels: a skin whose full.png draws a
-        // glow/highlight extending past empty.png's silhouette must stay clickable there too.
-        _emptyAlpha = new AlphaMap(emptyBitmap);
-        _fullAlpha = new AlphaMap(fullBitmap);
+        _emptyFrames = SkinFrames.Load(info.EmptyPath, info.EmptyFrames, info.Fps);
+        _fullFrames = SkinFrames.Load(info.FullPath, info.FullFrames, info.Fps);
+        foreach (var frame in _emptyFrames.Frames) _alphaMaps.Add(new AlphaMap(frame));
+        foreach (var frame in _fullFrames.Frames) _alphaMaps.Add(new AlphaMap(frame));
 
-        EmptyImage.Source = emptyBitmap;
-        FullImage.Source = fullBitmap;
+        EmptyImage.Source = _emptyFrames.Frames[0];
+        FullImage.Source = _fullFrames.Frames[0];
+
+        // Animated layers advance on their own cadence (per-frame delays), and only while the
+        // window is visible — hiding stops the timers so an idle OSD costs nothing.
+        if (_emptyFrames.IsAnimated)
+            _emptyAnimTimer.Tick += (_, _) =>
+            {
+                _emptyFrameIndex = (_emptyFrameIndex + 1) % _emptyFrames.Frames.Count;
+                EmptyImage.Source = _emptyFrames.Frames[_emptyFrameIndex];
+                _emptyAnimTimer.Interval = _emptyFrames.Delays[_emptyFrameIndex];
+            };
+        if (_fullFrames.IsAnimated)
+            _fullAnimTimer.Tick += (_, _) =>
+            {
+                _fullFrameIndex = (_fullFrameIndex + 1) % _fullFrames.Frames.Count;
+                FullImage.Source = _fullFrames.Frames[_fullFrameIndex];
+                _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
+            };
+        IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is false)
+            {
+                _emptyAnimTimer.Stop();
+                _fullAnimTimer.Stop();
+            }
+        };
 
         Width = info.Width * info.Scale;
         Height = info.Height * info.Scale;
@@ -171,6 +201,16 @@ public partial class SkinOsdWindow : Window
         BeginAnimation(OpacityProperty, null); // cancel any running fade-out
         Opacity = 1;
         Show();
+        if (_emptyFrames.IsAnimated && !_emptyAnimTimer.IsEnabled)
+        {
+            _emptyAnimTimer.Interval = _emptyFrames.Delays[_emptyFrameIndex];
+            _emptyAnimTimer.Start();
+        }
+        if (_fullFrames.IsAnimated && !_fullAnimTimer.IsEnabled)
+        {
+            _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
+            _fullAnimTimer.Start();
+        }
         _hideTimer.Stop();
         _hideTimer.Start(); // both paths auto-hide; IsMouseOver blocks the tick while hovered
     }
@@ -179,7 +219,11 @@ public partial class SkinOsdWindow : Window
     {
         int px = (int)(windowPoint.X / _info.Scale);
         int py = (int)(windowPoint.Y / _info.Scale);
-        return _emptyAlpha.IsOpaque(px, py) || _fullAlpha.IsOpaque(px, py);
+        foreach (var map in _alphaMaps)
+        {
+            if (map.IsOpaque(px, py)) return true;
+        }
+        return false;
     }
 
     private void RaisePercentFromWindowPoint(System.Windows.Point windowPoint)
