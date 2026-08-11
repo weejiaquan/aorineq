@@ -101,10 +101,29 @@ public partial class App : System.Windows.Application
         try
         {
             _mutex = new Mutex(initiallyOwned: true, MutexName, out bool isFirstInstance);
+            if (!isFirstInstance)
+            {
+                // Losing the mutex race with the show-event probe above having found nothing
+                // usually means the old instance is mid-teardown: its event is already disposed
+                // (so signaling would create a fresh event nobody listens to and this launch
+                // would exit alongside the dying one — leaving nothing running), but it still
+                // holds the mutex for a few more milliseconds. Waiting briefly acquires the mutex
+                // the moment teardown finishes, letting this launch take over as the instance.
+                try
+                {
+                    isFirstInstance = _mutex.WaitOne(TimeSpan.FromSeconds(3));
+                }
+                catch (AbandonedMutexException)
+                {
+                    isFirstInstance = true; // old instance died holding it; ownership transferred
+                }
+            }
             _ownsMutex = isFirstInstance;
             _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
             if (!isFirstInstance)
             {
+                // A healthy instance really is running (simultaneous-start race past the probe):
+                // its event exists by now, so this opens rather than creates it.
                 _showEvent.Set(); // ask the running instance to show its slider
                 Shutdown();
                 return;
@@ -145,7 +164,7 @@ public partial class App : System.Windows.Application
             _tray.OpenRequested += () => ShowOsd(interactive: true);
             _tray.MuteToggleRequested += () => { _state.ToggleMute(); Render(interactive: false); };
             _tray.SettingsRequested += OpenSettings;
-            _tray.ExitRequested += () => Shutdown();
+            _tray.ExitRequested += BeginShutdown;
 
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
 
@@ -268,8 +287,20 @@ public partial class App : System.Windows.Application
         if (proc is null)
             return false; // couldn't start — treat like a decline, stay running non-elevated
 
-        Shutdown();
+        BeginShutdown();
         return true;
+    }
+
+    /// <summary>Intentional-exit path (tray Exit, elevated relaunch): disposes the show event
+    /// BEFORE Shutdown() starts draining the dispatcher. The waiter thread ignores signals once
+    /// shutdown has started, so a relaunch probing the still-alive event during that drain would
+    /// signal a corpse and exit — leaving nothing running. With the event gone up front, such a
+    /// relaunch falls through to the mutex and takes over via its teardown-takeover wait instead.
+    /// OnExit's dispose remains for the other paths (Dispose is idempotent).</summary>
+    private void BeginShutdown()
+    {
+        _showEvent?.Dispose();
+        Shutdown();
     }
 
     /// <summary>Shown when a named single-instance object (mutex/event) already exists but is
