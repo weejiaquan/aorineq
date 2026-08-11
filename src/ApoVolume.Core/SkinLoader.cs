@@ -2,8 +2,14 @@ using System.Text.Json;
 
 namespace ApoVolume.Core;
 
-/// <summary>Position/visibility of the percent-text overlay drawn on top of a skin.</summary>
-public sealed record SkinText(bool Show, int X, int Y);
+/// <summary>Position, visibility, and styling of the percent-text overlay drawn on top of a
+/// skin. Colors are stored as raw strings (#AARRGGBB or #RRGGBB) and parsed in the UI layer,
+/// which falls back gracefully on malformed values; a null OutlineColor/ShadowColor means that
+/// effect is off. Defaults reproduce the pre-styling look (white, 14px, bold-ish).</summary>
+public sealed record SkinText(bool Show, int X, int Y,
+    string Color = "#FFFFFFFF", string FontFamily = "Segoe UI", double FontSize = 14, bool Bold = true,
+    string? OutlineColor = null, double OutlineWidth = 0,
+    string? ShadowColor = null, double ShadowBlur = 4, double ShadowDepth = 2);
 
 /// <summary>Result of loading one skin folder. Always has Name/Folder/EmptyPath/FullPath populated;
 /// on failure Width/Height are 0 and Error describes what went wrong. Width/Height are the LOGICAL
@@ -28,6 +34,16 @@ public static class SkinLoader
     private const double MinFps = 1.0;
     private const double MaxFps = 60.0;
     private const double DefaultFps = 10.0;
+    private const double MinFontSize = 4.0;
+    private const double MaxFontSize = 200.0;
+    private const double MaxOutlineWidth = 20.0;
+    private const double MaxShadow = 50.0;
+
+    private static string EmptyToDefault(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value;
+
+    private static string? NullIfBlank(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
 
     // JsonSerializerOptions caches type metadata internally — a fresh instance per Deserialize
     // call would rebuild that metadata every time a skin is (re)loaded or the folder is scanned.
@@ -72,7 +88,16 @@ public static class SkinLoader
                 }
 
                 if (parsed?.PercentText is { } pt)
-                    text = new SkinText(pt.Show, pt.X, pt.Y);
+                    text = new SkinText(pt.Show, pt.X, pt.Y,
+                        Color: EmptyToDefault(pt.Color, "#FFFFFFFF"),
+                        FontFamily: EmptyToDefault(pt.FontFamily, "Segoe UI"),
+                        FontSize: Math.Clamp(pt.FontSize ?? 14, MinFontSize, MaxFontSize),
+                        Bold: pt.Bold ?? true,
+                        OutlineColor: NullIfBlank(pt.OutlineColor),
+                        OutlineWidth: Math.Clamp(pt.OutlineWidth ?? 0, 0, MaxOutlineWidth),
+                        ShadowColor: NullIfBlank(pt.ShadowColor),
+                        ShadowBlur: Math.Clamp(pt.ShadowBlur ?? 4, 0, MaxShadow),
+                        ShadowDepth: Math.Clamp(pt.ShadowDepth ?? 2, 0, MaxShadow));
                 if (parsed?.Scale is { } rawScale)
                     scale = Math.Clamp(rawScale, MinScale, MaxScale);
                 if (parsed?.Fps is { } rawFps)
@@ -174,5 +199,14 @@ public static class SkinLoader
         public bool Show { get; set; }
         public int X { get; set; }
         public int Y { get; set; }
+        public string? Color { get; set; }
+        public string? FontFamily { get; set; }
+        public double? FontSize { get; set; }
+        public bool? Bold { get; set; }
+        public string? OutlineColor { get; set; }
+        public double? OutlineWidth { get; set; }
+        public string? ShadowColor { get; set; }
+        public double? ShadowBlur { get; set; }
+        public double? ShadowDepth { get; set; }
     }
 }

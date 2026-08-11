@@ -72,10 +72,12 @@ public static class SkinWriter
                 || config.FillStartX is not null || config.FillEndX is not null)
             {
                 // Anonymous shape matches SkinLoader's SkinJson (case-insensitive on read);
-                // null fill-range fields are omitted rather than written as null.
+                // null fields are omitted rather than written (WhenWritingNull). Text styling
+                // fields are only emitted when they differ from the loader's defaults, so a
+                // plain positioned number stays {show,x,y}.
                 var json = JsonSerializer.Serialize(new
                 {
-                    percentText = showText ? new { show = true, x = config.Text!.X, y = config.Text.Y } : null,
+                    percentText = showText ? BuildPercentText(config.Text!) : null,
                     scale = config.Scale,
                     fps = config.Fps,
                     emptyFrames = config.EmptyFrames,
@@ -96,6 +98,25 @@ public static class SkinWriter
             throw new InvalidOperationException($"Failed to save skin '{name.Trim()}': {ex.Message}", ex);
         }
     }
+
+    /// <summary>Serializes percentText with only the styling fields that differ from the
+    /// loader's defaults, so a plainly-positioned number round-trips as {show,x,y}. Null-valued
+    /// members are dropped by <see cref="JsonWriteOptions"/> (WhenWritingNull).</summary>
+    private static object BuildPercentText(SkinText t) => new
+    {
+        show = true,
+        x = t.X,
+        y = t.Y,
+        color = t.Color == "#FFFFFFFF" ? null : t.Color,
+        fontFamily = t.FontFamily == "Segoe UI" ? null : t.FontFamily,
+        fontSize = t.FontSize == 14 ? (double?)null : t.FontSize,
+        bold = t.Bold ? (bool?)null : false,
+        outlineColor = t.OutlineColor,
+        outlineWidth = t.OutlineColor is null || t.OutlineWidth == 0 ? (double?)null : t.OutlineWidth,
+        shadowColor = t.ShadowColor,
+        shadowBlur = t.ShadowColor is null || t.ShadowBlur == 4 ? (double?)null : t.ShadowBlur,
+        shadowDepth = t.ShadowColor is null || t.ShadowDepth == 2 ? (double?)null : t.ShadowDepth,
+    };
 
     private static void CopyLayer(string source, string folder, string layer)
     {

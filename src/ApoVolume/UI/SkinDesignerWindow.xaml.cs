@@ -39,6 +39,12 @@ public partial class SkinDesignerWindow : Window
     private int _emptyFrameIndex;
     private int _fullFrameIndex;
 
+    // Text-style colors kept as hex strings; the swatch buttons show them and the color picker
+    // edits them. Text color always set; outline/shadow null = that effect off.
+    private string _textColor = "#FFFFFFFF";
+    private string _outlineColor = "#FF000000";
+    private string _shadowColor = "#FF000000";
+
     /// <summary>Raised after a successful save or zip import with the skin's name. App refreshes
     /// the Settings picker and hot-reloads the live OSD when the active skin was touched.</summary>
     public event Action<string>? SkinSaved;
@@ -47,6 +53,11 @@ public partial class SkinDesignerWindow : Window
     {
         _currentSettings = currentSettings;
         InitializeComponent();
+        _initializing = true;
+        foreach (var family in Fonts.SystemFontFamilies
+            .Select(f => f.Source).OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+            FontCombo.Items.Add(family);
+        _initializing = false;
         _emptyAnimTimer.Tick += (_, _) => AdvanceFrame(isEmpty: true);
         _fullAnimTimer.Tick += (_, _) => AdvanceFrame(isEmpty: false);
         IsVisibleChanged += (_, e) =>
@@ -120,6 +131,7 @@ public partial class SkinDesignerWindow : Window
         ShowNumberCheck.IsChecked = info.Text is { Show: true };
         NumberXBox.Text = (info.Text?.X ?? 10).ToString();
         NumberYBox.Text = (info.Text?.Y ?? 5).ToString();
+        LoadTextStyle(info.Text);
         ScaleSlider.Value = info.Scale;
         FpsBox.Text = info.Fps.ToString("0.##");
         EmptyFramesBox.Text = info.EmptyFrames.ToString();
@@ -145,6 +157,7 @@ public partial class SkinDesignerWindow : Window
         FullFramesBox.Text = "1";
         FillStartBox.Text = "";
         FillEndBox.Text = "";
+        LoadTextStyle(null); // reset styling controls to defaults
         _initializing = false;
         EmptyPathText.Text = "—";
         FullPathText.Text = "—";
@@ -469,13 +482,15 @@ public partial class SkinDesignerWindow : Window
         RangeEndHandle.Margin = new Thickness(fillEnd * scale - RangeEndHandle.Width / 2, 0, 0, 0);
 
         bool showNumber = ShowNumberCheck.IsChecked == true;
-        PercentTextBlock.Visibility = showNumber ? Visibility.Visible : Visibility.Collapsed;
+        PercentPath.Visibility = showNumber ? Visibility.Visible : Visibility.Collapsed;
+        TextStylePanel.IsEnabled = showNumber;
         if (showNumber)
         {
-            PercentTextBlock.Text = percent.ToString();
+            PercentTextRenderer.Update(PercentPath, CurrentSkinText()!, percent.ToString(), scale,
+                VisualTreeHelper.GetDpi(this).PixelsPerDip);
             int x = int.TryParse(NumberXBox.Text, out var px) ? px : 0;
             int y = int.TryParse(NumberYBox.Text, out var py) ? py : 0;
-            PercentTextBlock.Margin = new Thickness(x * scale, y * scale, 0, 0);
+            PercentPath.Margin = new Thickness(x * scale, y * scale, 0, 0);
         }
     }
 
@@ -497,13 +512,110 @@ public partial class SkinDesignerWindow : Window
         ExportZipButton.IsEnabled = _editingSkinName is not null;
     }
 
+    /// <summary>Builds the SkinText from the current controls, or null when Show is unchecked.</summary>
+    private SkinText? CurrentSkinText()
+    {
+        if (ShowNumberCheck.IsChecked != true) return null;
+        return new SkinText(true,
+            int.TryParse(NumberXBox.Text, out var x) ? x : 0,
+            int.TryParse(NumberYBox.Text, out var y) ? y : 0,
+            Color: _textColor,
+            FontFamily: FontCombo.SelectedItem as string ?? "Segoe UI",
+            FontSize: double.TryParse(FontSizeBox.Text, out var fs) ? Math.Clamp(fs, 4, 200) : 14,
+            Bold: BoldCheck.IsChecked == true,
+            OutlineColor: OutlineCheck.IsChecked == true ? _outlineColor : null,
+            OutlineWidth: double.TryParse(OutlineWidthBox.Text, out var ow) ? Math.Clamp(ow, 0, 20) : 0,
+            ShadowColor: ShadowCheck.IsChecked == true ? _shadowColor : null,
+            ShadowBlur: double.TryParse(ShadowBlurBox.Text, out var sb) ? Math.Clamp(sb, 0, 50) : 4,
+            ShadowDepth: double.TryParse(ShadowDepthBox.Text, out var sd) ? Math.Clamp(sd, 0, 50) : 2);
+    }
+
+    /// <summary>Populates the text-style controls from a SkinText (or defaults when null).</summary>
+    private void LoadTextStyle(SkinText? t)
+    {
+        _textColor = t?.Color ?? "#FFFFFFFF";
+        _outlineColor = t?.OutlineColor ?? "#FF000000";
+        _shadowColor = t?.ShadowColor ?? "#FF000000";
+        SelectFont(t?.FontFamily ?? "Segoe UI");
+        FontSizeBox.Text = (t?.FontSize ?? 14).ToString("0.##");
+        BoldCheck.IsChecked = t?.Bold ?? true;
+        OutlineCheck.IsChecked = t?.OutlineColor is not null;
+        OutlineWidthBox.Text = (t?.OutlineWidth is > 0 ? t.OutlineWidth : 2).ToString("0.##");
+        ShadowCheck.IsChecked = t?.ShadowColor is not null;
+        ShadowBlurBox.Text = (t?.ShadowBlur ?? 4).ToString("0.##");
+        ShadowDepthBox.Text = (t?.ShadowDepth ?? 2).ToString("0.##");
+        UpdateSwatches();
+    }
+
+    private void SelectFont(string family)
+    {
+        foreach (string item in FontCombo.Items)
+        {
+            if (string.Equals(item, family, StringComparison.OrdinalIgnoreCase))
+            {
+                FontCombo.SelectedItem = item;
+                return;
+            }
+        }
+        // Unknown/absent family: show the name without a selection so it round-trips unchanged.
+        FontCombo.SelectedIndex = -1;
+    }
+
+    private void UpdateSwatches()
+    {
+        TextColorSwatch.Background = SwatchBrush(_textColor);
+        OutlineColorSwatch.Background = SwatchBrush(_outlineColor);
+        ShadowColorSwatch.Background = SwatchBrush(_shadowColor);
+    }
+
+    private static System.Windows.Media.Brush SwatchBrush(string hex)
+    {
+        try { return new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)); }
+        catch (FormatException) { return System.Windows.Media.Brushes.White; }
+        catch (NotSupportedException) { return System.Windows.Media.Brushes.White; }
+    }
+
+    private void OnPickTextColor(object sender, RoutedEventArgs e) => PickColor(ref _textColor);
+    private void OnPickOutlineColor(object sender, RoutedEventArgs e)
+    {
+        if (PickColor(ref _outlineColor)) OutlineCheck.IsChecked = true; // choosing a color turns it on
+    }
+    private void OnPickShadowColor(object sender, RoutedEventArgs e)
+    {
+        if (PickColor(ref _shadowColor)) ShadowCheck.IsChecked = true;
+    }
+
+    /// <summary>Opens the native Windows color picker (WinForms, already referenced) seeded with
+    /// the current color; on OK stores it back as #AARRGGBB and refreshes preview + swatches.</summary>
+    private bool PickColor(ref string target)
+    {
+        using var dialog = new System.Windows.Forms.ColorDialog { FullOpen = true, AnyColor = true };
+        try
+        {
+            var current = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(target);
+            dialog.Color = System.Drawing.Color.FromArgb(current.A, current.R, current.G, current.B);
+        }
+        catch (FormatException) { }
+        catch (NotSupportedException) { }
+
+        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+            return false;
+        var c = dialog.Color;
+        // ColorDialog drops alpha; keep the previous alpha so a translucent color stays translucent.
+        byte alpha = 0xFF;
+        try { alpha = ((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(target)).A; }
+        catch (FormatException) { }
+        catch (NotSupportedException) { }
+        target = $"#{alpha:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+        UpdateSwatches();
+        RefreshPreview();
+        Validate();
+        return true;
+    }
+
     private SkinConfig CurrentConfig()
     {
-        SkinText? text = ShowNumberCheck.IsChecked == true
-            ? new SkinText(true,
-                int.TryParse(NumberXBox.Text, out var x) ? x : 0,
-                int.TryParse(NumberYBox.Text, out var y) ? y : 0)
-            : null;
+        SkinText? text = CurrentSkinText();
         // GIF layers self-describe; recording 1 keeps skin.json meaningful for the loader.
         // A full-width fill range is the default and is omitted from skin.json entirely.
         int fillStart = ParseFillStart();
@@ -532,7 +644,7 @@ public partial class SkinDesignerWindow : Window
         DragTarget target;
         if (HitsElement(e, RangeStartHandle)) target = DragTarget.RangeStart;
         else if (HitsElement(e, RangeEndHandle)) target = DragTarget.RangeEnd;
-        else if (ShowNumberCheck.IsChecked == true && HitsElement(e, PercentTextBlock)) target = DragTarget.Number;
+        else if (ShowNumberCheck.IsChecked == true && HitsElement(e, PercentPath)) target = DragTarget.Number;
         else return;
 
         _dragging = PreviewCanvas.CaptureMouse() ? target : DragTarget.None;
@@ -551,10 +663,10 @@ public partial class SkinDesignerWindow : Window
             case DragTarget.Number:
             {
                 // Center the text on the cursor; clamp so the number stays inside the artwork.
-                int x = (int)Math.Round(pos.X / scale - PercentTextBlock.ActualWidth / (2 * scale));
-                int y = (int)Math.Round(pos.Y / scale - PercentTextBlock.ActualHeight / (2 * scale));
-                NumberXBox.Text = Math.Clamp(x, 0, Math.Max(0, _imgWidth - (int)(PercentTextBlock.ActualWidth / scale))).ToString();
-                NumberYBox.Text = Math.Clamp(y, 0, Math.Max(0, _imgHeight - (int)(PercentTextBlock.ActualHeight / scale))).ToString();
+                int x = (int)Math.Round(pos.X / scale - PercentPath.ActualWidth / (2 * scale));
+                int y = (int)Math.Round(pos.Y / scale - PercentPath.ActualHeight / (2 * scale));
+                NumberXBox.Text = Math.Clamp(x, 0, Math.Max(0, _imgWidth - (int)(PercentPath.ActualWidth / scale))).ToString();
+                NumberYBox.Text = Math.Clamp(y, 0, Math.Max(0, _imgHeight - (int)(PercentPath.ActualHeight / scale))).ToString();
                 break;
             }
             case DragTarget.RangeStart:

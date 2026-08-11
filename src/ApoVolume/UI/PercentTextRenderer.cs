@@ -1,0 +1,83 @@
+using System.Globalization;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Shapes;
+using ApoVolume.Core;
+
+namespace ApoVolume.UI;
+
+/// <summary>Renders the skin percent number into a <see cref="Path"/> as glyph geometry, so the
+/// outline is a real stroke (WPF text has no native stroke). Shared by <see cref="SkinOsdWindow"/>
+/// and the designer preview so both look identical. All styling is best-effort: a malformed color
+/// falls back (white text / no outline / no shadow) and never throws.</summary>
+internal static class PercentTextRenderer
+{
+    /// <summary>Rebuilds <paramref name="path"/> to show <paramref name="text"/> styled per
+    /// <paramref name="style"/> at <paramref name="scale"/> (font size, outline width, shadow
+    /// blur/depth are all multiplied by scale so the number tracks the skin's zoom).</summary>
+    public static void Update(Path path, SkinText style, string text, double scale, double pixelsPerDip)
+    {
+        var typeface = new Typeface(
+            new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
+            FontStyles.Normal,
+            style.Bold ? FontWeights.Bold : FontWeights.Normal,
+            FontStretches.Normal);
+
+        var formatted = new FormattedText(
+            text, CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
+            typeface, Math.Max(1.0, style.FontSize * scale),
+            System.Windows.Media.Brushes.Black, pixelsPerDip);
+
+        // Geometry origin at (0,0); the Path is positioned by its Margin by the caller.
+        path.Data = formatted.BuildGeometry(new System.Windows.Point(0, 0));
+        path.Fill = Brush(style.Color) ?? System.Windows.Media.Brushes.White;
+
+        var outline = style.OutlineColor is null ? null : Brush(style.OutlineColor);
+        if (outline is not null && style.OutlineWidth > 0)
+        {
+            path.Stroke = outline;
+            path.StrokeThickness = style.OutlineWidth * scale;
+        }
+        else
+        {
+            path.Stroke = null;
+            path.StrokeThickness = 0;
+        }
+
+        var shadow = style.ShadowColor is null ? null : ParseColor(style.ShadowColor);
+        path.Effect = shadow is { } sc
+            ? new DropShadowEffect
+            {
+                Color = sc,
+                BlurRadius = style.ShadowBlur * scale,
+                ShadowDepth = style.ShadowDepth * scale,
+                Direction = 315, // down-right, the conventional shadow angle
+                Opacity = 1.0,
+            }
+            : null;
+    }
+
+    private static SolidColorBrush? Brush(string? hex)
+    {
+        var c = ParseColor(hex);
+        if (c is null) return null;
+        var brush = new SolidColorBrush(c.Value);
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>Parses #AARRGGBB / #RRGGBB (and named colors) via WPF's converter; null on any
+    /// failure so callers fall back rather than crash on user-authored strings.</summary>
+    private static System.Windows.Media.Color? ParseColor(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        try
+        {
+            var converted = System.Windows.Media.ColorConverter.ConvertFromString(hex);
+            return converted is System.Windows.Media.Color c ? c : null;
+        }
+        catch (FormatException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+}

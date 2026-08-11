@@ -13,8 +13,8 @@
                 <RectangleGeometry x:Name="FillClip" />
             </Image.Clip>
         </Image>
-        <TextBlock x:Name="PercentTextBlock" Foreground="White" FontSize="14" FontWeight="SemiBold"
-                   HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed" />
+        <!-- Percent number as glyph geometry so the outline can be a real stroke. -->
+        <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed" />
         <!-- Mute badge: small glyph chip, bottom-right, shown only while muted. -->
         <Border x:Name="MuteBadge" Width="20" Height="20" CornerRadius="10" Background="#F2202020"
                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,4" Visibility="Collapsed">

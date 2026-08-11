@@ -73,9 +73,8 @@
                                     <RectangleGeometry x:Name="FillClip" />
                                 </Image.Clip>
                             </Image>
-                            <TextBlock x:Name="PercentTextBlock" Foreground="White" FontSize="14" FontWeight="SemiBold"
-                                       HorizontalAlignment="Left" VerticalAlignment="Top"
-                                       Cursor="SizeAll" Visibility="Collapsed" />
+                            <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                  Cursor="SizeAll" Visibility="Collapsed" />
                             <!-- Draggable fill-range handles: where 0% and 100% sit inside the artwork. -->
                             <Border x:Name="RangeStartHandle" Width="7" HorizontalAlignment="Left"
                                     Background="#800078D7" BorderBrush="#FF0078D7" BorderThickness="1,0"
@@ -173,6 +172,64 @@
                     <TextBlock Grid.Column="3" Text="Y" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <TextBox x:Name="NumberYBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
                 </Grid>
+
+                <!-- Number text styling (enabled only while Show number is checked) -->
+                <StackPanel x:Name="TextStylePanel">
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="44" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Font" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                        <ComboBox x:Name="FontCombo" Grid.Column="1" SelectionChanged="OnControlChanged" />
+                        <TextBlock Grid.Column="3" Text="Size" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                        <TextBox x:Name="FontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <CheckBox x:Name="BoldCheck" Content="Bold" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                        <TextBlock Text="Color" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                        <Button x:Name="TextColorSwatch" Width="28" Height="18" Click="OnPickTextColor"
+                                ToolTip="Text color" />
+                    </StackPanel>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="40" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox x:Name="OutlineCheck" Grid.Column="0" Content="Outline" VerticalAlignment="Center"
+                                  Margin="0,0,6,0" Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                        <Button x:Name="OutlineColorSwatch" Grid.Column="1" Width="28" Height="18" Margin="0,0,8,0"
+                                Click="OnPickOutlineColor" ToolTip="Outline color" />
+                        <TextBlock Grid.Column="2" Text="Width" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                        <TextBox x:Name="OutlineWidthBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    </Grid>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox x:Name="ShadowCheck" Grid.Column="0" Content="Shadow" VerticalAlignment="Center"
+                                  Margin="0,0,6,0" Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                        <Button x:Name="ShadowColorSwatch" Grid.Column="1" Width="28" Height="18" Margin="0,0,8,0"
+                                Click="OnPickShadowColor" ToolTip="Shadow color" />
+                        <TextBlock Grid.Column="2" Text="Blur" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                        <TextBox x:Name="ShadowBlurBox" Grid.Column="3" Margin="0,0,8,0" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                        <TextBlock Grid.Column="4" Text="Depth" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                        <TextBox x:Name="ShadowDepthBox" Grid.Column="5" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    </Grid>
+                </StackPanel>
+
                 <TextBlock Margin="0,0,0,2">
                     <Run Text="Scale: " /><Run x:Name="ScaleLabel" Text="1.00" />
                 </TextBlock>
