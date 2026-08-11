@@ -67,11 +67,7 @@
                         <Grid x:Name="PreviewCanvas"
                               MouseLeftButtonDown="OnPreviewMouseDown" MouseMove="OnPreviewMouseMove"
                               MouseLeftButtonUp="OnPreviewMouseUp">
-                            <Image x:Name="EmptyImage" Stretch="Fill">
-                                <Image.Clip>
-                                    <RectangleGeometry x:Name="EmptyClip" />
-                                </Image.Clip>
-                            </Image>
+                            <Image x:Name="EmptyImage" Stretch="Fill" />
                             <Image x:Name="FullImage" Stretch="Fill">
                                 <Image.Clip>
                                     <RectangleGeometry x:Name="FillClip" />
