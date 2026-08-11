@@ -22,7 +22,10 @@ public partial class SkinDesignerWindow : Window
     private int _imgWidth;
     private int _imgHeight;
     private string? _editingSkinName; // null = designing a new skin
-    private bool _initializing;
+    // True from construction (same pattern as SettingsWindow): sliders with an initial Value
+    // raise ValueChanged DURING InitializeComponent, before sibling elements exist — the guard
+    // must already be up. PopulateSkinList drops it once the window is fully built.
+    private bool _initializing = true;
     private bool _draggingNumber;
     private SkinOsdWindow? _testOsd;
     private string? _testFolder;
