@@ -120,18 +120,27 @@ public sealed class ScheduledTaskAutostart
 
     private static (int ExitCode, string Error) Run(string args)
     {
-        using var p = Process.Start(new ProcessStartInfo("schtasks.exe", args)
+        try
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        })!;
-        // Read stdout asynchronously to avoid deadlock while reading stderr synchronously
-        var stdoutTask = p.StandardOutput.ReadToEndAsync();
-        var error = p.StandardError.ReadToEnd();
-        p.WaitForExit();
-        stdoutTask.Wait();
-        return (p.ExitCode, error);
+            using var p = Process.Start(new ProcessStartInfo("schtasks.exe", args)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            })!;
+            // Read stdout asynchronously to avoid deadlock while reading stderr synchronously
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var error = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            stdoutTask.Wait();
+            return (p.ExitCode, error);
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            // schtasks.exe unlaunchable (policy-stripped system): surface through the class's
+            // one exception contract instead of escaping an async void UI handler.
+            throw new InvalidOperationException($"Couldn't run schtasks.exe: {ex.Message}", ex);
+        }
     }
 }
