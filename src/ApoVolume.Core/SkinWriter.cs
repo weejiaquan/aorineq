@@ -3,15 +3,22 @@ using System.Text.Json;
 namespace ApoVolume.Core;
 
 /// <summary>Everything a skin save carries besides the two images. Defaults mirror
-/// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers.</summary>
+/// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers, and a null
+/// fill range meaning "the bar spans the full image width".</summary>
 public sealed record SkinConfig(SkinText? Text, double Scale,
-    double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1);
+    double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1,
+    int? FillStartX = null, int? FillEndX = null);
 
 /// <summary>Writes a skin folder (empty.png + full.png + optional skin.json) for the skin
 /// designer. Image content validation stays with the caller (PngHeader before save,
 /// SkinLoader as the source of truth on read); this class owns name validation and file layout.</summary>
 public static class SkinWriter
 {
+    private static readonly JsonSerializerOptions JsonWriteOptions = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private static readonly string[] ReservedNames =
     {
         "CON", "PRN", "AUX", "NUL",
@@ -61,9 +68,11 @@ public static class SkinWriter
             var jsonPath = Path.Combine(folder, "skin.json");
             bool showText = config.Text is { Show: true };
             if (showText || config.Scale != 1.0 || config.Fps != 10.0
-                || config.EmptyFrames != 1 || config.FullFrames != 1)
+                || config.EmptyFrames != 1 || config.FullFrames != 1
+                || config.FillStartX is not null || config.FillEndX is not null)
             {
-                // Anonymous shape matches SkinLoader's SkinJson (case-insensitive on read).
+                // Anonymous shape matches SkinLoader's SkinJson (case-insensitive on read);
+                // null fill-range fields are omitted rather than written as null.
                 var json = JsonSerializer.Serialize(new
                 {
                     percentText = showText ? new { show = true, x = config.Text!.X, y = config.Text.Y } : null,
@@ -71,7 +80,9 @@ public static class SkinWriter
                     fps = config.Fps,
                     emptyFrames = config.EmptyFrames,
                     fullFrames = config.FullFrames,
-                });
+                    fillStartX = config.FillStartX,
+                    fillEndX = config.FillEndX,
+                }, JsonWriteOptions);
                 File.WriteAllText(jsonPath, json);
             }
             else if (File.Exists(jsonPath))

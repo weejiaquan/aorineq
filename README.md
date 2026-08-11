@@ -116,7 +116,9 @@ Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
     "scale": 1.5,       // zoom multiplier (1.0 = original size, clamped to 0.25–4.0)
     "fps": 12,          // sprite-sheet playback rate (default 10, clamped to 1–60)
     "emptyFrames": 1,   // sprite-sheet frame count for empty.png (default 1)
-    "fullFrames": 8     // sprite-sheet frame count for full.png (default 1)
+    "fullFrames": 8,    // sprite-sheet frame count for full.png (default 1)
+    "fillStartX": 120,  // image-pixel x where 0% sits (default 0) — for bars that occupy
+    "fillEndX": 680     // only part of a wider image; default is the image width
   }
   ```
   Omitting `percentText` hides the percentage number. Omitting `scale` defaults to `1.0`.
@@ -171,6 +173,12 @@ The whole bar is clickable, not just the current fill: the clickable/draggable s
 union of empty.png's and full.png's opaque pixels, independent of the current volume level.
 Clicking anywhere on that shape jumps the volume straight to that position, like a normal
 slider — it does not nudge the fill incrementally.
+
+When the bar occupies only part of a wider decorative image, set `fillStartX`/`fillEndX` (or
+drag the two colored range handles in the skin designer): 0% and 100% then map exactly onto
+the bar's pixel edges, both for the fill and for clicks — clicks in the decorative margins
+clamp to 0/100. Keep `full.png`'s lit pixels inside that range; static decoration belongs in
+`empty.png`.
 
 Skins render in Windows' display-scaled units, the same as the rest of the UI: on a 150%-scaled
 display, a skin whose PNGs are 300px wide renders at 450 physical pixels. There is no

@@ -76,6 +76,15 @@
                             <TextBlock x:Name="PercentTextBlock" Foreground="White" FontSize="14" FontWeight="SemiBold"
                                        HorizontalAlignment="Left" VerticalAlignment="Top"
                                        Cursor="SizeAll" Visibility="Collapsed" />
+                            <!-- Draggable fill-range handles: where 0% and 100% sit inside the artwork. -->
+                            <Border x:Name="RangeStartHandle" Width="7" HorizontalAlignment="Left"
+                                    Background="#800078D7" BorderBrush="#FF0078D7" BorderThickness="1,0"
+                                    Cursor="SizeWE" Visibility="Collapsed"
+                                    ToolTip="0% — drag to the bar's left edge" />
+                            <Border x:Name="RangeEndHandle" Width="7" HorizontalAlignment="Left"
+                                    Background="#80D77800" BorderBrush="#FFD77800" BorderThickness="1,0"
+                                    Cursor="SizeWE" Visibility="Collapsed"
+                                    ToolTip="100% — drag to the bar's right edge" />
                         </Grid>
                     </Grid>
                 </ScrollViewer>
@@ -120,6 +129,23 @@
                     <TextBlock Grid.Column="4" Text="full" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
                                ToolTip="Sprite-sheet frame count for the full layer (GIFs are automatic)" />
                     <TextBox x:Name="FullFramesBox" Grid.Column="5" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                </Grid>
+
+                <Separator Margin="0,4,0,8" />
+                <TextBlock Text="Fill range" FontWeight="SemiBold" Margin="0,0,0,2"
+                           ToolTip="Where the bar lives inside the image: 0% and 100% in image pixels. Drag the colored handles on the preview." />
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="0% at" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                    <TextBox x:Name="FillStartBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    <TextBlock Grid.Column="3" Text="100% at" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                    <TextBox x:Name="FillEndBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
                 </Grid>
 
                 <Separator Margin="0,4,0,8" />

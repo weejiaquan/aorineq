@@ -12,7 +12,8 @@ public sealed record SkinText(bool Show, int X, int Y);
 /// actual frame count and per-frame delays are discovered at decode time in the UI layer).</summary>
 public sealed record SkinInfo(string Name, string Folder, string EmptyPath, string FullPath,
     int Width, int Height, SkinText? Text, double Scale,
-    double Fps, int EmptyFrames, int FullFrames, bool EmptyIsGif, bool FullIsGif, string? Error)
+    double Fps, int EmptyFrames, int FullFrames, bool EmptyIsGif, bool FullIsGif,
+    int FillStartX, int FillEndX, string? Error)
 {
     public bool IsValid => Error is null;
 }
@@ -43,9 +44,11 @@ public static class SkinLoader
         double fps = DefaultFps;
         int emptyFrames = 1;
         int fullFrames = 1;
+        int? fillStartJson = null;
+        int? fillEndJson = null;
 
         SkinInfo Bad(string error) => new(name, folder, emptyPath, fullPath, 0, 0, text, scale,
-            fps, 1, 1, false, false, error);
+            fps, 1, 1, false, false, 0, 0, error);
 
         try
         {
@@ -78,6 +81,8 @@ public static class SkinLoader
                     emptyFrames = Math.Max(1, ef);
                 if (parsed?.FullFrames is { } ff)
                     fullFrames = Math.Max(1, ff);
+                fillStartJson = parsed?.FillStartX;
+                fillEndJson = parsed?.FillEndX;
             }
 
             var empty = ResolveLayer(folder, "empty", emptyFrames);
@@ -94,10 +99,18 @@ public static class SkinLoader
                     $"{Path.GetFileName(full.Path)} frame is {full.LogicalWidth}×{full.LogicalHeight} " +
                     $"but {Path.GetFileName(empty.Path)} frame is {empty.LogicalWidth}×{empty.LogicalHeight}");
 
+            // Fill range: where the bar actually lives inside the (possibly wider, decorative)
+            // image. Defaults to the full width; values clamp into the image, but an inverted or
+            // empty range is an authoring error worth surfacing rather than guessing around.
+            int fillStart = Math.Clamp(fillStartJson ?? 0, 0, empty.LogicalWidth);
+            int fillEnd = Math.Clamp(fillEndJson ?? empty.LogicalWidth, 0, empty.LogicalWidth);
+            if (fillStart >= fillEnd)
+                return Bad($"fillStartX ({fillStart}) must be less than fillEndX ({fillEnd})");
+
             return new SkinInfo(name, folder, empty.Path, full.Path,
                 empty.LogicalWidth, empty.LogicalHeight, text, scale,
                 fps, empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
-                empty.IsGif, full.IsGif, null);
+                empty.IsGif, full.IsGif, fillStart, fillEnd, null);
         }
         catch (Exception ex)
         {
@@ -152,6 +165,8 @@ public static class SkinLoader
         public double? Fps { get; set; }
         public int? EmptyFrames { get; set; }
         public int? FullFrames { get; set; }
+        public int? FillStartX { get; set; }
+        public int? FillEndX { get; set; }
     }
 
     private sealed class SkinTextJson

@@ -149,6 +149,31 @@ public class SkinWriterTests : IDisposable
     }
 
     [Fact]
+    public void Save_fill_range_roundtrips_and_null_range_is_omitted()
+    {
+        var wideEmpty = Path.Combine(_dir, "src", "wide-empty.png");
+        var wideFull = Path.Combine(_dir, "src", "wide-full.png");
+        TestPngs.Write(wideEmpty, 800, 100);
+        TestPngs.Write(wideFull, 800, 100);
+
+        var folder = SkinWriter.Save(_root, "ranged", wideEmpty, wideFull,
+            new SkinConfig(null, 1.0, FillStartX: 120, FillEndX: 680));
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"roundtrip range: {info.FillStartX}..{info.FillEndX}");
+        Assert.True(info.IsValid);
+        Assert.Equal(120, info.FillStartX);
+        Assert.Equal(680, info.FillEndX);
+
+        // Null range with another non-default field: json written, but no fill keys inside.
+        var folder2 = SkinWriter.Save(_root, "unranged", wideEmpty, wideFull,
+            new SkinConfig(null, 1.5));
+        var json = File.ReadAllText(Path.Combine(folder2, "skin.json"));
+        _out.WriteLine("json without range: " + json);
+        Assert.DoesNotContain("fillStartX", json);
+        Assert.Equal(800, SkinLoader.Load(folder2).FillEndX); // default = full width
+    }
+
+    [Fact]
     public void Save_with_all_defaults_omits_skin_json_even_with_animation_defaults()
     {
         var folder = SkinWriter.Save(_root, "plain", _emptySrc, _fullSrc,

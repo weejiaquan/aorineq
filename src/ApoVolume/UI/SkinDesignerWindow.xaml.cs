@@ -29,7 +29,9 @@ public partial class SkinDesignerWindow : Window
     // raise ValueChanged DURING InitializeComponent, before sibling elements exist — the guard
     // must already be up. PopulateSkinList drops it once the window is fully built.
     private bool _initializing = true;
-    private bool _draggingNumber;
+
+    private enum DragTarget { None, Number, RangeStart, RangeEnd }
+    private DragTarget _dragging = DragTarget.None;
     private SkinOsdWindow? _testOsd;
     private string? _testFolder;
     private readonly DispatcherTimer _emptyAnimTimer = new();
@@ -122,6 +124,8 @@ public partial class SkinDesignerWindow : Window
         FpsBox.Text = info.Fps.ToString("0.##");
         EmptyFramesBox.Text = info.EmptyFrames.ToString();
         FullFramesBox.Text = info.FullFrames.ToString();
+        FillStartBox.Text = info.FillStartX.ToString();
+        FillEndBox.Text = info.FillEndX.ToString();
         _initializing = false;
         ReloadPreviewData();
         StatusText.Text = $"Editing '{info.Name}'. Change the name before saving to create a copy.";
@@ -139,6 +143,8 @@ public partial class SkinDesignerWindow : Window
         FpsBox.Text = "10";
         EmptyFramesBox.Text = "1";
         FullFramesBox.Text = "1";
+        FillStartBox.Text = "";
+        FillEndBox.Text = "";
         _initializing = false;
         EmptyPathText.Text = "—";
         FullPathText.Text = "—";
@@ -162,6 +168,10 @@ public partial class SkinDesignerWindow : Window
         if (dialog.ShowDialog(this) != true) return;
         if (isEmpty) { _emptySource = dialog.FileName; EmptyPathText.Text = dialog.FileName; EmptyPathText.ToolTip = dialog.FileName; }
         else { _fullSource = dialog.FileName; FullPathText.Text = dialog.FileName; FullPathText.ToolTip = dialog.FileName; }
+        _initializing = true;
+        FillStartBox.Text = ""; // new artwork: range resets to full width in ReloadPreviewData
+        FillEndBox.Text = "";
+        _initializing = false;
         ReloadPreviewData();
     }
 
@@ -306,6 +316,11 @@ public partial class SkinDesignerWindow : Window
         _imgHeight = emptyMeta.Size.Value.Height;
         _emptyFrameIndex = 0;
         _fullFrameIndex = 0;
+        // Blank/unparsable range boxes take the full width of the (possibly new) artwork.
+        _initializing = true;
+        if (!int.TryParse(FillStartBox.Text, out _)) FillStartBox.Text = "0";
+        if (!int.TryParse(FillEndBox.Text, out _)) FillEndBox.Text = _imgWidth.ToString();
+        _initializing = false;
         // A GIF layer's frame count is the file's own; reflect it read-only in the box.
         _initializing = true;
         if (IsGif(_emptySource)) EmptyFramesBox.Text = _emptyFrames.Frames.Count.ToString();
@@ -344,6 +359,12 @@ public partial class SkinDesignerWindow : Window
 
     private double ParseFps() =>
         double.TryParse(FpsBox.Text, out var f) ? Math.Clamp(f, 1.0, 60.0) : 10.0;
+
+    private int ParseFillStart() =>
+        int.TryParse(FillStartBox.Text, out var v) ? Math.Clamp(v, 0, Math.Max(0, _imgWidth)) : 0;
+
+    private int ParseFillEnd() =>
+        int.TryParse(FillEndBox.Text, out var v) ? Math.Clamp(v, 0, Math.Max(0, _imgWidth)) : _imgWidth;
 
     private void AdvanceFrame(bool isEmpty)
     {
@@ -424,9 +445,17 @@ public partial class SkinDesignerWindow : Window
 
         int percent = (int)FillSlider.Value;
         bool muted = MuteCheck.IsChecked == true;
-        FillClip.Rect = new Rect(0, 0, SkinMath.FillWidth(_imgWidth, percent) * scale, h);
+        int fillStart = ParseFillStart();
+        int fillEnd = ParseFillEnd();
+        FillClip.Rect = new Rect(0, 0, SkinMath.FillWidth(_imgWidth, percent, fillStart, fillEnd) * scale, h);
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
         EmptyImage.Opacity = muted ? 0.6 : 1.0;
+
+        // Range handles ride on the artwork at their pixel positions (centered on the value).
+        RangeStartHandle.Visibility = Visibility.Visible;
+        RangeEndHandle.Visibility = Visibility.Visible;
+        RangeStartHandle.Margin = new Thickness(fillStart * scale - RangeStartHandle.Width / 2, 0, 0, 0);
+        RangeEndHandle.Margin = new Thickness(fillEnd * scale - RangeEndHandle.Width / 2, 0, 0, 0);
 
         bool showNumber = ShowNumberCheck.IsChecked == true;
         PercentTextBlock.Visibility = showNumber ? Visibility.Visible : Visibility.Collapsed;
@@ -439,13 +468,17 @@ public partial class SkinDesignerWindow : Window
         }
     }
 
-    /// <summary>Save/Test require both layers decoded and a valid name; Export requires a saved skin.</summary>
+    /// <summary>Save/Test require both layers decoded, a valid name, and a sane fill range;
+    /// Export requires a saved skin.</summary>
     private void Validate()
     {
         bool imagesOk = _emptyFrames is not null && _fullFrames is not null;
+        bool rangeOk = !imagesOk || ParseFillStart() < ParseFillEnd();
+        if (imagesOk && !rangeOk)
+            ImageErrorText.Text = "Fill range: the 0% position must be left of the 100% position.";
         string? nameError = SkinWriter.ValidateName(NameBox.Text);
-        SaveButton.IsEnabled = imagesOk && nameError is null;
-        TestButton.IsEnabled = imagesOk;
+        SaveButton.IsEnabled = imagesOk && rangeOk && nameError is null;
+        TestButton.IsEnabled = imagesOk && rangeOk;
         ExportZipButton.IsEnabled = _editingSkinName is not null;
     }
 
@@ -457,49 +490,82 @@ public partial class SkinDesignerWindow : Window
                 int.TryParse(NumberYBox.Text, out var y) ? y : 0)
             : null;
         // GIF layers self-describe; recording 1 keeps skin.json meaningful for the loader.
+        // A full-width fill range is the default and is omitted from skin.json entirely.
+        int fillStart = ParseFillStart();
+        int fillEnd = ParseFillEnd();
+        bool customRange = fillStart != 0 || fillEnd != _imgWidth;
         return new SkinConfig(text, ScaleSlider.Value, ParseFps(),
             IsGif(_emptySource) ? 1 : ParseFrames(EmptyFramesBox),
-            IsGif(_fullSource) ? 1 : ParseFrames(FullFramesBox));
+            IsGif(_fullSource) ? 1 : ParseFrames(FullFramesBox),
+            customRange ? fillStart : null,
+            customRange ? fillEnd : null);
     }
 
-    // ----- number dragging: grab the percent text anywhere on the preview and drop it; the
-    // X/Y boxes track live. Coordinates are stored in image pixels (divide by scale). -----
+    // ----- preview dragging: the percent number and the two fill-range handles are all
+    // grabbable; positions are stored in image pixels (divide by scale). -----
+
+    private static bool HitsElement(MouseButtonEventArgs e, FrameworkElement element)
+    {
+        if (element.Visibility != Visibility.Visible) return false;
+        var pos = e.GetPosition(element);
+        return pos.X >= 0 && pos.Y >= 0 && pos.X <= element.ActualWidth && pos.Y <= element.ActualHeight;
+    }
 
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (ShowNumberCheck.IsChecked != true || PercentTextBlock.Visibility != Visibility.Visible)
-            return;
-        // Only start a drag when the press lands on the number itself.
-        var posOnText = e.GetPosition(PercentTextBlock);
-        if (posOnText.X < 0 || posOnText.Y < 0 ||
-            posOnText.X > PercentTextBlock.ActualWidth || posOnText.Y > PercentTextBlock.ActualHeight)
-            return;
-        _draggingNumber = PreviewCanvas.CaptureMouse();
-        e.Handled = true;
+        // Range handles first (they overlay the artwork), then the number.
+        DragTarget target;
+        if (HitsElement(e, RangeStartHandle)) target = DragTarget.RangeStart;
+        else if (HitsElement(e, RangeEndHandle)) target = DragTarget.RangeEnd;
+        else if (ShowNumberCheck.IsChecked == true && HitsElement(e, PercentTextBlock)) target = DragTarget.Number;
+        else return;
+
+        _dragging = PreviewCanvas.CaptureMouse() ? target : DragTarget.None;
+        e.Handled = _dragging != DragTarget.None;
     }
 
     private void OnPreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (!_draggingNumber || e.LeftButton != MouseButtonState.Pressed) return;
+        if (_dragging == DragTarget.None || e.LeftButton != MouseButtonState.Pressed) return;
         double scale = ScaleSlider.Value;
         var pos = e.GetPosition(PreviewCanvas);
-        // Center the text on the cursor; clamp so the number stays inside the artwork.
-        int x = (int)Math.Round(pos.X / scale - PercentTextBlock.ActualWidth / (2 * scale));
-        int y = (int)Math.Round(pos.Y / scale - PercentTextBlock.ActualHeight / (2 * scale));
-        x = Math.Clamp(x, 0, Math.Max(0, _imgWidth - (int)(PercentTextBlock.ActualWidth / scale)));
-        y = Math.Clamp(y, 0, Math.Max(0, _imgHeight - (int)(PercentTextBlock.ActualHeight / scale)));
+
         _initializing = true; // box updates must not trigger OnControlChanged re-entry
-        NumberXBox.Text = x.ToString();
-        NumberYBox.Text = y.ToString();
+        switch (_dragging)
+        {
+            case DragTarget.Number:
+            {
+                // Center the text on the cursor; clamp so the number stays inside the artwork.
+                int x = (int)Math.Round(pos.X / scale - PercentTextBlock.ActualWidth / (2 * scale));
+                int y = (int)Math.Round(pos.Y / scale - PercentTextBlock.ActualHeight / (2 * scale));
+                NumberXBox.Text = Math.Clamp(x, 0, Math.Max(0, _imgWidth - (int)(PercentTextBlock.ActualWidth / scale))).ToString();
+                NumberYBox.Text = Math.Clamp(y, 0, Math.Max(0, _imgHeight - (int)(PercentTextBlock.ActualHeight / scale))).ToString();
+                break;
+            }
+            case DragTarget.RangeStart:
+            {
+                // The 0% handle stays left of the 100% handle by at least one pixel.
+                int x = (int)Math.Round(pos.X / scale);
+                FillStartBox.Text = Math.Clamp(x, 0, ParseFillEnd() - 1).ToString();
+                break;
+            }
+            case DragTarget.RangeEnd:
+            {
+                int x = (int)Math.Round(pos.X / scale);
+                FillEndBox.Text = Math.Clamp(x, ParseFillStart() + 1, _imgWidth).ToString();
+                break;
+            }
+        }
         _initializing = false;
         RefreshPreview();
     }
 
     private void OnPreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_draggingNumber) return;
-        _draggingNumber = false;
+        if (_dragging == DragTarget.None) return;
+        _dragging = DragTarget.None;
         PreviewCanvas.ReleaseMouseCapture();
+        Validate(); // a finished range drag re-checks save-ability
     }
 
     private void OnSave(object sender, RoutedEventArgs e)
