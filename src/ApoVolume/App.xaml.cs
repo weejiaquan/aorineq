@@ -27,6 +27,7 @@ public partial class App : System.Windows.Application
     private string? _loadedSkinStamp;
     private SettingsWindow? _settingsWindow;
     private SkinDesignerWindow? _skinDesigner;
+    private OnboardingWindow? _onboarding;
     private VolumeState _state = new();
     private string _settingsPath = "";
     // Single source of truth for everything persisted to settings.json. Every field (volume
@@ -139,6 +140,22 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // First-run onboarding: without Equalizer APO the app cannot function at all, so a
+        // missing install gets the guided wizard instead of the old fail-fast error box. The
+        // wizard downloads/starts the official installer and verifies; declining exits.
+        if (EapoDetection.Detect() == EapoStatus.NotInstalled)
+        {
+            bool proceed = false;
+            var wizard = new OnboardingWindow(blocking: true);
+            wizard.Completed += p => proceed = p;
+            wizard.ShowDialog();
+            if (!proceed)
+            {
+                Shutdown();
+                return;
+            }
+        }
+
         string configDir;
         try
         {
@@ -171,6 +188,12 @@ public partial class App : System.Windows.Application
 
             if (_uacDeclined)
                 _tray.ShowWarning("Not elevated — volume keys won't work in elevated games.");
+
+            // Installed-but-inactive is NOT blocking (running EAPO on a non-default device is
+            // legitimate) — one balloon pointing at the Settings setup guide.
+            if (EapoDetection.Detect() == EapoStatus.InstalledInactive)
+                _tray.ShowWarning("Equalizer APO isn't enabled on your current playback device — "
+                    + "volume changes won't be audible there. See Settings → Setup guide.");
 
             // Elevated-startup reconciliation.
             if (Elevation.IsElevated && _settings.RunAsAdmin)
@@ -247,10 +270,12 @@ public partial class App : System.Windows.Application
         _writer!.WriteVolume(_state.CurrentDb);
         _tray!.Update(_state.Percent, _state.Muted);
 
-        // Fresh-launch flag only (also used by E2E automation): when an instance is already
-        // running, a second launch signals the OSD as usual — this is not an IPC command.
+        // Fresh-launch flags only (also used by E2E automation): when an instance is already
+        // running, a second launch signals the OSD as usual — these are not IPC commands.
         if (e.Args.Contains("--settings"))
             OpenSettings();
+        if (e.Args.Contains("--onboarding"))
+            OpenOnboarding();
     }
 
     /// <summary>
@@ -543,6 +568,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
             _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
+            _settingsWindow.SetupGuideRequested += OpenOnboarding;
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
@@ -552,6 +578,19 @@ public partial class App : System.Windows.Application
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>Opens the setup wizard in informational mode (Settings "Setup guide…" and the
+    /// --onboarding flag). One window at a time; it closes for real, so no hide/show dance.</summary>
+    private void OpenOnboarding()
+    {
+        if (_onboarding is null)
+        {
+            _onboarding = new OnboardingWindow(blocking: false);
+            _onboarding.Closed += (_, _) => _onboarding = null;
+            _onboarding.Show();
+        }
+        _onboarding.Activate();
     }
 
     /// <summary>Lazily creates (or re-shows) the single skin designer window.</summary>

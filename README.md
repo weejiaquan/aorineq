@@ -62,6 +62,17 @@ elevated autostart task from starting on battery power (desktop setups are
 unaffected). A fix is planned; until then, plug in before rebooting or start
 the app manually.
 
+## First-run setup
+
+apo-volume needs [Equalizer APO](https://equalizerapo.com) (free, open-source, GPLv2). If it
+isn't installed, apo-volume opens a **setup guide** on first run: it downloads the official
+installer for you, starts it, and tells you exactly what to do in the one step that needs you —
+ticking your speakers/headphones in Equalizer APO's Configurator. Afterwards it verifies the
+install against your current playback device and offers a one-click **audio restart** (a reboot
+substitute). The guide can be reopened anytime from Settings → **Setup guide…**, which also
+shows a live status line and an **Open Configurator** shortcut for enabling other devices.
+apo-volume never bundles Equalizer APO — the installer always comes from its official home.
+
 ## OSD styles and skins
 
 apo-volume displays volume changes as a floating on-screen indicator (OSD). Four display styles
