@@ -102,10 +102,37 @@ Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
       "x": 10,        // pixel offset of text from left edge
       "y": 5          // pixel offset of text from top edge
     },
-    "scale": 1.5        // zoom multiplier (1.0 = original size, clamped to 0.25–4.0)
+    "scale": 1.5,       // zoom multiplier (1.0 = original size, clamped to 0.25–4.0)
+    "fps": 12,          // sprite-sheet playback rate (default 10, clamped to 1–60)
+    "emptyFrames": 1,   // sprite-sheet frame count for empty.png (default 1)
+    "fullFrames": 8     // sprite-sheet frame count for full.png (default 1)
   }
   ```
   Omitting `percentText` hides the percentage number. Omitting `scale` defaults to `1.0`.
+
+### Animated skins
+
+Each layer can animate, three ways — all behave identically once loaded:
+
+- **GIF** — name the file `empty.gif`/`full.gif` instead of `.png` (a `.png` with the same
+  name wins if both exist). Frame timing comes from the GIF itself. Note GIF transparency is
+  1-bit: hard edges, no soft shadows.
+- **Sprite-sheet PNG** — stack the frames vertically in one PNG (equal heights) and declare
+  `emptyFrames`/`fullFrames` + `fps` in skin.json. Full 8-bit alpha.
+- **PNG frame sequence** — in the skin designer, click **Frames…** and multi-select your
+  exported frames (e.g. Photoshop's *Export Layers to Files*); the sheet is assembled for you.
+
+Layers animate independently and loop; a static layer plus an animated one is fine. The two
+layers' *frame* sizes must match, and everything else (fill clip, mute, click-through and
+hit-testing, the percent number) works exactly as for static skins — the clickable shape is the
+union of every frame's opaque pixels. Animation only runs while the OSD is on screen.
+APNG is not supported (WPF has no decoder for it); use a sprite sheet for full-alpha animation.
+
+### Sharing skins
+
+Skins travel as plain zip files: **Export…** in the skin designer produces one, and
+**Import skin…** (Settings) or **Import…** (designer) installs one — the skin's name is taken
+from the zip filename. Only the known skin files are ever extracted from a zip.
   An invalid (unparseable) `skin.json` fails the whole skin, which then falls back per
   [Fallback behavior](#fallback-behavior) below.
 
