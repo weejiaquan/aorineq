@@ -11,6 +11,26 @@ namespace ApoVolume.UI;
 /// outline is a real stroke (WPF text has no native stroke). Shared by <see cref="SkinOsdWindow"/>
 /// and the designer preview so both look identical. All styling is best-effort: a malformed color
 /// falls back (white text / no outline / no shadow) and never throws.</summary>
+internal static class SkinComposite
+{
+    /// <summary>Clip that shows everything in a w×h canvas EXCEPT the filled bar span
+    /// [barStart..fillWidth] — the union of the left region [0..barStart] and the right region
+    /// [fillWidth..w]. Used for the empty layer so it never stacks under the (possibly translucent)
+    /// full layer in the filled span, while decoration outside the fill range still shows.</summary>
+    public static Geometry ComplementClip(double barStart, double fillWidth, double w, double h)
+    {
+        double leftEnd = Math.Clamp(barStart, 0, w);
+        double rightStart = Math.Clamp(fillWidth, 0, w);
+        var group = new GeometryGroup { FillRule = FillRule.Nonzero };
+        if (leftEnd > 0)
+            group.Children.Add(new RectangleGeometry(new Rect(0, 0, leftEnd, h)));
+        if (rightStart < w)
+            group.Children.Add(new RectangleGeometry(new Rect(rightStart, 0, w - rightStart, h)));
+        group.Freeze();
+        return group;
+    }
+}
+
 internal static class PercentTextRenderer
 {
     /// <summary>Rebuilds <paramref name="path"/> to show <paramref name="text"/> styled per

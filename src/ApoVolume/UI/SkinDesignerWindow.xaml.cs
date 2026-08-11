@@ -473,11 +473,12 @@ public partial class SkinDesignerWindow : Window
         int fillEnd = ParseFillEnd();
         double fillWidth = SkinMath.FillWidth(_imgWidth, percent, fillStart, fillEnd) * scale;
         FillClip.Rect = new Rect(0, 0, fillWidth, h);
-        // Empty shows only the unfilled remainder so it doesn't double under the full layer
-        // (matches SkinOsdWindow). Muted: full hidden, empty covers the whole canvas.
-        EmptyClip.Rect = muted
-            ? new Rect(0, 0, w, h)
-            : new Rect(fillWidth, 0, Math.Max(0, w - fillWidth), h);
+        // Empty shows everything except the filled bar span [fillStart..fillWidth] (matches
+        // SkinOsdWindow), so decoration outside the fill range keeps showing and there's no
+        // double-darkening under a translucent full. Muted: full hidden, empty covers all.
+        EmptyImage.Clip = muted
+            ? null
+            : SkinComposite.ComplementClip(fillStart * scale, fillWidth, w, h);
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
         EmptyImage.Opacity = muted ? 0.6 : 1.0;
 
@@ -546,7 +547,7 @@ public partial class SkinDesignerWindow : Window
         _shadowColor = t?.ShadowColor ?? "#FF000000";
         SelectFont(t?.FontFamily ?? "Segoe UI");
         FontSizeBox.Text = (t?.FontSize ?? 14).ToString("0.##");
-        BoldCheck.IsChecked = t?.Bold ?? true;
+        BoldCheck.IsChecked = t?.Bold ?? false; // default = SemiBold baseline, so a new plain number saves as {show,x,y}
         OutlineCheck.IsChecked = t?.OutlineColor is not null;
         OutlineWidthBox.Text = (t?.OutlineWidth is > 0 ? t.OutlineWidth : 2).ToString("0.##");
         ShadowCheck.IsChecked = t?.ShadowColor is not null;
