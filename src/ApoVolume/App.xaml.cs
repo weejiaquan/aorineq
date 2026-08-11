@@ -721,6 +721,11 @@ public partial class App : System.Windows.Application
     private static void RunElevatedSetup()
     {
         var configDir = ApoPaths.GetConfigDir();
+        // The grant goes on the config DIRECTORY, inheritable to children: external tools (Peace)
+        // rewrite config.txt via temp-file-and-rename, and a replacement file carries no file-level
+        // ACE — it inherits from the directory, so only a directory grant survives that pattern.
+        GrantUsersModifyOnDirectory(configDir);
+
         var volumePath = Path.Combine(configDir, ApoWriter.VolumeFileName);
         if (!File.Exists(volumePath))
             File.WriteAllText(volumePath, ApoWriter.FormatPreamp(0) + Environment.NewLine);
@@ -735,6 +740,8 @@ public partial class App : System.Windows.Application
         w.EnsureInclude();
     }
 
+    /// <summary>File-level grant for files that already exist (directory inheritance only applies
+    /// to files created after <see cref="GrantUsersModifyOnDirectory"/> ran).</summary>
     private static void GrantUsersModify(string path)
     {
         var fi = new FileInfo(path);
@@ -745,11 +752,28 @@ public partial class App : System.Windows.Application
         fi.SetAccessControl(acl);
     }
 
+    private static void GrantUsersModifyOnDirectory(string dir)
+    {
+        var di = new DirectoryInfo(dir);
+        var acl = di.GetAccessControl();
+        acl.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+            FileSystemRights.Modify,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+        di.SetAccessControl(acl);
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _hook?.Dispose();
         _tray?.Dispose();
         _writer?.Dispose();
+        // The show event must go away BEFORE the mutex is released: a relaunch probes the named
+        // event first, and while it still exists the new process would signal this dying instance
+        // and exit — leaving nothing running. With the event gone first, the relaunch falls
+        // through to the mutex, which is released right after, and starts normally.
+        _showEvent?.Dispose();
         if (_ownsMutex)
         {
             // Release before disposing so a successor launched during our teardown acquires the
@@ -758,7 +782,6 @@ public partial class App : System.Windows.Application
             catch (ApplicationException) { } // not owned (shouldn't happen; flag tracks ownership)
         }
         _mutex?.Dispose();
-        _showEvent?.Dispose();
         _settingsSaver.Dispose();
         base.OnExit(e);
     }

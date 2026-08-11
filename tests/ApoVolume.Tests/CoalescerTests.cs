@@ -174,6 +174,28 @@ public class CoalescerTests
     }
 
     [Fact]
+    public void Flush_never_lets_a_stale_action_overwrite_a_newer_one()
+    {
+        // Regression for the dequeue/run reordering race: the timer thread can dequeue an older
+        // action, lose the CPU, and only run it after Flush() has executed a newer one. With a
+        // 1 ms interval the timer contends with Flush on every iteration; the sequence stamps
+        // must guarantee the newest post's effect survives every interleaving.
+        using var c = new Coalescer(TimeSpan.FromMilliseconds(1));
+        int last = 0;
+        for (int i = 1; i <= 200; i++)
+        {
+            int v = i;
+            c.Post(() => Volatile.Write(ref last, v));
+            if (i % 3 == 0) c.Flush();
+        }
+        c.Flush();
+        Assert.Equal(200, Volatile.Read(ref last)); // newest post landed by the time Flush returned
+        Thread.Sleep(150); // any straggler timer action must not roll the value back
+        _out.WriteLine($"final value after settle: {last}");
+        Assert.Equal(200, Volatile.Read(ref last));
+    }
+
+    [Fact]
     public void Double_dispose_is_safe()
     {
         var c = new Coalescer(TimeSpan.FromMilliseconds(50));
