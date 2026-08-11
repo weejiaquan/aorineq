@@ -75,6 +75,8 @@
                                     <RectangleGeometry x:Name="FillClip" />
                                 </Image.Clip>
                             </Image>
+                            <!-- Optional muted artwork, shown alone in mute preview (mirrors SkinOsdWindow). -->
+                            <Image x:Name="MutedImage" Stretch="Fill" Visibility="Collapsed" />
                             <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top"
                                   Cursor="SizeAll" Visibility="Collapsed" />
                             <!-- Draggable fill-range handles: where 0% and 100% sit inside the artwork. -->
@@ -109,12 +111,24 @@
                     <TextBlock x:Name="FullPathText" Text="—" FontSize="11" Foreground="Gray"
                                TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
                 </DockPanel>
+                <TextBlock Text="muted — optional artwork while muted" FontSize="11" />
+                <DockPanel Margin="0,2,0,4">
+                    <Button DockPanel.Dock="Right" Content="Browse…" Padding="8,2" Click="OnBrowseMuted" />
+                    <Button DockPanel.Dock="Right" Content="Frames…" Padding="8,2" Margin="0,0,4,0" Click="OnImportMutedFrames"
+                            ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
+                    <Button x:Name="ClearMutedButton" DockPanel.Dock="Right" Content="Clear" Padding="8,2" Margin="0,0,4,0"
+                            Click="OnClearMuted" ToolTip="Remove the muted artwork and fall back to dimming" />
+                    <TextBlock x:Name="MutedPathText" Text="—" FontSize="11" Foreground="Gray"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
+                </DockPanel>
                 <TextBlock x:Name="ImageErrorText" Foreground="#D32F2F" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" />
 
                 <Separator Margin="0,4,0,8" />
                 <TextBlock Text="Animation" FontWeight="SemiBold" Margin="0,0,0,4" />
                 <Grid Margin="0,0,0,6">
                     <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -130,6 +144,9 @@
                     <TextBlock Grid.Column="4" Text="full" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
                                ToolTip="Sprite-sheet frame count for the full layer (GIFs are automatic)" />
                     <TextBox x:Name="FullFramesBox" Grid.Column="5" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                    <TextBlock Grid.Column="6" Text="muted" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
+                               ToolTip="Sprite-sheet frame count for the muted layer (GIFs are automatic)" />
+                    <TextBox x:Name="MutedFramesBox" Grid.Column="7" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
                 </Grid>
 
                 <Separator Margin="0,4,0,8" />
@@ -155,8 +172,15 @@
                 </TextBlock>
                 <Slider x:Name="FillSlider" Minimum="0" Maximum="100" Value="62"
                         ValueChanged="OnControlChanged" Margin="0,0,0,4" />
-                <CheckBox x:Name="MuteCheck" Content="Preview mute (dimmed, no fill)"
+                <CheckBox x:Name="MuteCheck" Content="Preview mute"
                           Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,4" />
+                <TextBlock Margin="0,0,0,2"
+                           ToolTip="Opacity of the dimmed artwork while muted — only used when the skin has no muted artwork">
+                    <Run Text="Mute dim: " /><Run x:Name="MutedDimLabel" Text="0.60" />
+                </TextBlock>
+                <Slider x:Name="MutedDimSlider" Minimum="0" Maximum="1" Value="0.6"
+                        TickFrequency="0.05" IsSnapToTickEnabled="True"
+                        ValueChanged="OnControlChanged" Margin="0,0,0,4" />
 
                 <Separator Margin="0,4,0,8" />
                 <CheckBox x:Name="ShowNumberCheck" Content="Show number (drag it on the preview)"
@@ -199,6 +223,13 @@
                         <TextBlock Text="Color" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
                         <Button x:Name="TextColorSwatch" Width="28" Height="18" Click="OnPickTextColor"
                                 ToolTip="Text color" />
+                        <TextBlock Text="Align" VerticalAlignment="Center" Margin="12,0,4,0" FontSize="11"
+                                   ToolTip="What X anchors: the number's left edge, center, or right edge" />
+                        <ComboBox x:Name="AlignCombo" Width="76" SelectionChanged="OnControlChanged">
+                            <ComboBoxItem Content="Left" Tag="left" IsSelected="True" />
+                            <ComboBoxItem Content="Center" Tag="center" />
+                            <ComboBoxItem Content="Right" Tag="right" />
+                        </ComboBox>
                     </StackPanel>
                     <Grid Margin="0,0,0,4">
                         <Grid.ColumnDefinitions>

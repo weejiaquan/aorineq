@@ -20,10 +20,13 @@ public partial class SkinDesignerWindow : Window
 
     private string? _emptySource;
     private string? _fullSource;
+    private string? _mutedSource; // optional muted artwork; null = dim-the-empty-layer fallback
     private SkinFrames? _emptyFrames;
     private SkinFrames? _fullFrames;
+    private SkinFrames? _mutedFrames;
     private int _imgWidth;   // logical frame size
     private int _imgHeight;
+    private double _lastTextWidth; // measured percent-text width (scale-multiplied), for align/drag math
     private string? _editingSkinName; // null = designing a new skin
     // True from construction (same pattern as SettingsWindow): sliders with an initial Value
     // raise ValueChanged DURING InitializeComponent, before sibling elements exist — the guard
@@ -31,13 +34,16 @@ public partial class SkinDesignerWindow : Window
     private bool _initializing = true;
 
     private enum DragTarget { None, Number, RangeStart, RangeEnd }
+    private enum PreviewLayer { Empty, Full, Muted }
     private DragTarget _dragging = DragTarget.None;
     private SkinOsdWindow? _testOsd;
     private string? _testFolder;
     private readonly DispatcherTimer _emptyAnimTimer = new();
     private readonly DispatcherTimer _fullAnimTimer = new();
+    private readonly DispatcherTimer _mutedAnimTimer = new();
     private int _emptyFrameIndex;
     private int _fullFrameIndex;
+    private int _mutedFrameIndex;
 
     // Text-style colors kept as hex strings; the swatch buttons show them and the color picker
     // edits them. Text color always set; outline/shadow null = that effect off.
@@ -58,14 +64,16 @@ public partial class SkinDesignerWindow : Window
             .Select(f => f.Source).OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
             FontCombo.Items.Add(family);
         _initializing = false;
-        _emptyAnimTimer.Tick += (_, _) => AdvanceFrame(isEmpty: true);
-        _fullAnimTimer.Tick += (_, _) => AdvanceFrame(isEmpty: false);
+        _emptyAnimTimer.Tick += (_, _) => AdvanceFrame(PreviewLayer.Empty);
+        _fullAnimTimer.Tick += (_, _) => AdvanceFrame(PreviewLayer.Full);
+        _mutedAnimTimer.Tick += (_, _) => AdvanceFrame(PreviewLayer.Muted);
         IsVisibleChanged += (_, e) =>
         {
             if (e.NewValue is false)
             {
                 _emptyAnimTimer.Stop();
                 _fullAnimTimer.Stop();
+                _mutedAnimTimer.Stop();
             }
             else
             {
@@ -124,8 +132,11 @@ public partial class SkinDesignerWindow : Window
         _editingSkinName = info.Name;
         _emptySource = info.EmptyPath;
         _fullSource = info.FullPath;
+        _mutedSource = info.MutedPath;
         EmptyPathText.Text = info.EmptyPath;
         FullPathText.Text = info.FullPath;
+        MutedPathText.Text = info.MutedPath ?? "—";
+        MutedPathText.ToolTip = info.MutedPath;
         _initializing = true; // bulk control update must not re-enter OnControlChanged per control
         NameBox.Text = info.Name;
         ShowNumberCheck.IsChecked = info.Text is { Show: true };
@@ -136,6 +147,9 @@ public partial class SkinDesignerWindow : Window
         FpsBox.Text = info.Fps.ToString("0.##");
         EmptyFramesBox.Text = info.EmptyFrames.ToString();
         FullFramesBox.Text = info.FullFrames.ToString();
+        MutedFramesBox.Text = info.MutedFrames.ToString();
+        MutedDimSlider.Value = info.MutedDim;
+        MutedDimLabel.Text = info.MutedDim.ToString("0.00");
         FillStartBox.Text = info.FillStartX.ToString();
         FillEndBox.Text = info.FillEndX.ToString();
         _initializing = false;
@@ -148,19 +162,26 @@ public partial class SkinDesignerWindow : Window
         _editingSkinName = null;
         _emptySource = null;
         _fullSource = null;
+        _mutedSource = null;
         _emptyFrames = null;
         _fullFrames = null;
+        _mutedFrames = null;
         _initializing = true;
         NameBox.Text = "";
         FpsBox.Text = "10";
         EmptyFramesBox.Text = "1";
         FullFramesBox.Text = "1";
+        MutedFramesBox.Text = "1";
+        MutedDimSlider.Value = 0.6;
+        MutedDimLabel.Text = "0.60";
         FillStartBox.Text = "";
         FillEndBox.Text = "";
         LoadTextStyle(null); // reset styling controls to defaults
         _initializing = false;
         EmptyPathText.Text = "—";
         FullPathText.Text = "—";
+        MutedPathText.Text = "—";
+        MutedPathText.ToolTip = null;
         ImageErrorText.Text = "";
         RestartAnimationTimers(); // no frames -> stops both
         RefreshPreview();
@@ -168,34 +189,71 @@ public partial class SkinDesignerWindow : Window
         StatusText.Text = "Pick two images to start a new skin.";
     }
 
-    private void OnBrowseEmpty(object sender, RoutedEventArgs e) => Browse(isEmpty: true);
-    private void OnBrowseFull(object sender, RoutedEventArgs e) => Browse(isEmpty: false);
+    private void OnBrowseEmpty(object sender, RoutedEventArgs e) => Browse(PreviewLayer.Empty);
+    private void OnBrowseFull(object sender, RoutedEventArgs e) => Browse(PreviewLayer.Full);
+    private void OnBrowseMuted(object sender, RoutedEventArgs e) => Browse(PreviewLayer.Muted);
 
-    private void Browse(bool isEmpty)
+    private void OnClearMuted(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Filter = "Images (*.png;*.gif)|*.png;*.gif",
-            Title = isEmpty ? "Choose the empty layer (0% artwork)" : "Choose the full layer (100% artwork)",
-        };
-        if (dialog.ShowDialog(this) != true) return;
-        if (isEmpty) { _emptySource = dialog.FileName; EmptyPathText.Text = dialog.FileName; EmptyPathText.ToolTip = dialog.FileName; }
-        else { _fullSource = dialog.FileName; FullPathText.Text = dialog.FileName; FullPathText.ToolTip = dialog.FileName; }
+        _mutedSource = null;
+        _mutedFrames = null;
+        MutedPathText.Text = "—";
+        MutedPathText.ToolTip = null;
         _initializing = true;
-        FillStartBox.Text = ""; // new artwork: range resets to full width in ReloadPreviewData
-        FillEndBox.Text = "";
+        MutedFramesBox.Text = "1";
         _initializing = false;
         ReloadPreviewData();
     }
 
-    private void OnImportEmptyFrames(object sender, RoutedEventArgs e) => ImportFrames(isEmpty: true);
-    private void OnImportFullFrames(object sender, RoutedEventArgs e) => ImportFrames(isEmpty: false);
+    private void Browse(PreviewLayer layer)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "Images (*.png;*.gif)|*.png;*.gif",
+            Title = layer switch
+            {
+                PreviewLayer.Empty => "Choose the empty layer (0% artwork)",
+                PreviewLayer.Full => "Choose the full layer (100% artwork)",
+                _ => "Choose the muted artwork (shown instead of the dimmed bar)",
+            },
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        SetLayerSource(layer, dialog.FileName);
+        if (layer != PreviewLayer.Muted)
+        {
+            _initializing = true;
+            FillStartBox.Text = ""; // new artwork: range resets to full width in ReloadPreviewData
+            FillEndBox.Text = "";
+            _initializing = false;
+        }
+        ReloadPreviewData();
+    }
+
+    private void SetLayerSource(PreviewLayer layer, string path)
+    {
+        switch (layer)
+        {
+            case PreviewLayer.Empty:
+                _emptySource = path; EmptyPathText.Text = path; EmptyPathText.ToolTip = path;
+                break;
+            case PreviewLayer.Full:
+                _fullSource = path; FullPathText.Text = path; FullPathText.ToolTip = path;
+                break;
+            case PreviewLayer.Muted:
+                _mutedSource = path; MutedPathText.Text = path; MutedPathText.ToolTip = path;
+                break;
+        }
+    }
+
+    private void OnImportEmptyFrames(object sender, RoutedEventArgs e) => ImportFrames(PreviewLayer.Empty);
+    private void OnImportFullFrames(object sender, RoutedEventArgs e) => ImportFrames(PreviewLayer.Full);
+    private void OnImportMutedFrames(object sender, RoutedEventArgs e) => ImportFrames(PreviewLayer.Muted);
 
     /// <summary>Builds a sprite sheet from a numbered PNG frame sequence (the Photoshop
     /// "Export Layers to Files" workflow): frames are sorted by filename, must share dimensions,
     /// get stacked vertically into a scratch PNG that becomes the layer source, and the layer's
     /// frame count is filled in automatically.</summary>
-    private void ImportFrames(bool isEmpty)
+    private void ImportFrames(PreviewLayer layer)
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
@@ -245,22 +303,32 @@ public partial class SkinDesignerWindow : Window
                 encoder.Save(fs);
 
             _initializing = true;
-            if (isEmpty)
+            switch (layer)
             {
-                _emptySource = sheetPath;
-                EmptyPathText.Text = $"{files.Length} frames → sheet";
-                EmptyPathText.ToolTip = sheetPath;
-                EmptyFramesBox.Text = files.Length.ToString();
+                case PreviewLayer.Empty:
+                    _emptySource = sheetPath;
+                    EmptyPathText.Text = $"{files.Length} frames → sheet";
+                    EmptyPathText.ToolTip = sheetPath;
+                    EmptyFramesBox.Text = files.Length.ToString();
+                    break;
+                case PreviewLayer.Full:
+                    _fullSource = sheetPath;
+                    FullPathText.Text = $"{files.Length} frames → sheet";
+                    FullPathText.ToolTip = sheetPath;
+                    FullFramesBox.Text = files.Length.ToString();
+                    break;
+                case PreviewLayer.Muted:
+                    _mutedSource = sheetPath;
+                    MutedPathText.Text = $"{files.Length} frames → sheet";
+                    MutedPathText.ToolTip = sheetPath;
+                    MutedFramesBox.Text = files.Length.ToString();
+                    break;
             }
-            else
+            if (layer != PreviewLayer.Muted)
             {
-                _fullSource = sheetPath;
-                FullPathText.Text = $"{files.Length} frames → sheet";
-                FullPathText.ToolTip = sheetPath;
-                FullFramesBox.Text = files.Length.ToString();
+                FillStartBox.Text = ""; // new artwork: range resets to full width in ReloadPreviewData
+                FillEndBox.Text = "";
             }
-            FillStartBox.Text = ""; // new artwork: range resets to full width in ReloadPreviewData
-            FillEndBox.Text = "";
             _initializing = false;
             ReloadPreviewData();
             StatusText.Text = $"Assembled {files.Length} frames into a sprite sheet.";
@@ -279,13 +347,15 @@ public partial class SkinDesignerWindow : Window
     {
         _emptyFrames = null;
         _fullFrames = null;
+        _mutedFrames = null;
         RestartAnimationTimers(); // stale timers from the previous skin must not keep ticking
 
         var emptyMeta = ReadLayerMeta(_emptySource, ParseFrames(EmptyFramesBox));
         var fullMeta = ReadLayerMeta(_fullSource, ParseFrames(FullFramesBox));
-        if (emptyMeta.Error is not null || fullMeta.Error is not null)
+        var mutedMeta = ReadLayerMeta(_mutedSource, ParseFrames(MutedFramesBox));
+        if (emptyMeta.Error is not null || fullMeta.Error is not null || mutedMeta.Error is not null)
         {
-            ImageErrorText.Text = emptyMeta.Error ?? fullMeta.Error!;
+            ImageErrorText.Text = emptyMeta.Error ?? fullMeta.Error ?? mutedMeta.Error!;
             RefreshPreview();
             Validate();
             return;
@@ -306,12 +376,23 @@ public partial class SkinDesignerWindow : Window
             Validate();
             return;
         }
+        if (mutedMeta.Size is not null && mutedMeta.Size != emptyMeta.Size)
+        {
+            ImageErrorText.Text =
+                $"Frame-size mismatch: muted is {mutedMeta.Size.Value.Width}×{mutedMeta.Size.Value.Height} " +
+                $"but the skin is {emptyMeta.Size.Value.Width}×{emptyMeta.Size.Value.Height}. They must be identical.";
+            RefreshPreview();
+            Validate();
+            return;
+        }
 
         try
         {
             double fps = ParseFps();
             _emptyFrames = SkinFrames.Load(_emptySource!, ParseFrames(EmptyFramesBox), fps);
             _fullFrames = SkinFrames.Load(_fullSource!, ParseFrames(FullFramesBox), fps);
+            if (_mutedSource is not null)
+                _mutedFrames = SkinFrames.Load(_mutedSource, ParseFrames(MutedFramesBox), fps);
         }
         catch (Exception ex) when (ex is NotSupportedException or IOException
             or FileFormatException or ArgumentException or OutOfMemoryException)
@@ -320,6 +401,7 @@ public partial class SkinDesignerWindow : Window
             // surface as an error, not take the app down.
             _emptyFrames = null;
             _fullFrames = null;
+            _mutedFrames = null;
             ImageErrorText.Text = "Image failed to decode: " + ex.Message;
             RefreshPreview();
             Validate();
@@ -331,6 +413,7 @@ public partial class SkinDesignerWindow : Window
         _imgHeight = emptyMeta.Size.Value.Height;
         _emptyFrameIndex = 0;
         _fullFrameIndex = 0;
+        _mutedFrameIndex = 0;
         // Blank/unparsable range boxes take the full width of the (possibly new) artwork.
         _initializing = true;
         if (!int.TryParse(FillStartBox.Text, out _)) FillStartBox.Text = "0";
@@ -340,8 +423,10 @@ public partial class SkinDesignerWindow : Window
         _initializing = true;
         if (IsGif(_emptySource)) EmptyFramesBox.Text = _emptyFrames.Frames.Count.ToString();
         if (IsGif(_fullSource)) FullFramesBox.Text = _fullFrames.Frames.Count.ToString();
+        if (IsGif(_mutedSource) && _mutedFrames is not null) MutedFramesBox.Text = _mutedFrames.Frames.Count.ToString();
         EmptyFramesBox.IsEnabled = !IsGif(_emptySource);
         FullFramesBox.IsEnabled = !IsGif(_fullSource);
+        MutedFramesBox.IsEnabled = _mutedSource is not null && !IsGif(_mutedSource);
         _initializing = false;
         RefreshPreview();
         RestartAnimationTimers();
@@ -381,21 +466,28 @@ public partial class SkinDesignerWindow : Window
     private int ParseFillEnd() =>
         int.TryParse(FillEndBox.Text, out var v) ? Math.Clamp(v, 0, Math.Max(0, _imgWidth)) : _imgWidth;
 
-    private void AdvanceFrame(bool isEmpty)
+    private void AdvanceFrame(PreviewLayer layer)
     {
-        if (isEmpty)
+        switch (layer)
         {
-            if (_emptyFrames is not { IsAnimated: true }) return;
-            _emptyFrameIndex = (_emptyFrameIndex + 1) % _emptyFrames.Frames.Count;
-            EmptyImage.Source = _emptyFrames.Frames[_emptyFrameIndex];
-            _emptyAnimTimer.Interval = _emptyFrames.Delays[_emptyFrameIndex];
-        }
-        else
-        {
-            if (_fullFrames is not { IsAnimated: true }) return;
-            _fullFrameIndex = (_fullFrameIndex + 1) % _fullFrames.Frames.Count;
-            FullImage.Source = _fullFrames.Frames[_fullFrameIndex];
-            _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
+            case PreviewLayer.Empty:
+                if (_emptyFrames is not { IsAnimated: true }) return;
+                _emptyFrameIndex = (_emptyFrameIndex + 1) % _emptyFrames.Frames.Count;
+                EmptyImage.Source = _emptyFrames.Frames[_emptyFrameIndex];
+                _emptyAnimTimer.Interval = _emptyFrames.Delays[_emptyFrameIndex];
+                break;
+            case PreviewLayer.Full:
+                if (_fullFrames is not { IsAnimated: true }) return;
+                _fullFrameIndex = (_fullFrameIndex + 1) % _fullFrames.Frames.Count;
+                FullImage.Source = _fullFrames.Frames[_fullFrameIndex];
+                _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
+                break;
+            case PreviewLayer.Muted:
+                if (_mutedFrames is not { IsAnimated: true }) return;
+                _mutedFrameIndex = (_mutedFrameIndex + 1) % _mutedFrames.Frames.Count;
+                MutedImage.Source = _mutedFrames.Frames[_mutedFrameIndex];
+                _mutedAnimTimer.Interval = _mutedFrames.Delays[_mutedFrameIndex];
+                break;
         }
     }
 
@@ -403,6 +495,7 @@ public partial class SkinDesignerWindow : Window
     {
         _emptyAnimTimer.Stop();
         _fullAnimTimer.Stop();
+        _mutedAnimTimer.Stop();
         if (!IsVisible) return;
         if (_emptyFrames is { IsAnimated: true })
         {
@@ -414,6 +507,11 @@ public partial class SkinDesignerWindow : Window
             _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
             _fullAnimTimer.Start();
         }
+        if (_mutedFrames is { IsAnimated: true })
+        {
+            _mutedAnimTimer.Interval = _mutedFrames.Delays[_mutedFrameIndex];
+            _mutedAnimTimer.Start();
+        }
     }
 
     /// <summary>Single change handler for every editor control: keeps labels in sync and
@@ -423,8 +521,9 @@ public partial class SkinDesignerWindow : Window
         if (_initializing) return;
         FillLabel.Text = $"{(int)FillSlider.Value}%";
         ScaleLabel.Text = ScaleSlider.Value.ToString("0.00");
+        MutedDimLabel.Text = MutedDimSlider.Value.ToString("0.00");
         if (ReferenceEquals(sender, FpsBox) || ReferenceEquals(sender, EmptyFramesBox)
-            || ReferenceEquals(sender, FullFramesBox))
+            || ReferenceEquals(sender, FullFramesBox) || ReferenceEquals(sender, MutedFramesBox))
         {
             ReloadPreviewData();
             return;
@@ -479,8 +578,17 @@ public partial class SkinDesignerWindow : Window
         EmptyImage.Clip = muted
             ? null
             : SkinComposite.ComplementClip(fillStart * scale, fillWidth, w, h);
+        // Mute preview mirrors SkinOsdWindow: dedicated muted artwork replaces everything;
+        // otherwise the empty layer dims by the mutedDim slider. The slider only means anything
+        // without a muted layer, so it's disabled while one is set.
+        bool useMutedLayer = muted && _mutedFrames is not null;
+        MutedImage.Visibility = useMutedLayer ? Visibility.Visible : Visibility.Collapsed;
+        if (_mutedFrames is not null)
+            MutedImage.Source = _mutedFrames.Frames[_mutedFrameIndex % _mutedFrames.Frames.Count];
+        EmptyImage.Visibility = useMutedLayer ? Visibility.Hidden : Visibility.Visible;
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
-        EmptyImage.Opacity = muted ? 0.6 : 1.0;
+        EmptyImage.Opacity = muted && !useMutedLayer ? MutedDimSlider.Value : 1.0;
+        MutedDimSlider.IsEnabled = _mutedSource is null;
 
         // Range handles ride on the artwork at their pixel positions (centered on the value).
         RangeStartHandle.Visibility = Visibility.Visible;
@@ -493,11 +601,14 @@ public partial class SkinDesignerWindow : Window
         TextStylePanel.IsEnabled = showNumber;
         if (showNumber)
         {
-            PercentTextRenderer.Update(PercentPath, CurrentSkinText()!, percent.ToString(), scale,
+            var style = CurrentSkinText()!;
+            _lastTextWidth = PercentTextRenderer.Update(PercentPath, style, percent.ToString(), scale,
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
             int x = int.TryParse(NumberXBox.Text, out var px) ? px : 0;
             int y = int.TryParse(NumberYBox.Text, out var py) ? py : 0;
-            PercentPath.Margin = new Thickness(x * scale, y * scale, 0, 0);
+            // X is the alignment anchor, same math as SkinOsdWindow.ShowVolume.
+            PercentPath.Margin = new Thickness(
+                SkinMath.AlignedTextX(x * scale, _lastTextWidth, style.Align), y * scale, 0, 0);
         }
     }
 
@@ -508,14 +619,15 @@ public partial class SkinDesignerWindow : Window
     private void Validate()
     {
         bool imagesOk = _emptyFrames is not null && _fullFrames is not null;
+        bool mutedOk = _mutedSource is null || _mutedFrames is not null; // chosen muted art must decode
         bool rangeOk = !imagesOk || ParseFillStart() < ParseFillEnd();
         if (imagesOk && !rangeOk)
             ImageErrorText.Text = RangeErrorMessage;
         else if (ImageErrorText.Text == RangeErrorMessage)
             ImageErrorText.Text = ""; // fixed without an image reload: stale error must clear
         string? nameError = SkinWriter.ValidateName(NameBox.Text);
-        SaveButton.IsEnabled = imagesOk && rangeOk && nameError is null;
-        TestButton.IsEnabled = imagesOk && rangeOk;
+        SaveButton.IsEnabled = imagesOk && mutedOk && rangeOk && nameError is null;
+        TestButton.IsEnabled = imagesOk && mutedOk && rangeOk;
         ExportZipButton.IsEnabled = _editingSkinName is not null;
     }
 
@@ -536,8 +648,12 @@ public partial class SkinDesignerWindow : Window
             OutlineWidth: double.TryParse(OutlineWidthBox.Text, out var ow) ? Math.Clamp(ow, 0, 20) : 0,
             ShadowColor: ShadowCheck.IsChecked == true ? _shadowColor : null,
             ShadowBlur: double.TryParse(ShadowBlurBox.Text, out var sb) ? Math.Clamp(sb, 0, 50) : 4,
-            ShadowDepth: double.TryParse(ShadowDepthBox.Text, out var sd) ? Math.Clamp(sd, 0, 50) : 2);
+            ShadowDepth: double.TryParse(ShadowDepthBox.Text, out var sd) ? Math.Clamp(sd, 0, 50) : 2,
+            Align: SelectedAlign());
     }
+
+    private string SelectedAlign() =>
+        (AlignCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "left";
 
     /// <summary>Populates the text-style controls from a SkinText (or defaults when null).</summary>
     private void LoadTextStyle(SkinText? t)
@@ -546,6 +662,7 @@ public partial class SkinDesignerWindow : Window
         _outlineColor = t?.OutlineColor ?? "#FF000000";
         _shadowColor = t?.ShadowColor ?? "#FF000000";
         SelectFont(t?.FontFamily ?? "Segoe UI");
+        SelectAlign(t?.Align ?? "left");
         FontSizeBox.Text = (t?.FontSize ?? 14).ToString("0.##");
         BoldCheck.IsChecked = t?.Bold ?? false; // default = SemiBold baseline, so a new plain number saves as {show,x,y}
         OutlineCheck.IsChecked = t?.OutlineColor is not null;
@@ -570,6 +687,19 @@ public partial class SkinDesignerWindow : Window
         // it verbatim instead of rewriting it to the fallback.
         FontCombo.SelectedIndex = -1;
         FontCombo.Text = family;
+    }
+
+    private void SelectAlign(string align)
+    {
+        foreach (ComboBoxItem item in AlignCombo.Items)
+        {
+            if ((string)item.Tag == align)
+            {
+                AlignCombo.SelectedItem = item;
+                return;
+            }
+        }
+        AlignCombo.SelectedIndex = 0; // loader normalizes, but default to Left defensively
     }
 
     private void UpdateSwatches()
@@ -636,7 +766,10 @@ public partial class SkinDesignerWindow : Window
             IsGif(_emptySource) ? 1 : ParseFrames(EmptyFramesBox),
             IsGif(_fullSource) ? 1 : ParseFrames(FullFramesBox),
             customRange ? fillStart : null,
-            customRange ? fillEnd : null);
+            customRange ? fillEnd : null,
+            // Rounded so slider tick accumulation (12 × 0.05) can't miss the 0.6 default check.
+            MutedFrames: _mutedSource is null || IsGif(_mutedSource) ? 1 : ParseFrames(MutedFramesBox),
+            MutedDim: Math.Round(MutedDimSlider.Value, 2));
     }
 
     // ----- preview dragging: the percent number and the two fill-range handles are all
@@ -673,10 +806,16 @@ public partial class SkinDesignerWindow : Window
         {
             case DragTarget.Number:
             {
-                // Center the text on the cursor; clamp so the number stays inside the artwork.
-                int x = (int)Math.Round(pos.X / scale - PercentPath.ActualWidth / (2 * scale));
+                // Center the text on the cursor and clamp its left edge into the artwork; the
+                // stored X is then the ANCHOR for the current alignment (margin position mapped
+                // back through the alignment offset), so a centered number drops centered under
+                // the cursor and stays put when the digit count changes.
+                string align = SelectedAlign();
+                double leftEdge = Math.Clamp(pos.X - _lastTextWidth / 2,
+                    0, Math.Max(0, _imgWidth * scale - _lastTextWidth));
+                double anchor = leftEdge - SkinMath.AlignedTextX(0, _lastTextWidth, align);
                 int y = (int)Math.Round(pos.Y / scale - PercentPath.ActualHeight / (2 * scale));
-                NumberXBox.Text = Math.Clamp(x, 0, Math.Max(0, _imgWidth - (int)(PercentPath.ActualWidth / scale))).ToString();
+                NumberXBox.Text = ((int)Math.Round(anchor / scale)).ToString();
                 NumberYBox.Text = Math.Clamp(y, 0, Math.Max(0, _imgHeight - (int)(PercentPath.ActualHeight / scale))).ToString();
                 break;
             }
@@ -727,13 +866,19 @@ public partial class SkinDesignerWindow : Window
         {
             CleanupTestOsd();
             var folder = SkinWriter.Save(ApoPaths.GetSkinsRoot(), name, _emptySource, _fullSource,
-                CurrentConfig());
+                CurrentConfig(), _mutedSource);
             // Adopt the saved copies as the working sources (keeping each source's extension —
             // a GIF layer saved as empty.gif), so further edits are in-place.
             _emptySource = Path.Combine(folder, "empty" + (IsGif(_emptySource) ? ".gif" : ".png"));
             _fullSource = Path.Combine(folder, "full" + (IsGif(_fullSource) ? ".gif" : ".png"));
             EmptyPathText.Text = _emptySource;
             FullPathText.Text = _fullSource;
+            if (_mutedSource is not null)
+            {
+                _mutedSource = Path.Combine(folder, "muted" + (IsGif(_mutedSource) ? ".gif" : ".png"));
+                MutedPathText.Text = _mutedSource;
+                MutedPathText.ToolTip = _mutedSource;
+            }
             _editingSkinName = name;
             PopulateSkinList(selectName: name);
             StatusText.Text = $"Saved '{name}'.";
@@ -823,7 +968,7 @@ public partial class SkinDesignerWindow : Window
         {
             var root = Path.Combine(Path.GetTempPath(), "apo-volume-skin-preview");
             var name = Guid.NewGuid().ToString("N");
-            var folder = SkinWriter.Save(root, name, _emptySource, _fullSource, CurrentConfig());
+            var folder = SkinWriter.Save(root, name, _emptySource, _fullSource, CurrentConfig(), _mutedSource);
             var info = SkinLoader.Load(folder);
             if (!info.IsValid)
             {

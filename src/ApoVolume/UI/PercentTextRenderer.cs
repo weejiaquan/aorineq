@@ -35,8 +35,11 @@ internal static class PercentTextRenderer
 {
     /// <summary>Rebuilds <paramref name="path"/> to show <paramref name="text"/> styled per
     /// <paramref name="style"/> at <paramref name="scale"/> (font size, outline width, shadow
-    /// blur/depth are all multiplied by scale so the number tracks the skin's zoom).</summary>
-    public static void Update(Path path, SkinText style, string text, double scale, double pixelsPerDip)
+    /// blur/depth are all multiplied by scale so the number tracks the skin's zoom). Returns the
+    /// measured text width (already scale-multiplied) so callers can place the Path's margin per
+    /// the style's alignment — the width changes with the digit count, so the margin must be
+    /// recomputed on every update.</summary>
+    public static double Update(Path path, SkinText style, string text, double scale, double pixelsPerDip)
     {
         var typeface = new Typeface(
             new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
@@ -78,6 +81,8 @@ internal static class PercentTextRenderer
                 Opacity = 1.0,
             }
             : null;
+
+        return formatted.WidthIncludingTrailingWhitespace;
     }
 
     private static SolidColorBrush? Brush(string? hex)

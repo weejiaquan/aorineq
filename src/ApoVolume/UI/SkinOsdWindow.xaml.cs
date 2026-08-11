@@ -23,10 +23,13 @@ public partial class SkinOsdWindow : Window
     private readonly AlphaMap _hitMap;
     private readonly SkinFrames _emptyFrames;
     private readonly SkinFrames _fullFrames;
+    private readonly SkinFrames? _mutedFrames; // optional dedicated muted-state artwork
     private readonly DispatcherTimer _emptyAnimTimer = new();
     private readonly DispatcherTimer _fullAnimTimer = new();
+    private readonly DispatcherTimer _mutedAnimTimer = new();
     private int _emptyFrameIndex;
     private int _fullFrameIndex;
+    private int _mutedFrameIndex;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
 
     // Behavior config, pushed in from Settings via ApplyConfig; same defaults as OsdWindow so the
@@ -55,10 +58,18 @@ public partial class SkinOsdWindow : Window
 
         _emptyFrames = SkinFrames.Load(info.EmptyPath, info.EmptyFrames, info.Fps);
         _fullFrames = SkinFrames.Load(info.FullPath, info.FullFrames, info.Fps);
-        _hitMap = AlphaMap.Union(_emptyFrames.Frames.Concat(_fullFrames.Frames));
+        _mutedFrames = info.MutedPath is null
+            ? null
+            : SkinFrames.Load(info.MutedPath, info.MutedFrames, info.Fps);
+        var hitFrames = _emptyFrames.Frames.Concat(_fullFrames.Frames);
+        if (_mutedFrames is not null)
+            hitFrames = hitFrames.Concat(_mutedFrames.Frames); // muted-only art must stay clickable
+        _hitMap = AlphaMap.Union(hitFrames);
 
         EmptyImage.Source = _emptyFrames.Frames[0];
         FullImage.Source = _fullFrames.Frames[0];
+        if (_mutedFrames is not null)
+            MutedImage.Source = _mutedFrames.Frames[0];
 
         // Animated layers advance on their own cadence (per-frame delays), and only while the
         // window is visible — hiding stops the timers so an idle OSD costs nothing.
@@ -76,23 +87,31 @@ public partial class SkinOsdWindow : Window
                 FullImage.Source = _fullFrames.Frames[_fullFrameIndex];
                 _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
             };
+        if (_mutedFrames is { IsAnimated: true })
+            _mutedAnimTimer.Tick += (_, _) =>
+            {
+                _mutedFrameIndex = (_mutedFrameIndex + 1) % _mutedFrames.Frames.Count;
+                MutedImage.Source = _mutedFrames.Frames[_mutedFrameIndex];
+                _mutedAnimTimer.Interval = _mutedFrames.Delays[_mutedFrameIndex];
+            };
         IsVisibleChanged += (_, e) =>
         {
             if (e.NewValue is false)
             {
                 _emptyAnimTimer.Stop();
                 _fullAnimTimer.Stop();
+                _mutedAnimTimer.Stop();
             }
         };
 
         Width = info.Width * info.Scale;
         Height = info.Height * info.Scale;
 
-        if (info.Text is { Show: true } text)
-        {
+        if (info.Text is { Show: true })
             PercentPath.Visibility = Visibility.Visible;
-            PercentPath.Margin = new Thickness(text.X * info.Scale, text.Y * info.Scale, 0, 0);
-        }
+        // The Path's Margin is NOT set here: with alignment, the anchored position depends on
+        // the measured text width, which changes with the digit count — ShowVolume recomputes
+        // it on every update.
 
         _hideTimer.Tick += (_, _) =>
         {
@@ -172,8 +191,15 @@ public partial class SkinOsdWindow : Window
     {
         _lastPercent = percent;
         if (_info.Text is { Show: true } text)
-            PercentTextRenderer.Update(PercentPath, text, percent.ToString(), _info.Scale,
-                VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        {
+            double textWidth = PercentTextRenderer.Update(PercentPath, text, percent.ToString(),
+                _info.Scale, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            // X is the anchor (left edge / center / right edge per align); recomputed on every
+            // show since the measured width changes with the digit count.
+            PercentPath.Margin = new Thickness(
+                SkinMath.AlignedTextX(text.X * _info.Scale, textWidth, text.Align),
+                text.Y * _info.Scale, 0, 0);
+        }
 
         double fillWidth = SkinMath.FillWidth(_info.Width, percent, _info.FillStartX, _info.FillEndX)
             * _info.Scale; // already clamped >= 0
@@ -185,9 +211,14 @@ public partial class SkinOsdWindow : Window
             ? null
             : SkinComposite.ComplementClip(_info.FillStartX * _info.Scale, fillWidth, Width, Height);
 
+        // Muted with dedicated artwork: the muted layer alone conveys mute (no badge, no dim).
+        // Muted without one: the classic dimmed empty + badge, dimmed by the skin's mutedDim.
+        bool useMutedLayer = muted && _mutedFrames is not null;
+        MutedImage.Visibility = useMutedLayer ? Visibility.Visible : Visibility.Collapsed;
+        EmptyImage.Visibility = useMutedLayer ? Visibility.Hidden : Visibility.Visible;
         FullImage.Visibility = muted ? Visibility.Hidden : Visibility.Visible;
-        EmptyImage.Opacity = muted ? 0.6 : 1.0;
-        MuteBadge.Visibility = muted ? Visibility.Visible : Visibility.Collapsed;
+        EmptyImage.Opacity = muted && !useMutedLayer ? _info.MutedDim : 1.0;
+        MuteBadge.Visibility = muted && !useMutedLayer ? Visibility.Visible : Visibility.Collapsed;
 
         var wa = SystemParameters.WorkArea;
         double left, top;
@@ -219,6 +250,15 @@ public partial class SkinOsdWindow : Window
         {
             _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
             _fullAnimTimer.Start();
+        }
+        if (useMutedLayer && _mutedFrames!.IsAnimated && !_mutedAnimTimer.IsEnabled)
+        {
+            _mutedAnimTimer.Interval = _mutedFrames.Delays[_mutedFrameIndex];
+            _mutedAnimTimer.Start();
+        }
+        else if (!useMutedLayer)
+        {
+            _mutedAnimTimer.Stop(); // unmuted while visible: don't animate a collapsed layer
         }
         _hideTimer.Stop();
         _hideTimer.Start(); // both paths auto-hide; IsMouseOver blocks the tick while hovered
