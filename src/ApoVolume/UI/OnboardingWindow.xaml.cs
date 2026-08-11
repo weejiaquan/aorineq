@@ -5,15 +5,18 @@ using ApoVolume.Core;
 
 namespace ApoVolume.UI;
 
-/// <summary>First-run setup wizard for Equalizer APO. Two modes: blocking (startup found EAPO
-/// missing — closing without success exits the app) and informational ("Setup guide…" from
-/// Settings / --onboarding: shows current state, closing just closes). One state machine:
+/// <summary>Setup wizard. Two modes: blocking (first run, or startup found eapo mode without
+/// EAPO — closing without success exits the app) and informational ("Setup guide…" from
+/// Settings / --onboarding: shows current state, closing just closes). An optional volume-mode
+/// page leads (first run and the setup guide): choosing "Replace Windows volume" finishes
+/// immediately (EAPO not required), choosing the APO preamp flows into the one state machine:
 /// Explain → Downloading → InstallerRunning → re-detect → (Retry | Configurator | Success);
 /// Success offers the audio-service restart that substitutes for a reboot.</summary>
 public partial class OnboardingWindow : Window
 {
     private enum Step
     {
+        ModeChoice,    // how volume keys control loudness (system vs eapo)
         Explain,
         Downloading,
         InstallerRunning,
@@ -23,17 +26,40 @@ public partial class OnboardingWindow : Window
 
     private readonly bool _blocking;
     private Step _step;
+    private string? _selectedMode; // the mode the user confirmed on the mode page, if any
     private System.Threading.CancellationTokenSource? _downloadCancel;
 
-    /// <summary>Raised when the wizard is done: true → EAPO is usable, continue startup;
-    /// false → user chose to exit (blocking mode only).</summary>
+    /// <summary>Raised when the wizard is done: true → the chosen setup is usable, continue
+    /// startup; false → user chose to exit (blocking mode only).</summary>
     public event Action<bool>? Completed;
 
-    public OnboardingWindow(bool blocking)
+    /// <summary>Raised when the user confirms a choice on the volume-mode page ("eapo" or
+    /// "system"), before any install flow runs. The owner persists/applies it.</summary>
+    public event Action<string>? ModeSelected;
+
+    /// <summary>A non-null <paramref name="modeChoice"/> starts the wizard on the volume-mode
+    /// page with that mode preselected; null keeps the classic EAPO-install-only flow.</summary>
+    public OnboardingWindow(bool blocking, string? modeChoice = null)
     {
         _blocking = blocking;
         InitializeComponent();
-        EnterStateForCurrentDetection(initial: true);
+        if (modeChoice is not null)
+            ShowModeChoice(modeChoice);
+        else
+            EnterStateForCurrentDetection(initial: true);
+    }
+
+    private void ShowModeChoice(string preselect)
+    {
+        SystemModeRadio.IsChecked = preselect != VolumeModes.Eapo;
+        EapoModeRadio.IsChecked = preselect == VolumeModes.Eapo;
+        Show(Step.ModeChoice,
+            heading: "How should volume keys control loudness?",
+            body: "apo-volume swallows the volume keys and shows its own OSD either way — pick "
+                + "what the keys actually change. You can switch anytime in Settings.",
+            primary: "Continue",
+            secondary: _blocking ? "Exit apo-volume" : "Close");
+        ModePanel.Visibility = Visibility.Visible;
     }
 
     /// <summary>Picks the wizard step matching live detection — the entry point and every
@@ -79,6 +105,7 @@ public partial class OnboardingWindow : Window
         _step = step;
         HeadingText.Text = heading;
         BodyText.Text = body;
+        ModePanel.Visibility = Visibility.Collapsed; // ShowModeChoice re-shows it after this
         GuidanceText.Text = guidance ?? "";
         GuidanceText.Visibility = guidance is null ? Visibility.Collapsed : Visibility.Visible;
         DownloadProgress.Visibility = step == Step.Downloading ? Visibility.Visible : Visibility.Collapsed;
@@ -93,6 +120,17 @@ public partial class OnboardingWindow : Window
     {
         switch (_step)
         {
+            case Step.ModeChoice:
+            {
+                var mode = EapoModeRadio.IsChecked == true ? VolumeModes.Eapo : VolumeModes.System;
+                _selectedMode = mode;
+                ModeSelected?.Invoke(mode);
+                if (mode == VolumeModes.System)
+                    Finish(proceed: true); // Windows volume needs no EAPO — nothing left to set up
+                else
+                    EnterStateForCurrentDetection(); // Explain / NeedsDevice / Success, live
+                break;
+            }
             case Step.Explain:
                 await RunDownloadAndInstaller();
                 break;
@@ -290,10 +328,11 @@ public partial class OnboardingWindow : Window
     {
         _downloadCancel?.Cancel();
         // Real close (not hide): the wizard is cheap to recreate. A raw close (X) that skipped
-        // Finish still reports once — proceed only if EAPO actually ended up usable.
+        // Finish still reports once — proceed if the confirmed choice was system mode (which
+        // needs no EAPO), or if EAPO actually ended up usable.
         var handler = Completed;
         Completed = null;
-        handler?.Invoke(EapoDetection.Detect() == EapoStatus.Active);
+        handler?.Invoke(_selectedMode == VolumeModes.System || EapoDetection.Detect() == EapoStatus.Active);
         base.OnClosing(e);
     }
 }
