@@ -15,6 +15,7 @@ public partial class App : System.Windows.Application
     private const string ShowEventName = "ApoVolume_ShowOsd";
 
     private Mutex? _mutex;
+    private bool _ownsMutex;
     private EventWaitHandle? _showEvent;
     private KeyboardHook? _hook;
     private ApoWriter? _writer;
@@ -35,6 +36,10 @@ public partial class App : System.Windows.Application
     private bool _uacDeclined;
     private bool _togglingRunAsAdmin;
     private bool _togglingAutostart;
+    // Monotonic token for SettingsWindow state syncs (dispatcher thread only): each sync bumps it
+    // before its async autostart query, and only the newest token may apply its result — an older
+    // in-flight query (e.g. from opening Settings mid-toggle) can no longer overwrite fresher state.
+    private int _stateSyncVersion;
     private readonly Coalescer _settingsSaver = new(TimeSpan.FromMilliseconds(50));
 
     private static string ExePath => Environment.ProcessPath!;
@@ -96,6 +101,7 @@ public partial class App : System.Windows.Application
         try
         {
             _mutex = new Mutex(initiallyOwned: true, MutexName, out bool isFirstInstance);
+            _ownsMutex = isFirstInstance;
             _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
             if (!isFirstInstance)
             {
@@ -117,22 +123,26 @@ public partial class App : System.Windows.Application
         try
         {
             configDir = ApoPaths.GetConfigDir();
-            EnsureWritableOrElevate(configDir);
+            _writer = new ApoWriter(configDir);
+            // The probe reuses _writer (its EnsureInclude doubles as the config.txt write check),
+            // so startup needs exactly one ApoWriter and one include pass. On the elevated-setup
+            // path the child process added the include line itself, so no retry is needed here.
+            EnsureWritableOrElevate(_writer);
 
             _state = new VolumeState(settings.Percent, settings.Muted);
             _state.StepPercent = settings.StepPercent;
 
-            _writer = new ApoWriter(configDir);
             _writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
                 _tray?.ShowWarning("Volume changes are not reaching Equalizer APO (apo-volume.txt is not writable)."));
-            _writer.EnsureInclude();
             _writer.StartIncludeGuard();
 
             _osd = new OsdWindow();
             _osd.PercentChangedByUser += OnOsdPercentChanged;
 
             _tray = new TrayIcon();
-            _tray.OpenRequested += () => Render(interactive: true);
+            // Opening the slider changes no state, so it only shows the OSD — a full Render here
+            // would pointlessly rewrite apo-volume.txt and re-persist settings on every tray click.
+            _tray.OpenRequested += () => ShowOsd(interactive: true);
             _tray.MuteToggleRequested += () => { _state.ToggleMute(); Render(interactive: false); };
             _tray.SettingsRequested += OpenSettings;
             _tray.ExitRequested += () => Shutdown();
@@ -140,8 +150,7 @@ public partial class App : System.Windows.Application
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
 
             if (_uacDeclined)
-                _tray.ShowWarning(
-                    "Running without administrator rights — volume keys won't work while elevated games are focused.");
+                _tray.ShowWarning("Not elevated — volume keys won't work in elevated games.");
 
             // Elevated-startup reconciliation.
             if (Elevation.IsElevated && _settings.RunAsAdmin)
@@ -203,7 +212,9 @@ public partial class App : System.Windows.Application
                 while (_showEvent.WaitOne())
                 {
                     if (Dispatcher.HasShutdownStarted) break;
-                    Dispatcher.BeginInvoke(() => Render(interactive: true));
+                    // Same as the tray's OpenRequested: a second launch just wants the slider
+                    // visible — no state changed, so no Render.
+                    Dispatcher.BeginInvoke(() => ShowOsd(interactive: true));
                 }
             }
             catch (Exception) { } // shutdown races (disposed handle / stopped dispatcher) must not crash the process
@@ -373,6 +384,16 @@ public partial class App : System.Windows.Application
 
     private static Task<bool> IsAutostartEnabledAsync() => Task.Run(IsAutostartEnabled);
 
+    /// <summary>Re-queries autostart state and re-syncs the SettingsWindow, unless a newer sync
+    /// started while this one's query was in flight (see <see cref="_stateSyncVersion"/>).</summary>
+    private async Task SyncSettingsWindowStateAsync()
+    {
+        int version = ++_stateSyncVersion;
+        bool autostartEnabled = await IsAutostartEnabledAsync();
+        if (version != _stateSyncVersion) return; // superseded — the newer sync's result wins
+        _settingsWindow?.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, _settings);
+    }
+
     /// <summary>Handles the SettingsWindow RunAsAdminChanged event: persists the choice, offers an
     /// immediate elevated relaunch when turning on, migrates the autostart mechanism to match, and
     /// suggests a restart when turning off while currently elevated.</summary>
@@ -386,22 +407,14 @@ public partial class App : System.Windows.Application
         {
             _settings = _settings with { RunAsAdmin = on };
 
-            // Synchronous, not coalesced: TryRelaunchElevatedAndShutdown below can call Shutdown(),
-            // which disposes _settingsSaver before its debounce timer fires — the coalesced write
-            // would be lost and the elevated child would start from stale settings. This write must
-            // land before we ever offer or perform that relaunch. Saves the full _settings (not a
-            // partial reconstruction), so every other persisted field — OSD style/position/etc. —
-            // survives an admin-toggle instead of being reset to defaults.
-            try
-            {
-                _settings.Save(_settingsPath);
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+            // Through the coalescer, then flushed: posting replaces any stale pending save
+            // (latest-wins), so an older snapshot queued just before this toggle can never land
+            // after — and overwrite — this one; Flush() then writes synchronously, so the settings
+            // are on disk before TryRelaunchElevatedAndShutdown below can start an elevated child
+            // that reads them. Saves the full _settings (not a partial reconstruction), so every
+            // other persisted field — OSD style/position/etc. — survives an admin-toggle.
+            SaveSettings();
+            _settingsSaver.Flush();
 
             bool autostartEnabled = await IsAutostartEnabledAsync();
 
@@ -431,7 +444,7 @@ public partial class App : System.Windows.Application
                         "apo-volume", MessageBoxButton.OK, MessageBoxImage.Information);
             }
 
-            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _settings.RunAsAdmin, Elevation.IsElevated, _settings);
+            await SyncSettingsWindowStateAsync();
         }
         finally
         {
@@ -451,7 +464,7 @@ public partial class App : System.Windows.Application
         try
         {
             await ApplyAutostartAsync(on);
-            _settingsWindow?.SyncState(await IsAutostartEnabledAsync(), _settings.RunAsAdmin, Elevation.IsElevated, _settings);
+            await SyncSettingsWindowStateAsync();
         }
         finally
         {
@@ -479,6 +492,7 @@ public partial class App : System.Windows.Application
     /// shells out to schtasks (~100ms); the await resumes back here on the UI thread.</summary>
     private async void OpenSettings()
     {
+        int version = ++_stateSyncVersion;
         bool autostartEnabled = await IsAutostartEnabledAsync();
 
         if (_settingsWindow is null)
@@ -489,7 +503,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
         }
-        else
+        else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
             // Also rescans the skins folder (inside SyncState -> ApplyOsdSettings/PopulateSkins).
             _settingsWindow.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, _settings);
@@ -677,14 +691,12 @@ public partial class App : System.Windows.Application
     // administrator" rather than the RunAsAdmin/ScheduledTask path), the probe below trivially
     // succeeds without ever granting the Users ACL that RunElevatedSetup would add — a later
     // non-elevated run would then fail the probe and self-correct via --setup as usual.
-    private static void EnsureWritableOrElevate(string configDir)
+    private static void EnsureWritableOrElevate(ApoWriter writer)
     {
         try
         {
-            var probe = Path.Combine(configDir, ApoWriter.VolumeFileName);
-            File.AppendAllText(probe, ""); // create-or-touch; throws if unwritable
-            using var w = new ApoWriter(configDir);
-            w.EnsureInclude();
+            File.AppendAllText(writer.VolumeFilePath, ""); // create-or-touch; throws if unwritable
+            writer.EnsureInclude();
             return; // all writable — no elevation ever needed
         }
         catch (UnauthorizedAccessException)
@@ -699,27 +711,38 @@ public partial class App : System.Windows.Application
             proc.WaitForExit();
             if (proc.ExitCode != 0)
                 throw new InvalidOperationException(
-                    "Elevated setup failed. Grant write access to the Equalizer APO config folder and retry.");
+                    "Elevated setup failed — make the Equalizer APO config folder writable and retry.");
         }
     }
 
-    /// <summary>Runs elevated (--setup): create volume file, grant Users modify on it, add include line.</summary>
+    /// <summary>Runs elevated (--setup): create volume file, grant Users modify on it and on
+    /// config.txt (the include-guard watcher must be able to re-append the Include line from a
+    /// non-elevated session when an external tool rewrites config.txt), add include line.</summary>
     private static void RunElevatedSetup()
     {
         var configDir = ApoPaths.GetConfigDir();
         var volumePath = Path.Combine(configDir, ApoWriter.VolumeFileName);
         if (!File.Exists(volumePath))
             File.WriteAllText(volumePath, ApoWriter.FormatPreamp(0) + Environment.NewLine);
+        GrantUsersModify(volumePath);
 
-        var fi = new FileInfo(volumePath);
+        using var w = new ApoWriter(configDir);
+        // Created empty (if absent) before the ACL grant so EnsureInclude below — and every later
+        // non-elevated write — happens against a file Users can already modify.
+        if (!File.Exists(w.ConfigTxtPath))
+            File.WriteAllText(w.ConfigTxtPath, "");
+        GrantUsersModify(w.ConfigTxtPath);
+        w.EnsureInclude();
+    }
+
+    private static void GrantUsersModify(string path)
+    {
+        var fi = new FileInfo(path);
         var acl = fi.GetAccessControl();
         acl.AddAccessRule(new FileSystemAccessRule(
             new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
             FileSystemRights.Modify, AccessControlType.Allow));
         fi.SetAccessControl(acl);
-
-        using var w = new ApoWriter(configDir);
-        w.EnsureInclude();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -727,6 +750,13 @@ public partial class App : System.Windows.Application
         _hook?.Dispose();
         _tray?.Dispose();
         _writer?.Dispose();
+        if (_ownsMutex)
+        {
+            // Release before disposing so a successor launched during our teardown acquires the
+            // mutex immediately instead of waiting on abandoned-mutex semantics.
+            try { _mutex!.ReleaseMutex(); }
+            catch (ApplicationException) { } // not owned (shouldn't happen; flag tracks ownership)
+        }
         _mutex?.Dispose();
         _showEvent?.Dispose();
         _settingsSaver.Dispose();

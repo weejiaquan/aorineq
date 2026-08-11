@@ -79,12 +79,49 @@ public sealed class Coalescer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Synchronously runs the pending action (if any) on the calling thread. Also acts as a
+    /// barrier: if the timer thread is mid-action, this blocks until it finishes, so on return
+    /// every posted action has actually executed. Used where a write must land before the caller
+    /// proceeds (e.g. before relaunching elevated), and by <see cref="Dispose"/> so a trailing
+    /// write is never silently dropped at shutdown.
+    /// </summary>
+    public void Flush()
+    {
+        Action? pending;
+        lock (_lock)
+        {
+            pending = _pending;
+            _pending = null;
+        }
+        lock (_runLock) // taken even when pending is null: waits out an in-flight timer action
+        {
+            if (pending is null)
+            {
+                return;
+            }
+            try
+            {
+                pending();
+            }
+            catch (Exception)
+            {
+                // Same contract as OnTimer: actions own their error handling.
+            }
+        }
+    }
+
     public void Dispose()
     {
         lock (_lock)
         {
+            if (_disposed)
+            {
+                return;
+            }
             _disposed = true;
         }
         _timer.Dispose();
+        Flush(); // the trailing action must land, not be dropped with it
     }
 }

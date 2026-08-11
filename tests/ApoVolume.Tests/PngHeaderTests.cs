@@ -102,6 +102,48 @@ public class PngHeaderTests : IDisposable
     }
 
     [Fact]
+    public void Read_returns_null_when_first_chunk_is_not_IHDR()
+    {
+        var path = Path.Combine(_dir, "wrong-chunk.png");
+        WritePng(path, 300, 100);
+        var bytes = File.ReadAllBytes(path);
+        // Overwrite the first chunk's type (bytes 12..15) with a different valid-looking tag:
+        // the signature stays intact, so only the new IHDR check can reject this.
+        System.Text.Encoding.ASCII.GetBytes("acTL").CopyTo(bytes, 12);
+        File.WriteAllBytes(path, bytes);
+
+        var result = PngHeader.Read(path);
+        _out.WriteLine($"non-IHDR first chunk parsed: {(result is null ? "<null>" : $"{result.Value.Width}x{result.Value.Height}!")}");
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(300, 0)]
+    [InlineData(0, 0)]
+    public void Read_returns_null_for_zero_dimensions(int width, int height)
+    {
+        var path = Path.Combine(_dir, "zero-dim.png");
+        WritePng(path, width, height);
+
+        var result = PngHeader.Read(path);
+        _out.WriteLine($"{width}x{height} parsed: {(result is null ? "<null>" : "non-null!")}");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void Read_returns_null_for_dimensions_above_int_max()
+    {
+        var path = Path.Combine(_dir, "oversize.png");
+        // 0x80000000 as a big-endian uint — would go negative in a naive (int) cast.
+        WritePng(path, unchecked((int)0x80000000), 100);
+
+        var result = PngHeader.Read(path);
+        _out.WriteLine($"2^31-width parsed: {(result is null ? "<null>" : $"{result.Value.Width}x{result.Value.Height}!")}");
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void Read_returns_null_for_missing_file()
     {
         var path = Path.Combine(_dir, "does-not-exist.png");

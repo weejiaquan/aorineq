@@ -18,7 +18,7 @@
         <!-- Mute badge: small glyph chip, bottom-right, shown only while muted. -->
         <Border x:Name="MuteBadge" Width="20" Height="20" CornerRadius="10" Background="#F2202020"
                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,4" Visibility="Collapsed">
-            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"
+            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="White"
                        HorizontalAlignment="Center" VerticalAlignment="Center" Text="&#xE74F;" />
         </Border>
     </Grid>

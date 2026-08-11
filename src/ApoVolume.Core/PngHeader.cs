@@ -25,8 +25,17 @@ public static class PngHeader
             for (int i = 0; i < Signature.Length; i++)
                 if (header[i] != Signature[i]) return null;
 
+            // Bytes 12..15 are the first chunk's type, which the PNG spec requires to be IHDR —
+            // without this check the "width/height" below would be read from arbitrary chunk data.
+            if (header[12] != 'I' || header[13] != 'H' || header[14] != 'D' || header[15] != 'R')
+                return null;
+
             uint width = ((uint)header[16] << 24) | ((uint)header[17] << 16) | ((uint)header[18] << 8) | header[19];
             uint height = ((uint)header[20] << 24) | ((uint)header[21] << 16) | ((uint)header[22] << 8) | header[23];
+            // Zero dimensions are invalid per spec; anything above int.MaxValue would go negative
+            // in the cast (the spec itself caps dimensions at 2^31-1).
+            if (width == 0 || height == 0 || width > int.MaxValue || height > int.MaxValue)
+                return null;
             return ((int)width, (int)height);
         }
         catch (IOException)

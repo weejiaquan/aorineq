@@ -60,10 +60,23 @@ public sealed class TrayIcon : IDisposable
         {
             g.Clear(Color.Transparent);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-            using var font = new Font("Segoe MDL2 Assets", 22, GraphicsUnit.Pixel);
+            using var font = CreateGlyphFont();
             g.DrawString(glyph, font, Brushes.White, 1, 3);
         }
         return Icon.FromHandle(bmp.GetHicon()); // two long-lived icons for app lifetime; handles freed on process exit
+    }
+
+    /// <summary>Segoe Fluent Icons (Win11), falling back to Segoe MDL2 Assets (Win10) — the glyph
+    /// codepoints used here are identical in both. GDI+ silently substitutes a default text font
+    /// when a family is missing (which would render the glyph as a box), so the substitution is
+    /// detected via Font.Name and the fallback family used explicitly instead.</summary>
+    private static Font CreateGlyphFont()
+    {
+        var font = new Font("Segoe Fluent Icons", 22, GraphicsUnit.Pixel);
+        if (font.Name.Equals("Segoe Fluent Icons", StringComparison.OrdinalIgnoreCase))
+            return font;
+        font.Dispose();
+        return new Font("Segoe MDL2 Assets", 22, GraphicsUnit.Pixel);
     }
 
     public void Dispose()

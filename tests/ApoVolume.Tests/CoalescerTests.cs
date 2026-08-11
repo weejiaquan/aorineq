@@ -108,6 +108,81 @@ public class CoalescerTests
     }
 
     [Fact]
+    public void Dispose_flushes_pending_trailing_action()
+    {
+        // Interval far beyond the test's lifetime: the trailing action can only ever run if
+        // Dispose actually flushes it — a timer firing can't produce a false pass.
+        var c = new Coalescer(TimeSpan.FromMinutes(10));
+        int lastSeen = -1;
+
+        c.Post(() => Volatile.Write(ref lastSeen, 1)); // leading edge, runs promptly
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < 2000 && Volatile.Read(ref lastSeen) != 1)
+        {
+            Thread.Sleep(5);
+        }
+        Assert.Equal(1, Volatile.Read(ref lastSeen));
+
+        c.Post(() => Volatile.Write(ref lastSeen, 2)); // pending trailing, 10 minutes away
+        c.Dispose();
+        _out.WriteLine($"after dispose: lastSeen={lastSeen}");
+        Assert.Equal(2, Volatile.Read(ref lastSeen)); // Dispose ran it synchronously
+    }
+
+    [Fact]
+    public void Flush_runs_pending_synchronously_and_second_flush_is_a_noop()
+    {
+        using var c = new Coalescer(TimeSpan.FromMinutes(10));
+        int runs = 0;
+        int lastSeen = -1;
+
+        c.Post(() => { Interlocked.Increment(ref runs); Volatile.Write(ref lastSeen, 1); });
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < 2000 && Volatile.Read(ref lastSeen) != 1)
+        {
+            Thread.Sleep(5);
+        }
+
+        c.Post(() => { Interlocked.Increment(ref runs); Volatile.Write(ref lastSeen, 2); });
+        c.Flush();
+        Assert.Equal(2, Volatile.Read(ref lastSeen)); // pending ran on the flushing thread
+        Assert.Equal(2, runs);
+
+        c.Flush(); // nothing pending: must neither throw nor re-run anything
+        _out.WriteLine($"after double flush: runs={runs}, lastSeen={lastSeen}");
+        Assert.Equal(2, runs);
+    }
+
+    [Fact]
+    public void Flush_waits_for_in_flight_action()
+    {
+        using var c = new Coalescer(TimeSpan.FromMilliseconds(50));
+        var started = new ManualResetEventSlim(false);
+        int done = 0;
+
+        c.Post(() =>
+        {
+            started.Set();
+            Thread.Sleep(150);
+            Volatile.Write(ref done, 1);
+        });
+        Assert.True(started.Wait(TimeSpan.FromSeconds(2)), "action never started");
+
+        c.Flush(); // barrier: must block until the in-flight action completes
+        _out.WriteLine($"flush returned; done={done}");
+        Assert.Equal(1, Volatile.Read(ref done));
+    }
+
+    [Fact]
+    public void Double_dispose_is_safe()
+    {
+        var c = new Coalescer(TimeSpan.FromMilliseconds(50));
+        c.Dispose();
+        var ex = Record.Exception(() => c.Dispose());
+        Assert.Null(ex);
+    }
+
+    [Fact]
     public void Leading_and_trailing_actions_never_overlap()
     {
         using var c = new Coalescer(TimeSpan.FromMilliseconds(50));

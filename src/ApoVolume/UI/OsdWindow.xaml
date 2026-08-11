@@ -17,7 +17,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="48" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="GlyphText" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                <TextBlock x:Name="GlyphText" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18"
                            Foreground="White" VerticalAlignment="Center" Text="&#xE767;" />
                 <Slider x:Name="VolumeSlider" Grid.Column="1" Minimum="0" Maximum="100"
                         IsMoveToPointEnabled="True" VerticalAlignment="Center"
@@ -70,7 +70,7 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="48" />
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="FluentGlyphText" FontFamily="Segoe MDL2 Assets" FontSize="18"
+                <TextBlock x:Name="FluentGlyphText" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18"
                            VerticalAlignment="Center" Text="&#xE767;" />
                 <Grid x:Name="FluentTrackHost" Grid.Column="1" VerticalAlignment="Center" Height="14">
                     <Border x:Name="FluentTrackTail" Height="4" VerticalAlignment="Center" CornerRadius="2" />
