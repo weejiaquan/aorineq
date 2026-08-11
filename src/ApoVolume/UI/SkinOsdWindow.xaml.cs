@@ -16,9 +16,10 @@ namespace ApoVolume.UI;
 public partial class SkinOsdWindow : Window
 {
     private readonly SkinInfo _info;
-    // Hit shape = union of opaque pixels across ALL frames of BOTH layers, so an element that is
-    // transparent in one animation frame stays clickable throughout.
-    private readonly List<AlphaMap> _alphaMaps = new();
+    // Hit shape = ONE union map of the opaque pixels across ALL frames of BOTH layers, so an
+    // element that is transparent in one animation frame stays clickable throughout — at the
+    // memory cost of a single static skin regardless of frame count.
+    private readonly AlphaMap _hitMap;
     private readonly SkinFrames _emptyFrames;
     private readonly SkinFrames _fullFrames;
     private readonly DispatcherTimer _emptyAnimTimer = new();
@@ -53,8 +54,7 @@ public partial class SkinOsdWindow : Window
 
         _emptyFrames = SkinFrames.Load(info.EmptyPath, info.EmptyFrames, info.Fps);
         _fullFrames = SkinFrames.Load(info.FullPath, info.FullFrames, info.Fps);
-        foreach (var frame in _emptyFrames.Frames) _alphaMaps.Add(new AlphaMap(frame));
-        foreach (var frame in _fullFrames.Frames) _alphaMaps.Add(new AlphaMap(frame));
+        _hitMap = AlphaMap.Union(_emptyFrames.Frames.Concat(_fullFrames.Frames));
 
         EmptyImage.Source = _emptyFrames.Frames[0];
         FullImage.Source = _fullFrames.Frames[0];
@@ -219,11 +219,7 @@ public partial class SkinOsdWindow : Window
     {
         int px = (int)(windowPoint.X / _info.Scale);
         int py = (int)(windowPoint.Y / _info.Scale);
-        foreach (var map in _alphaMaps)
-        {
-            if (map.IsOpaque(px, py)) return true;
-        }
-        return false;
+        return _hitMap.IsOpaque(px, py);
     }
 
     private void RaisePercentFromWindowPoint(System.Windows.Point windowPoint)

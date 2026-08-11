@@ -139,6 +139,7 @@ public static class SkinLoader
         if (!Directory.Exists(skinsRoot)) return Array.Empty<SkinInfo>();
 
         return Directory.GetDirectories(skinsRoot)
+            .Where(d => !new DirectoryInfo(d).Name.StartsWith('.')) // dot-folders: import staging, VCS
             .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
             .Select(Load)
             .ToList();

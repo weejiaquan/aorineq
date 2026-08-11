@@ -16,24 +16,66 @@ public sealed class AlphaMap
 
     public AlphaMap(BitmapSource source)
     {
+        PixelWidth = source.PixelWidth;
+        PixelHeight = source.PixelHeight;
+        _alpha = new byte[PixelWidth * PixelHeight];
+        AccumulateMax(source, _alpha, PixelWidth, PixelHeight);
+    }
+
+    private AlphaMap(byte[] alpha, int width, int height)
+    {
+        _alpha = alpha;
+        PixelWidth = width;
+        PixelHeight = height;
+    }
+
+    /// <summary>Builds ONE map holding the union (per-pixel max alpha) of every source — used for
+    /// animated skins so the hit shape covers all frames of both layers while memory stays a
+    /// single byte-per-pixel array regardless of frame count. All sources must share pixel
+    /// dimensions (guaranteed upstream by the loader's logical-frame-size validation).</summary>
+    public static AlphaMap Union(IEnumerable<BitmapSource> sources)
+    {
+        byte[]? alpha = null;
+        int width = 0, height = 0;
+        foreach (var source in sources)
+        {
+            if (alpha is null)
+            {
+                width = source.PixelWidth;
+                height = source.PixelHeight;
+                alpha = new byte[width * height];
+            }
+            AccumulateMax(source, alpha, width, height);
+        }
+        if (alpha is null)
+            throw new ArgumentException("At least one source is required.", nameof(sources));
+        return new AlphaMap(alpha, width, height);
+    }
+
+    /// <summary>Max-combines a source's alpha channel into <paramref name="alpha"/>. Sources
+    /// smaller than the map (defensive; upstream validation should prevent it) only cover their
+    /// own extent.</summary>
+    private static void AccumulateMax(BitmapSource source, byte[] alpha, int width, int height)
+    {
         BitmapSource bgra = source.Format == PixelFormats.Bgra32
             ? source
             : new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
 
-        PixelWidth = bgra.PixelWidth;
-        PixelHeight = bgra.PixelHeight;
-
-        int stride = PixelWidth * 4;
-        var pixels = new byte[stride * PixelHeight];
+        int srcWidth = Math.Min(bgra.PixelWidth, width);
+        int srcHeight = Math.Min(bgra.PixelHeight, height);
+        int stride = bgra.PixelWidth * 4;
+        var pixels = new byte[stride * bgra.PixelHeight];
         bgra.CopyPixels(pixels, stride, 0);
 
-        _alpha = new byte[PixelWidth * PixelHeight];
-        for (int y = 0; y < PixelHeight; y++)
+        for (int y = 0; y < srcHeight; y++)
         {
             int rowOffset = y * stride;
-            int rowBase = y * PixelWidth;
-            for (int x = 0; x < PixelWidth; x++)
-                _alpha[rowBase + x] = pixels[rowOffset + x * 4 + 3]; // B,G,R,A -> alpha is byte 3
+            int rowBase = y * width;
+            for (int x = 0; x < srcWidth; x++)
+            {
+                byte a = pixels[rowOffset + x * 4 + 3]; // B,G,R,A -> alpha is byte 3
+                if (a > alpha[rowBase + x]) alpha[rowBase + x] = a;
+            }
         }
     }
 

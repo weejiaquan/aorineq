@@ -118,6 +118,56 @@ public class SkinArchiveTests : IDisposable
     }
 
     [Fact]
+    public void Failed_overwrite_import_leaves_existing_skin_untouched()
+    {
+        // An existing, working skin...
+        var existingZipSrc = MakeSkinFolder("existing-src", withJson: true);
+        var goodZip = Path.Combine(_dir, "good.zip");
+        SkinArchive.Export(existingZipSrc, goodZip);
+        var existing = SkinArchive.Import(goodZip, _root, "target");
+        Assert.True(SkinLoader.Load(existing).IsValid);
+
+        // ...must survive a failed overwrite-import of a broken zip byte-for-byte.
+        var badZip = Path.Combine(_dir, "bad.zip");
+        using (var archive = ZipFile.Open(badZip, ZipArchiveMode.Create))
+            archive.CreateEntryFromFile(Path.Combine(existingZipSrc, "empty.png"), "empty.png"); // no full layer
+
+        var ex = Assert.Throws<InvalidOperationException>(() => SkinArchive.Import(badZip, _root, "target"));
+        _out.WriteLine("failed import: " + ex.Message);
+
+        var info = SkinLoader.Load(existing);
+        Assert.True(info.IsValid); // still a complete, valid skin
+        Assert.True(File.Exists(Path.Combine(existing, "skin.json")));
+        // No staging debris left behind either.
+        Assert.Empty(Directory.GetDirectories(_root).Where(d => Path.GetFileName(d)!.StartsWith(".import-")));
+    }
+
+    [Fact]
+    public void Overwrite_import_fully_replaces_no_stale_files_survive()
+    {
+        // Existing PNG-based skin with a skin.json...
+        var pngSrc = MakeSkinFolder("png-src", withJson: true);
+        var pngZip = Path.Combine(_dir, "png.zip");
+        SkinArchive.Export(pngSrc, pngZip);
+        SkinArchive.Import(pngZip, _root, "target");
+
+        // ...overwritten by a GIF-based skin WITHOUT json: the old full.png and skin.json must be
+        // gone, or the loader's png-over-gif precedence would keep rendering the old artwork.
+        var gifSrc = MakeSkinFolder("gif-src", withJson: false, gifFull: true);
+        var gifZip = Path.Combine(_dir, "gif.zip");
+        SkinArchive.Export(gifSrc, gifZip);
+        var folder = SkinArchive.Import(gifZip, _root, "target");
+
+        var files = Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(f => f).ToArray();
+        _out.WriteLine("files after overwrite: " + string.Join(", ", files));
+        Assert.Equal(new[] { "empty.png", "full.gif" }, files);
+        var info = SkinLoader.Load(folder);
+        Assert.True(info.IsValid);
+        Assert.True(info.FullIsGif);
+        Assert.Equal(1.0, info.Scale); // old skin.json's 1.5 must not survive
+    }
+
+    [Fact]
     public void Import_with_invalid_name_throws()
     {
         var skin = MakeSkinFolder("name-src", withJson: false);
