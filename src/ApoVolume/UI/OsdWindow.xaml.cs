@@ -12,8 +12,10 @@ namespace ApoVolume.UI;
 
 public partial class OsdWindow : Window
 {
-    private const string GlyphVolume = "\uE767"; // Segoe MDL2 'Volume'
-    private const string GlyphMute = "\uE74F";   // Segoe MDL2 'Mute'
+    // Same codepoints in Segoe Fluent Icons (Win11) and Segoe MDL2 Assets (Win10 fallback);
+    // the XAML FontFamily lists both so whichever is installed renders them.
+    private const string GlyphVolume = "\uE767"; // 'Volume'
+    private const string GlyphMute = "\uE74F";   // 'Mute'
     private const double DarkPillWidth = 300;
     private const double DarkPillHeight = 64;
     private const double MinimalBarWidthFraction = 0.4; // 40% of the work-area width
@@ -34,6 +36,12 @@ public partial class OsdWindow : Window
     /// <summary>Percent step applied per wheel notch; kept in sync with VolumeState.StepPercent
     /// via ApplyConfig so the OSD's wheel handling and the global hotkeys agree.</summary>
     public int StepPercent { get; set; } = 2;
+
+    // Cache key for the fluent style's theme-dependent brushes: ApplyFluentTheme runs on every
+    // ShowVolume while fluent is active, but the brushes only need rebuilding when the system
+    // theme or accent color actually changed — not on every volume keypress.
+    private bool? _fluentLight;
+    private System.Windows.Media.Color? _fluentAccent;
 
     public event Action<int>? PercentChangedByUser;
 
@@ -58,6 +66,19 @@ public partial class OsdWindow : Window
         };
         SourceInitialized += (_, _) => MakeNoActivate();
         MouseWheel += OnMouseWheel;
+        // Moving onto the OSD mid-fade-out rescues it: cancel the fade, restore full opacity and
+        // restart the hide delay (whose tick then blocks on IsMouseOver for as long as the pointer
+        // stays). Harmless when no fade is running — the timer restart just extends the delay.
+        MouseEnter += (_, _) =>
+        {
+            BeginAnimation(OpacityProperty, null);
+            Opacity = 1;
+            if (IsVisible)
+            {
+                _hideTimer.Stop();
+                _hideTimer.Start();
+            }
+        };
     }
 
     /// <summary>Applies style/position/behavior settings to the window. Called once at App
@@ -191,32 +212,39 @@ public partial class OsdWindow : Window
         // Color is ambiguous in this project (UseWindowsForms also brings System.Drawing.Color
         // into scope), so every literal Color here is fully qualified per repo convention.
         bool light = SystemTheme.AppsUseLightTheme();
-        var accentBrush = new SolidColorBrush(SystemTheme.Accent());
-        var textBrush = light ? System.Windows.Media.Brushes.Black : System.Windows.Media.Brushes.White;
-        // The thumb's center is a "cutout" that matches the panel background, not the text
-        // color, so the accent ring reads as floating on top of the panel.
-        var thumbCenterBrush = light
-            ? System.Windows.Media.Brushes.White
-            : new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20));
+        var accent = SystemTheme.Accent();
+        if (_fluentLight != light || _fluentAccent != accent)
+        {
+            _fluentLight = light;
+            _fluentAccent = accent;
 
-        FluentRoot.Background = new SolidColorBrush(light
-            ? System.Windows.Media.Color.FromArgb(0xF2, 0xF3, 0xF3, 0xF3)
-            : System.Windows.Media.Color.FromArgb(0xF2, 0x20, 0x20, 0x20));
-        FluentRoot.BorderBrush = new SolidColorBrush(light
-            ? System.Windows.Media.Color.FromArgb(0x14, 0x00, 0x00, 0x00)
-            : System.Windows.Media.Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF));
-        // Unfilled track color isn't specified by the spec (only the panel background/border and
-        // the accent fill/thumb are); this reuses the same subtle overlay tone as the panel
-        // border, just a bit more opaque so the track reads as a track rather than disappearing.
-        FluentTrackTail.Background = new SolidColorBrush(light
-            ? System.Windows.Media.Color.FromArgb(0x1F, 0x00, 0x00, 0x00)
-            : System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF));
+            var accentBrush = Frozen(new SolidColorBrush(accent));
+            var textBrush = light ? System.Windows.Media.Brushes.Black : System.Windows.Media.Brushes.White;
+            // The thumb's center is a "cutout" that matches the panel background, not the text
+            // color, so the accent ring reads as floating on top of the panel.
+            var thumbCenterBrush = light
+                ? System.Windows.Media.Brushes.White
+                : Frozen(new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20)));
 
-        FluentGlyphText.Foreground = textBrush;
-        FluentPercentText.Foreground = textBrush;
-        FluentTrackFill.Background = accentBrush;
-        FluentThumbRing.Fill = accentBrush;
-        FluentThumbCenter.Fill = thumbCenterBrush;
+            FluentRoot.Background = Frozen(new SolidColorBrush(light
+                ? System.Windows.Media.Color.FromArgb(0xF2, 0xF3, 0xF3, 0xF3)
+                : System.Windows.Media.Color.FromArgb(0xF2, 0x20, 0x20, 0x20)));
+            FluentRoot.BorderBrush = Frozen(new SolidColorBrush(light
+                ? System.Windows.Media.Color.FromArgb(0x14, 0x00, 0x00, 0x00)
+                : System.Windows.Media.Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)));
+            // Unfilled track color isn't specified by the spec (only the panel background/border and
+            // the accent fill/thumb are); this reuses the same subtle overlay tone as the panel
+            // border, just a bit more opaque so the track reads as a track rather than disappearing.
+            FluentTrackTail.Background = Frozen(new SolidColorBrush(light
+                ? System.Windows.Media.Color.FromArgb(0x1F, 0x00, 0x00, 0x00)
+                : System.Windows.Media.Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)));
+
+            FluentGlyphText.Foreground = textBrush;
+            FluentPercentText.Foreground = textBrush;
+            FluentTrackFill.Background = accentBrush;
+            FluentThumbRing.Fill = accentBrush;
+            FluentThumbCenter.Fill = thumbCenterBrush;
+        }
 
         FluentRoot.Measure(new System.Windows.Size(DarkPillWidth, DarkPillHeight));
         FluentRoot.Arrange(new Rect(0, 0, DarkPillWidth, DarkPillHeight));
@@ -229,6 +257,12 @@ public partial class OsdWindow : Window
         double thumbLeft = Math.Clamp(fillWidth - thumbDiameter / 2, 0, Math.Max(0, trackWidth - thumbDiameter));
         FluentThumbRing.Margin = new Thickness(thumbLeft, 0, 0, 0);
         FluentThumbCenter.Margin = new Thickness(thumbLeft + 4, 0, 0, 0);
+    }
+
+    private static SolidColorBrush Frozen(SolidColorBrush brush)
+    {
+        brush.Freeze();
+        return brush;
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

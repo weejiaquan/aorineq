@@ -82,6 +82,10 @@ public sealed class ApoWriter : IDisposable
         _watcher = new FileSystemWatcher(dir, "config.txt")
         {
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            // Max the kernel-side event buffer (64 KB): a burst of writes in the config dir (e.g.
+            // Peace saving many files) can overflow the 8 KB default, and an overflow drops the
+            // very config.txt event this guard exists to catch.
+            InternalBufferSize = 64 * 1024,
         };
         _watcher.Changed += OnConfigTxtTouched;
         _watcher.Created += OnConfigTxtTouched;

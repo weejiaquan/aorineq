@@ -88,6 +88,18 @@ public partial class SkinOsdWindow : Window
             HookWndProc();
         };
         MouseWheel += OnMouseWheel;
+        // Same fade rescue as OsdWindow: entering mid-fade-out cancels the fade and re-arms the
+        // hide delay instead of letting the OSD vanish under the pointer.
+        MouseEnter += (_, _) =>
+        {
+            BeginAnimation(OpacityProperty, null);
+            Opacity = 1;
+            if (IsVisible)
+            {
+                _hideTimer.Stop();
+                _hideTimer.Start();
+            }
+        };
         MouseLeftButtonDown += OnMouseLeftButtonDown;
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;

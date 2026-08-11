@@ -57,7 +57,11 @@ public sealed record Settings(
 
     public void Save(string path)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // GetDirectoryName returns "" for a bare filename (write to the current directory) —
+        // CreateDirectory("") would throw, so only create when there's a directory component.
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
         File.WriteAllText(path, JsonSerializer.Serialize(this));
     }
 }

@@ -20,6 +20,10 @@ public static class SkinLoader
     private const double MaxScale = 4.0;
     private const double DefaultScale = 1.0;
 
+    // JsonSerializerOptions caches type metadata internally — a fresh instance per Deserialize
+    // call would rebuild that metadata every time a skin is (re)loaded or the folder is scanned.
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     /// <summary>Loads and validates a single skin folder. Never throws; any failure is reported via SkinInfo.Error.</summary>
     public static SkinInfo Load(string folder)
     {
@@ -62,8 +66,7 @@ public static class SkinLoader
                 SkinJson? parsed;
                 try
                 {
-                    parsed = JsonSerializer.Deserialize<SkinJson>(File.ReadAllText(jsonPath),
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    parsed = JsonSerializer.Deserialize<SkinJson>(File.ReadAllText(jsonPath), JsonOptions);
                 }
                 catch (JsonException ex)
                 {

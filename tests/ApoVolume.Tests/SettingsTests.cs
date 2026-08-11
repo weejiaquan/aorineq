@@ -123,6 +123,23 @@ public class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void Save_with_bare_filename_writes_to_current_directory()
+    {
+        var name = "apo-volume-test-" + Guid.NewGuid().ToString("N") + ".json";
+        try
+        {
+            new Settings(60, false).Save(name); // no directory component: must not throw
+            _out.WriteLine($"saved bare filename to: {Path.GetFullPath(name)}");
+            Assert.True(File.Exists(name));
+            Assert.Equal(60, Settings.Load(name).Percent);
+        }
+        finally
+        {
+            File.Delete(name);
+        }
+    }
+
+    [Fact]
     public void All_fields_roundtrip()
     {
         var orig = new Settings(
