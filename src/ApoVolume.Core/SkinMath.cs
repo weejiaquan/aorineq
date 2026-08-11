@@ -34,4 +34,14 @@ public static class SkinMath
 
     /// <summary>Whether an alpha value counts as "opaque" (i.e. hit-testable) for skin hit-testing.</summary>
     public static bool IsOpaque(byte alpha, byte threshold = 10) => alpha > threshold;
+
+    /// <summary>Left edge of the percent text when <paramref name="x"/> is its ANCHOR under the
+    /// given alignment: left → x, center → x − width/2, right → x − width. Anything but
+    /// center/right reads as left, matching <c>SkinLoader</c>'s align normalization.</summary>
+    public static double AlignedTextX(double x, double textWidth, string align) => align switch
+    {
+        "center" => x - textWidth / 2,
+        "right" => x - textWidth,
+        _ => x,
+    };
 }

@@ -199,6 +199,97 @@ public class SkinWriterTests : IDisposable
     }
 
     [Fact]
+    public void Save_align_center_roundtrips_and_left_is_omitted()
+    {
+        var folder = SkinWriter.Save(_root, "aligned", _emptySrc, _fullSrc,
+            new SkinConfig(new SkinText(true, 150, 5, Align: "center"), 1.0));
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        _out.WriteLine("center json: " + json);
+        Assert.Contains("align", json);
+        Assert.Equal("center", SkinLoader.Load(folder).Text!.Align);
+
+        // Default left writes the historical plain {show,x,y} shape — no align key at all.
+        var plainFolder = SkinWriter.Save(_root, "plain-align", _emptySrc, _fullSrc,
+            new SkinConfig(new SkinText(true, 10, 5), 1.0));
+        var plainJson = File.ReadAllText(Path.Combine(plainFolder, "skin.json"));
+        _out.WriteLine("left json: " + plainJson);
+        Assert.DoesNotContain("align", plainJson);
+        Assert.Equal("left", SkinLoader.Load(plainFolder).Text!.Align);
+    }
+
+    [Fact]
+    public void Save_muted_layer_roundtrips_and_clearing_removes_it()
+    {
+        var mutedSrc = Path.Combine(_dir, "src", "my-muted.png");
+        TestPngs.Write(mutedSrc, 300, 100);
+
+        var folder = SkinWriter.Save(_root, "with-muted", _emptySrc, _fullSrc,
+            new SkinConfig(null, 1.0), mutedSrc);
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"saved with muted: has={info.HasMuted} path={info.MutedPath}");
+        Assert.True(info.HasMuted);
+        Assert.True(File.Exists(Path.Combine(folder, "muted.png")));
+
+        // Re-save without a muted source: the layer is cleared, stale file removed.
+        SkinWriter.Save(_root, "with-muted", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
+        var cleared = SkinLoader.Load(folder);
+        _out.WriteLine($"after clear: has={cleared.HasMuted} muted.png={File.Exists(Path.Combine(folder, "muted.png"))}");
+        Assert.False(cleared.HasMuted);
+        Assert.False(File.Exists(Path.Combine(folder, "muted.png")));
+    }
+
+    [Fact]
+    public void Save_muted_gif_lands_as_gif_and_removes_stale_png_variant()
+    {
+        var mutedPng = Path.Combine(_dir, "src", "muted-v1.png");
+        TestPngs.Write(mutedPng, 300, 100);
+        var folder = SkinWriter.Save(_root, "muted-fmt", _emptySrc, _fullSrc,
+            new SkinConfig(null, 1.0), mutedPng);
+        Assert.True(File.Exists(Path.Combine(folder, "muted.png")));
+
+        var mutedGif = Path.Combine(_dir, "src", "muted-v2.gif");
+        TestPngs.WriteGif(mutedGif, 300, 100);
+        SkinWriter.Save(_root, "muted-fmt", _emptySrc, _fullSrc, new SkinConfig(null, 1.0), mutedGif);
+        _out.WriteLine($"muted.gif={File.Exists(Path.Combine(folder, "muted.gif"))} muted.png={File.Exists(Path.Combine(folder, "muted.png"))}");
+        Assert.True(File.Exists(Path.Combine(folder, "muted.gif")));
+        Assert.False(File.Exists(Path.Combine(folder, "muted.png")));
+        Assert.True(SkinLoader.Load(folder).MutedIsGif);
+    }
+
+    [Fact]
+    public void Save_mutedDim_non_default_roundtrips_and_default_is_omitted()
+    {
+        var folder = SkinWriter.Save(_root, "dimmed", _emptySrc, _fullSrc,
+            new SkinConfig(null, 1.0, MutedDim: 0.25));
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        _out.WriteLine("dim json: " + json);
+        Assert.Contains("mutedDim", json);
+        Assert.Equal(0.25, SkinLoader.Load(folder).MutedDim);
+
+        // Default 0.6 with another non-default field: no mutedDim key written.
+        var folder2 = SkinWriter.Save(_root, "undimmed", _emptySrc, _fullSrc,
+            new SkinConfig(null, 1.5));
+        var json2 = File.ReadAllText(Path.Combine(folder2, "skin.json"));
+        _out.WriteLine("default-dim json: " + json2);
+        Assert.DoesNotContain("mutedDim", json2);
+        Assert.Equal(0.6, SkinLoader.Load(folder2).MutedDim);
+    }
+
+    [Fact]
+    public void Save_mutedFrames_roundtrips_for_a_muted_sheet()
+    {
+        var mutedSheet = Path.Combine(_dir, "src", "muted-sheet.png");
+        TestPngs.Write(mutedSheet, 300, 400); // 4 frames of 100
+        var folder = SkinWriter.Save(_root, "muted-anim", _emptySrc, _fullSrc,
+            new SkinConfig(null, 1.0, MutedFrames: 4), mutedSheet);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"roundtrip: valid={info.IsValid} mutedFrames={info.MutedFrames} err={info.Error}");
+        Assert.True(info.IsValid);
+        Assert.Equal(4, info.MutedFrames);
+    }
+
+    [Fact]
     public void Save_with_all_defaults_omits_skin_json_even_with_animation_defaults()
     {
         var folder = SkinWriter.Save(_root, "plain", _emptySrc, _fullSrc,

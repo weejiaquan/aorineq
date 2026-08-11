@@ -9,19 +9,26 @@ namespace ApoVolume.Core;
 public sealed record SkinText(bool Show, int X, int Y,
     string Color = "#FFFFFFFF", string FontFamily = "Segoe UI", double FontSize = 14, bool Bold = false,
     string? OutlineColor = null, double OutlineWidth = 0,
-    string? ShadowColor = null, double ShadowBlur = 4, double ShadowDepth = 2);
+    string? ShadowColor = null, double ShadowBlur = 4, double ShadowDepth = 2,
+    string Align = "left");
 
 /// <summary>Result of loading one skin folder. Always has Name/Folder/EmptyPath/FullPath populated;
 /// on failure Width/Height are 0 and Error describes what went wrong. Width/Height are the LOGICAL
 /// frame size: for a sprite-sheet PNG that is height/frames; for a GIF the logical screen size.
-/// EmptyFrames/FullFrames are the declared sheet frame counts (always 1 for GIF layers — a GIF's
-/// actual frame count and per-frame delays are discovered at decode time in the UI layer).</summary>
+/// EmptyFrames/FullFrames/MutedFrames are the declared sheet frame counts (always 1 for GIF layers
+/// — a GIF's actual frame count and per-frame delays are discovered at decode time in the UI
+/// layer). MutedPath is the optional muted-state artwork (null = dim the empty layer by MutedDim
+/// instead).</summary>
 public sealed record SkinInfo(string Name, string Folder, string EmptyPath, string FullPath,
     int Width, int Height, SkinText? Text, double Scale,
     double Fps, int EmptyFrames, int FullFrames, bool EmptyIsGif, bool FullIsGif,
-    int FillStartX, int FillEndX, string? Error)
+    int FillStartX, int FillEndX,
+    string? MutedPath, bool MutedIsGif, int MutedFrames, double MutedDim, string? Error)
 {
     public bool IsValid => Error is null;
+
+    /// <summary>Whether the skin ships dedicated muted-state artwork.</summary>
+    public bool HasMuted => MutedPath is not null;
 }
 
 /// <summary>Loads and validates skin folders. Each layer ("empty", "full") resolves to
@@ -38,9 +45,18 @@ public static class SkinLoader
     private const double MaxFontSize = 200.0;
     private const double MaxOutlineWidth = 20.0;
     private const double MaxShadow = 50.0;
+    private const double DefaultMutedDim = 0.6; // the pre-1.8 hardcoded mute dim opacity
 
     private static string EmptyToDefault(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value;
+
+    /// <summary>Case-insensitive align parse; anything but center/right reads as left, the
+    /// historical anchor semantics of x.</summary>
+    private static string NormalizeAlign(string? value)
+    {
+        var v = value?.Trim().ToLowerInvariant();
+        return v is "center" or "right" ? v : "left";
+    }
 
     private static string? NullIfBlank(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
@@ -60,11 +76,13 @@ public static class SkinLoader
         double fps = DefaultFps;
         int emptyFrames = 1;
         int fullFrames = 1;
+        int mutedFrames = 1;
+        double mutedDim = DefaultMutedDim;
         int? fillStartJson = null;
         int? fillEndJson = null;
 
         SkinInfo Bad(string error) => new(name, folder, emptyPath, fullPath, 0, 0, text, scale,
-            fps, 1, 1, false, false, 0, 0, error);
+            fps, 1, 1, false, false, 0, 0, null, false, 1, DefaultMutedDim, error);
 
         try
         {
@@ -97,7 +115,8 @@ public static class SkinLoader
                         OutlineWidth: Math.Clamp(pt.OutlineWidth ?? 0, 0, MaxOutlineWidth),
                         ShadowColor: NullIfBlank(pt.ShadowColor),
                         ShadowBlur: Math.Clamp(pt.ShadowBlur ?? 4, 0, MaxShadow),
-                        ShadowDepth: Math.Clamp(pt.ShadowDepth ?? 2, 0, MaxShadow));
+                        ShadowDepth: Math.Clamp(pt.ShadowDepth ?? 2, 0, MaxShadow),
+                        Align: NormalizeAlign(pt.Align));
                 if (parsed?.Scale is { } rawScale)
                     scale = Math.Clamp(rawScale, MinScale, MaxScale);
                 if (parsed?.Fps is { } rawFps)
@@ -106,6 +125,10 @@ public static class SkinLoader
                     emptyFrames = Math.Max(1, ef);
                 if (parsed?.FullFrames is { } ff)
                     fullFrames = Math.Max(1, ff);
+                if (parsed?.MutedFrames is { } mf)
+                    mutedFrames = Math.Max(1, mf);
+                if (parsed?.MutedDim is { } dim)
+                    mutedDim = Math.Clamp(dim, 0.0, 1.0);
                 fillStartJson = parsed?.FillStartX;
                 fillEndJson = parsed?.FillEndX;
             }
@@ -124,6 +147,23 @@ public static class SkinLoader
                     $"{Path.GetFileName(full.Path)} frame is {full.LogicalWidth}×{full.LogicalHeight} " +
                     $"but {Path.GetFileName(empty.Path)} frame is {empty.LogicalWidth}×{empty.LogicalHeight}");
 
+            // Optional muted layer: same resolution and logical-frame-size rules as empty/full,
+            // just never required — absence means "dim the empty layer by mutedDim" instead.
+            string? mutedPath = null;
+            bool mutedIsGif = false;
+            if (File.Exists(Path.Combine(folder, "muted.png")) || File.Exists(Path.Combine(folder, "muted.gif")))
+            {
+                var muted = ResolveLayer(folder, "muted", mutedFrames);
+                if (muted.Error is not null)
+                    return Bad(muted.Error);
+                if (muted.LogicalWidth != empty.LogicalWidth || muted.LogicalHeight != empty.LogicalHeight)
+                    return Bad(
+                        $"{Path.GetFileName(muted.Path)} frame is {muted.LogicalWidth}×{muted.LogicalHeight} " +
+                        $"but {Path.GetFileName(empty.Path)} frame is {empty.LogicalWidth}×{empty.LogicalHeight}");
+                mutedPath = muted.Path;
+                mutedIsGif = muted.IsGif;
+            }
+
             // Fill range: where the bar actually lives inside the (possibly wider, decorative)
             // image. Defaults to the full width; values clamp into the image, but an inverted or
             // empty range is an authoring error worth surfacing rather than guessing around.
@@ -135,7 +175,8 @@ public static class SkinLoader
             return new SkinInfo(name, folder, empty.Path, full.Path,
                 empty.LogicalWidth, empty.LogicalHeight, text, scale,
                 fps, empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
-                empty.IsGif, full.IsGif, fillStart, fillEnd, null);
+                empty.IsGif, full.IsGif, fillStart, fillEnd,
+                mutedPath, mutedIsGif, mutedPath is null || mutedIsGif ? 1 : mutedFrames, mutedDim, null);
         }
         catch (Exception ex)
         {
@@ -190,6 +231,8 @@ public static class SkinLoader
         public double? Fps { get; set; }
         public int? EmptyFrames { get; set; }
         public int? FullFrames { get; set; }
+        public int? MutedFrames { get; set; }
+        public double? MutedDim { get; set; }
         public int? FillStartX { get; set; }
         public int? FillEndX { get; set; }
     }
@@ -208,5 +251,6 @@ public static class SkinLoader
         public string? ShadowColor { get; set; }
         public double? ShadowBlur { get; set; }
         public double? ShadowDepth { get; set; }
+        public string? Align { get; set; }
     }
 }
