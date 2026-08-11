@@ -140,6 +140,35 @@ public class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void VolumeMode_missing_defaults_to_eapo()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":73,\"Muted\":true}"); // pre-1.8 format
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded pre-1.8: {s}");
+        Assert.Equal(VolumeModes.Eapo, s.VolumeMode);
+    }
+
+    [Fact]
+    public void VolumeMode_garbage_normalizes_to_eapo()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":50,\"Muted\":false,\"VolumeMode\":\"banana\"}");
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded with garbage mode: {s}");
+        Assert.Equal(VolumeModes.Eapo, s.VolumeMode);
+    }
+
+    [Fact]
+    public void VolumeMode_system_roundtrips()
+    {
+        new Settings(50, false, VolumeMode: VolumeModes.System).Save(_path);
+        var s = Settings.Load(_path);
+        _out.WriteLine($"roundtripped: {s}");
+        Assert.Equal(VolumeModes.System, s.VolumeMode);
+    }
+
+    [Fact]
     public void All_fields_roundtrip()
     {
         var orig = new Settings(

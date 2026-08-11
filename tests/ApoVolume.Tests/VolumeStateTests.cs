@@ -141,6 +141,21 @@ public class VolumeStateTests
     }
 
     [Fact]
+    public void SetMuted_adopts_external_state_without_touching_percent()
+    {
+        var s = new VolumeState(60);
+        s.SetMuted(true);
+        _out.WriteLine($"after SetMuted(true): percent={s.Percent} muted={s.Muted}");
+        Assert.True(s.Muted);
+        Assert.Equal(60, s.Percent);
+
+        s.SetMuted(false);
+        _out.WriteLine($"after SetMuted(false): percent={s.Percent} muted={s.Muted}");
+        Assert.False(s.Muted);
+        Assert.Equal(60, s.Percent);
+    }
+
+    [Fact]
     public void StepPercent_live_change_affects_up()
     {
         var s = new VolumeState(50, stepPercent: 1);
