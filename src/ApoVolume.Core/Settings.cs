@@ -35,7 +35,8 @@ public sealed record Settings(
     bool ProtocolLinksEnabled = true, bool AutoUpdate = true,
     Dictionary<string, DeviceVolumeSetting>? DeviceVolumes = null,
     Dictionary<string, EqScopeSetting>? DeviceEq = null,
-    EqScopeSetting? GlobalEq = null)
+    EqScopeSetting? GlobalEq = null,
+    string EqEditorMode = EqEditorModes.Unset)
 {
     public static Settings Default { get; } = new(50, false);
 
@@ -69,6 +70,9 @@ public sealed record Settings(
             OsdAnchor = clampedAnchor,
             OsdStyle = clampedStyle,
             VolumeMode = clampedMode,
+            // "" is meaningful here (never chosen), so an unknown value normalizes to it rather
+            // than to a fixed face — EqEditorModes.Resolve then picks from the user's own chains.
+            EqEditorMode = EqEditorModes.Normalize(s.EqEditorMode),
             DeviceVolumes = s.DeviceVolumes?
                 .Where(kv => !string.IsNullOrEmpty(kv.Key) && kv.Value is not null)
                 .ToDictionary(kv => kv.Key,
