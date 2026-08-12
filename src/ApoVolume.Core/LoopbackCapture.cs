@@ -134,7 +134,7 @@ public sealed class LoopbackCapture : IDisposable
             StopLocked();
             return false;
         }
-        int sampleRate, channels;
+        int sampleRate, channels, bits;
         bool isFloat;
         try
         {
@@ -143,7 +143,7 @@ public sealed class LoopbackCapture : IDisposable
                 StopLocked();
                 return false;
             }
-            (sampleRate, channels, isFloat) = format;
+            (sampleRate, channels, bits, isFloat) = format;
             var session = Guid.Empty;
             if (_client.Initialize(ShareModeShared, StreamFlagsLoopback | StreamFlagsEventCallback,
                     BufferDuration100ns, 0, formatPtr, ref session) < 0)
@@ -181,7 +181,7 @@ public sealed class LoopbackCapture : IDisposable
 
         SampleRate = sampleRate;
         _running = true;
-        var thread = new Thread(() => CaptureLoop(_capture, _event, channels, isFloat))
+        var thread = new Thread(() => CaptureLoop(_capture, _event, channels, bits, isFloat))
         {
             IsBackground = true,
             Name = "apo-volume loopback",
@@ -218,7 +218,8 @@ public sealed class LoopbackCapture : IDisposable
 
     /// <summary>Capture thread: wait for the engine's event, drain every ready packet,
     /// convert, raise. Ends on Stop or on any COM failure (device gone — owner Restarts).</summary>
-    private void CaptureLoop(IAudioCaptureClient capture, EventWaitHandle ready, int channels, bool isFloat)
+    private void CaptureLoop(IAudioCaptureClient capture, EventWaitHandle ready, int channels,
+        int bitsPerSample, bool isFloat)
     {
         try
         {
@@ -238,7 +239,7 @@ public sealed class LoopbackCapture : IDisposable
                     try
                     {
                         if (frames > 0)
-                            Publish(data, (int)frames, channels, isFloat,
+                            Publish(data, (int)frames, channels, bitsPerSample, isFloat,
                                 silent: (flags & BufferFlagsSilent) != 0);
                     }
                     finally
@@ -255,40 +256,57 @@ public sealed class LoopbackCapture : IDisposable
         catch (ObjectDisposedException) { }   // raced a Stop that disposed the event handle
     }
 
-    private void Publish(IntPtr data, int frames, int channels, bool isFloat, bool silent)
+    private void Publish(IntPtr data, int frames, int channels, int bitsPerSample, bool isFloat,
+        bool silent)
     {
         var left = new float[frames];
         var right = new float[frames];
         if (!silent)
         {
-            if (isFloat)
-            {
-                var interleaved = new float[frames * channels];
-                Marshal.Copy(data, interleaved, 0, interleaved.Length);
-                for (int i = 0; i < frames; i++)
-                {
-                    left[i] = interleaved[i * channels];
-                    right[i] = channels > 1 ? interleaved[i * channels + 1] : left[i];
-                }
-            }
-            else
-            {
-                var interleaved = new short[frames * channels];
-                Marshal.Copy(data, interleaved, 0, interleaved.Length);
-                for (int i = 0; i < frames; i++)
-                {
-                    left[i] = interleaved[i * channels] / 32768f;
-                    right[i] = channels > 1 ? interleaved[i * channels + 1] / 32768f : left[i];
-                }
-            }
+            var raw = new byte[frames * channels * (bitsPerSample / 8)];
+            Marshal.Copy(data, raw, 0, raw.Length);
+            DecodeInterleaved(raw, frames, channels, bitsPerSample, isFloat, left, right);
         }
         SamplesAvailable?.Invoke(left, right);
     }
 
+    /// <summary>Decodes an interleaved sample block into per-channel floats: float32, or
+    /// integer PCM at 16/24 (packed)/32 bits, little-endian. Mono duplicates into both
+    /// channels; extra channels beyond the first two are skipped. Public and pure so the
+    /// per-format byte math is unit-testable without an audio device.</summary>
+    public static void DecodeInterleaved(byte[] raw, int frames, int channels, int bitsPerSample,
+        bool isFloat, float[] left, float[] right)
+    {
+        int bytesPerSample = bitsPerSample / 8;
+        int stride = channels * bytesPerSample;
+        for (int i = 0; i < frames; i++)
+        {
+            left[i] = DecodeSample(raw, i * stride, bitsPerSample, isFloat);
+            right[i] = channels > 1
+                ? DecodeSample(raw, i * stride + bytesPerSample, bitsPerSample, isFloat)
+                : left[i];
+        }
+    }
+
+    private static float DecodeSample(byte[] raw, int offset, int bitsPerSample, bool isFloat)
+    {
+        if (isFloat)
+            return BitConverter.ToSingle(raw, offset);
+        return bitsPerSample switch
+        {
+            16 => BitConverter.ToInt16(raw, offset) / 32768f,
+            // 24-bit packed little-endian: sign-extend via a <<8 into an int's top bytes.
+            24 => ((raw[offset] << 8 | raw[offset + 1] << 16 | raw[offset + 2] << 24) >> 8)
+                / 8388608f,
+            _ => BitConverter.ToInt32(raw, offset) / 2147483648f, // 32-bit int PCM
+        };
+    }
+
     /// <summary>Reads the fields this capture needs from a WAVEFORMATEX(TENSIBLE) blob:
-    /// (rate, channels, isFloat). Null for formats outside float32 / 16-bit PCM — shared-mode
-    /// mix formats are float32 in practice, so refusing the exotic rest is safe.</summary>
-    private static (int Rate, int Channels, bool IsFloat)? ParseMixFormat(IntPtr format)
+    /// (rate, channels, bits, isFloat). Accepts float32 and 16/24/32-bit integer PCM — the
+    /// shared-mode mix format is float32 in practice, but PCM mixes exist on some drivers.
+    /// Null for anything else.</summary>
+    private static (int Rate, int Channels, int Bits, bool IsFloat)? ParseMixFormat(IntPtr format)
     {
         ushort tag = (ushort)Marshal.ReadInt16(format, 0);
         int channels = (ushort)Marshal.ReadInt16(format, 2);
@@ -319,9 +337,9 @@ public sealed class LoopbackCapture : IDisposable
         }
         if (isFloat && bits != 32)
             return null;
-        if (!isFloat && bits != 16)
+        if (!isFloat && bits is not (16 or 24 or 32))
             return null;
-        return (rate, channels, isFloat);
+        return (rate, channels, bits, isFloat);
     }
 
     // [PreserveSig] everywhere — same contract as the rest of the repo's audio interop

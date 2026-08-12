@@ -154,8 +154,11 @@ public static class AutoEqIndex
             text = await GatedDownload.GetStringAsync(url ?? ParametricEqUrl(entry),
                 FetchTimeout, MaxPresetBytes, cancellationToken);
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex) when (ex is HttpRequestException
+            || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
+            // The timeout surfaces as TaskCanceledException — it must not escape the UI's
+            // async void import handler as-is (that would crash the process).
             throw new InvalidOperationException($"Download failed: {ex.Message}", ex);
         }
         var name = PresetStore.SanitizeName(entry.Name);

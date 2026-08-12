@@ -1295,7 +1295,10 @@ public partial class App : System.Windows.Application
                 eq?.Enabled ?? true, eq?.PresetPreampDb ?? 0,
                 eq?.Bands ?? Array.Empty<EqBand>()));
         }
-        if (_deviceStates.ActiveId is null && !system)
+        // Fallback "all" block ONLY when no device sections rendered at all: EAPO would apply
+        // an "all" preamp IN ADDITION to a matching device block's preamp (they sum), so the
+        // two must never coexist. With no known devices, "all" is the legacy behavior.
+        if (devices.Count == 0 && !system)
             devices.Add(new DeviceEqSection("all", ActiveState.CurrentDb, true, 0, Array.Empty<EqBand>()));
 
         return new EqConfigModel(

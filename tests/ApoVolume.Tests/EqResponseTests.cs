@@ -132,4 +132,15 @@ public class EqResponseTests
 
         Assert.Equal(0.0, EqResponse.SuggestPreampDb(Array.Empty<EqBand>()), 3);
     }
+
+    [Fact]
+    public void SuggestPreamp_catches_narrow_high_q_peaks_between_grid_points()
+    {
+        // Q 50 at an awkward frequency: the fixed 512-point log grid straddles the peak, so
+        // the suggestion must come from the band's exact Fc (codex r1 finding).
+        var narrow = new EqBand(EqBandType.Peak, 3333, 9.0, 50.0);
+        double suggestion = EqResponse.SuggestPreampDb(new[] { narrow });
+        _out.WriteLine($"narrow +9 Q50 -> {suggestion:0.00}");
+        Assert.InRange(suggestion, -9.11, -8.99); // full compensation, not an undersampled fraction
+    }
 }
