@@ -70,7 +70,21 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Raised when the user clicks "Open equalizer…" — App owns the EQ editor window.</summary>
     public event Action? EqualizerRequested;
 
-    public SettingsWindow(bool autostartEnabled, bool runAsAdmin, bool isElevated, string version, Settings settings)
+    /// <summary>Raised by the health banner's "Switch to Windows volume mode" button. App runs the
+    /// same live transition the mode radios do, so the volume keys work on the very next press —
+    /// this is the one action available while Equalizer APO is detached that makes the app work
+    /// again immediately, and it is a real mode change, not a display state.</summary>
+    public event Action? SwitchToSystemModeRequested;
+
+    /// <summary>The last health reading and the mode it was judged against, kept so the banner can
+    /// be re-rendered (mode change, theme change) without asking the machine again — and so the
+    /// repair button knows which of its two jobs it currently has.</summary>
+    private EapoHealthSnapshot? _health;
+    private string _volumeMode = VolumeModes.Eapo;
+    private bool _eapoApplies = true;
+
+    public SettingsWindow(bool autostartEnabled, bool runAsAdmin, bool isElevated, string version,
+        Settings settings, EapoHealthSnapshot? health)
     {
         InitializeComponent();
 
@@ -98,7 +112,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ApplyVolumeMode(settings);
         ApplyDeviceVolumes(settings);
         PopulateSkins(settings.SkinName);
-        RefreshEapoStatus();
+        SetEapoHealth(health, settings.VolumeMode, EapoDependency.Applies(settings));
 
         _initializing = false;
 
@@ -219,27 +233,103 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 + $"{count} device{(count == 1 ? "" : "s")} remembered.";
     }
 
-    /// <summary>Live Equalizer APO status line + Configurator button state. Called at
-    /// construction and on every SyncState (Settings reopen), so plugging in headphones or
-    /// running the Configurator is reflected the next time the window is looked at.</summary>
-    private void RefreshEapoStatus()
+    /// <summary>Renders the health row and the banner from one reading. Called at construction,
+    /// on every SyncState, and by App after every health check — so the window shows what the
+    /// monitor last saw rather than asking the machine on its own schedule, and the "last checked"
+    /// time it prints is the time of a reading that really happened.
+    ///
+    /// A null reading means the monitor has not produced one yet (only possible in the instant
+    /// between the window opening and its forced check landing): the row says so instead of
+    /// guessing, and the banner stays down rather than flashing a fault that has not been
+    /// measured.</summary>
+    /// <param name="applies">Whether this user depends on Equalizer APO at all
+    /// (<see cref="EapoDependency"/>). False hides the whole health group AND the banner: someone
+    /// running AorinEQ purely for the OSD is told nothing about a program they do not use.</param>
+    public void SetEapoHealth(EapoHealthSnapshot? health, string volumeMode, bool applies)
     {
-        var status = EapoDetection.Detect();
-        EapoStatusText.Text = status switch
+        _health = health;
+        _volumeMode = volumeMode;
+        _eapoApplies = applies;
+
+        var groupVisibility = applies ? Visibility.Visible : Visibility.Collapsed;
+        EapoHealthHeading.Visibility = groupVisibility;
+        EapoHealthCard.Visibility = groupVisibility;
+        if (!applies)
         {
-            EapoStatus.Active => "Active on the current playback device.",
-            EapoStatus.InstalledInactive =>
-                "Installed, but not enabled on the current playback device — volume changes won't be audible there.",
-            _ => "Not installed.",
-        };
+            EapoBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        HealthInstalledValue.Text = health is null ? "Checking…" : YesNo(health.Installed);
+        HealthActiveValue.Text = health is null ? "Checking…"
+            : !health.Installed ? "—"
+            : YesNo(health.ActiveOnDevice);
+        HealthIncludeValue.Text = health is null ? "Checking…"
+            : !health.Installed ? "—"
+            : health.IncludeLinePresent switch
+            {
+                true => "Yes",
+                false => "No",
+                // Another tool had Equalizer APO's config file open for the moment we looked. Not
+                // a fault, and saying "No" would be a lie about the user's setup.
+                null => "Couldn't read it just now",
+            };
+        HealthCheckedValue.Text = health is null
+            ? "—"
+            : health.CheckedAt.ToLocalTime().ToString("HH:mm:ss");
+
         OpenConfiguratorButton.IsEnabled = EapoDetection.GetConfiguratorPath() is not null;
+        ApplyEapoBanner();
     }
 
-    /// <summary>Launches EAPO's Configurator (elevated — it registers APOs on devices).</summary>
-    private void OnOpenConfigurator(object sender, RoutedEventArgs e)
+    private static string YesNo(bool value) => value ? "Yes" : "No";
+
+    /// <summary>The banner itself: hidden while healthy (and while nothing has been measured), and
+    /// otherwise carrying the words for THIS fault in THIS volume mode. The mode-switch button is
+    /// collapsed in Windows volume mode because there it would do nothing — an offer that changes
+    /// nothing is worse than no offer.</summary>
+    private void ApplyEapoBanner()
+    {
+        if (!_eapoApplies || _health is null || _health.Healthy)
+        {
+            EapoBanner.Visibility = Visibility.Collapsed;
+            return;
+        }
+        EapoBannerTitle.Text = EapoHealthCopy.BannerTitle(_health);
+        EapoBannerBody.Text = EapoHealthCopy.BannerBody(_health, _volumeMode);
+        EapoRepairButton.Content = EapoHealthCopy.RepairButtonText(_health);
+        EapoSwitchModeButton.Visibility =
+            _volumeMode == VolumeModes.System ? Visibility.Collapsed : Visibility.Visible;
+        EapoBanner.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>The banner's repair button. Equalizer APO's own Configurator is the thing that
+    /// re-ticks a device, so that is what this opens when there is one; with no install there is
+    /// nothing to configure and the setup guide — which downloads and runs the real installer — is
+    /// the honest destination. Both cases are reachable: the Configurator is missing exactly when
+    /// Equalizer APO is not installed, and also when an install is damaged.
+    ///
+    /// The choice is made on whether a Configurator EXISTS, not on whether launching it succeeded:
+    /// launching fails when the user declines the elevation prompt, and answering "no" to UAC must
+    /// not then spring an installer wizard on them.</summary>
+    private void OnEapoRepair(object sender, RoutedEventArgs e)
+    {
+        if (EapoDetection.GetConfiguratorPath() is null)
+            SetupGuideRequested?.Invoke();
+        else
+            TryLaunchConfigurator();
+    }
+
+    private void OnEapoSwitchMode(object sender, RoutedEventArgs e) => SwitchToSystemModeRequested?.Invoke();
+
+    /// <summary>Launches EAPO's Configurator (elevated — it registers APOs on devices). False when
+    /// there is no Configurator to launch, or the user declined the elevation prompt.</summary>
+    private void OnOpenConfigurator(object sender, RoutedEventArgs e) => TryLaunchConfigurator();
+
+    private static bool TryLaunchConfigurator()
     {
         var path = EapoDetection.GetConfiguratorPath();
-        if (path is null) return;
+        if (path is null) return false;
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
@@ -247,10 +337,11 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 UseShellExecute = true,
                 Verb = "runas",
             });
+            return true;
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            // UAC declined — nothing to do.
+            return false; // UAC declined — the user said no, so nothing else should happen either
         }
     }
 
@@ -261,7 +352,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Re-syncs every control (General tab and OSD tab alike) from current app state.
     /// Called both after autostart/RunAsAdmin changes and every time Settings is (re)opened —
     /// which is also when the skins folder gets rescanned.</summary>
-    public void SyncState(bool autostartEnabled, bool runAsAdmin, bool isElevated, Settings settings)
+    public void SyncState(bool autostartEnabled, bool runAsAdmin, bool isElevated, Settings settings,
+        EapoHealthSnapshot? health)
     {
         _initializing = true;
         AutostartBox.IsChecked = autostartEnabled;
@@ -276,7 +368,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ApplyVolumeMode(settings);
         ApplyDeviceVolumes(settings);
         PopulateSkins(settings.SkinName);
-        RefreshEapoStatus();
+        // The mode comes from settings, so a mode change made anywhere (radios, the banner button,
+        // the setup guide) re-renders the banner against the mode the app is really in.
+        SetEapoHealth(health ?? _health, settings.VolumeMode, EapoDependency.Applies(settings));
 
         _initializing = false;
     }

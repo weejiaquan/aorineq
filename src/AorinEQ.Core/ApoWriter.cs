@@ -394,6 +394,27 @@ public sealed class ApoWriter : IDisposable
         return result;
     }
 
+    /// <summary>Read-only companion to <see cref="EnsureInclude"/>: whether config.txt currently
+    /// carries our Include line, by the same comparison EnsureInclude uses — so what the health
+    /// check reports and what the include guard would do can never disagree.
+    ///
+    /// Returns null when config.txt cannot be read at all. That is deliberately distinct from
+    /// false: another tool holding the file for a moment is not a missing include line, and a
+    /// health check that reported it as one would raise an alarm every time Peace saved.</summary>
+    public static bool? HasIncludeLine(string configTxtPath)
+    {
+        try
+        {
+            if (!File.Exists(configTxtPath))
+                return false; // no config.txt at all: our line is genuinely not there
+            return File.ReadAllLines(configTxtPath).Any(l => Matches(l, IncludeLine));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The same trimmed, case-insensitive comparison <see cref="EnsureInclude"/> uses —
     /// a line the app would call "already present" must be one this migration rewrites.</summary>
     private static bool Matches(string line, string includeLine) =>
