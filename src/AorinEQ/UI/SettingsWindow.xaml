@@ -103,6 +103,34 @@
         <!-- Who made the skin the user is running. Caption-sized like a subtitle but on the PRIMARY
              foreground on purpose: a credit is the answer to a question the user asked, not
              explanatory chrome, and TextFillColorSecondaryBrush measures ~3.15:1 in light theme. -->
+        <!-- The Equalizer APO health banner's headline. BodyStrong so it outranks a card title,
+             and — like every other text style here — it states its own Foreground, because a
+             ui:TextBlock outside a themed container falls back to black. -->
+        <Style x:Key="BannerTitle" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="BodyStrong" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+        <!-- The banner's explanation. On the PRIMARY foreground, not the secondary one the card
+             subtitles use: this is the text that tells someone why their volume stopped working,
+             and TextFillColorSecondaryBrush measures ~3.15:1 in light theme. -->
+        <Style x:Key="BannerBody" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="Body" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+        <!-- One fact of the health row: label on the left, value on the right. Both on the primary
+             foreground — the value is the answer, and the label is what makes it mean anything. -->
+        <Style x:Key="HealthLabel" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="Caption" />
+            <Setter Property="Margin" Value="0,0,16,4" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
+        <Style x:Key="HealthValue" TargetType="ui:TextBlock" BasedOn="{StaticResource HealthLabel}">
+            <Setter Property="FontTypography" Value="CaptionStrong" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
         <Style x:Key="SkinCredit" TargetType="ui:TextBlock">
             <Setter Property="FontTypography" Value="Caption" />
             <Setter Property="TextWrapping" Value="Wrap" />
@@ -156,6 +184,54 @@
                     <ui:TextBlock Style="{StaticResource PageTitle}" Text="Volume" />
                     <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
                                   Text="How the volume keys change your loudness, and how far each press moves it. Both modes swallow the keys and show your own OSD; they differ in what the keys actually change." />
+
+                    <!-- EQUALIZER APO HEALTH BANNER. Collapsed whenever there is nothing wrong, so
+                         it is never decoration; when it appears it is the first thing on the page,
+                         above the very setting it is about.
+
+                         Deliberately NOT ui:InfoBar: this is the surface that has to be legible on
+                         the day the user's volume stops working, so every colour in it is one this
+                         window already proves it can read, and its two buttons are real buttons
+                         with real hit areas rather than a library control's inline links.
+
+                         The Grid (rather than a horizontal StackPanel) is what lets the headline
+                         wrap beside the icon instead of running off the edge at 720px. -->
+                    <Border x:Name="EapoBanner" Visibility="Collapsed" Margin="0,0,0,8"
+                            Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                            BorderBrush="{DynamicResource SystemFillColorCautionBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="16,14,16,16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ui:SymbolIcon Grid.Column="0" Symbol="Warning24" FontSize="20"
+                                           Margin="0,1,12,0" VerticalAlignment="Top"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <StackPanel Grid.Column="1">
+                                <ui:TextBlock x:Name="EapoBannerTitle" Style="{StaticResource BannerTitle}" />
+                                <ui:TextBlock x:Name="EapoBannerBody" Style="{StaticResource BannerBody}" />
+                                <WrapPanel Margin="0,14,0,0">
+                                    <ui:Button x:Name="EapoRepairButton" Margin="0,0,8,0"
+                                               Icon="{ui:SymbolIcon Wrench24}"
+                                               Click="OnEapoRepair" />
+                                    <!-- The filled one, because it is the difference between a dead
+                                         app and a working one: it makes the volume keys work again
+                                         on the next press. Filled from the primary TEXT brush and
+                                         lettered in the window background, NOT from Appearance
+                                         ="Primary" — that paints from the Windows accent, and this
+                                         machine's accent is black (see the ModeRadio style). -->
+                                    <ui:Button x:Name="EapoSwitchModeButton"
+                                               Content="Switch to Windows volume mode"
+                                               Icon="{ui:SymbolIcon Speaker224}"
+                                               Background="{DynamicResource TextFillColorPrimaryBrush}"
+                                               BorderBrush="{DynamicResource TextFillColorPrimaryBrush}"
+                                               Foreground="{DynamicResource ApplicationBackgroundBrush}"
+                                               Click="OnEapoSwitchMode" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
 
                     <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Volume control" />
                     <ui:CardControl Margin="{StaticResource RowMargin}">
@@ -233,6 +309,57 @@
                         </ui:CardControl.Header>
                         <ui:ToggleSwitch x:Name="RunAsAdminBox"
                                          Checked="OnRunAsAdminChanged" Unchecked="OnRunAsAdminChanged" />
+                    </ui:CardControl>
+
+                    <!-- EQUALIZER APO HEALTH. This lived in About until 3.4.0, where it was a
+                         one-line status nobody had a reason to visit. It belongs here: whether
+                         Equalizer APO is actually processing audio is the single thing that decides
+                         whether APO preamp mode works at all, and this is the page that offers that
+                         mode. About keeps the version and the repository link.
+
+                         Three separate facts rather than one status word, because they fail
+                         independently and the fix differs: installed is about the program, enabled
+                         is about the DEVICE (the one a Windows update resets), and the settings
+                         link is about Equalizer APO's own config file. -->
+                    <ui:TextBlock x:Name="EapoHealthHeading" Style="{StaticResource SectionHeading}"
+                                  Text="Equalizer APO health" />
+                    <ui:CardControl x:Name="EapoHealthCard" Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource HealthLabel}"
+                                              Text="Installed" />
+                                <ui:TextBlock x:Name="HealthInstalledValue" Grid.Row="0" Grid.Column="1"
+                                              Style="{StaticResource HealthValue}" />
+                                <ui:TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource HealthLabel}"
+                                              Text="Switched on for the device you're using" />
+                                <ui:TextBlock x:Name="HealthActiveValue" Grid.Row="1" Grid.Column="1"
+                                              Style="{StaticResource HealthValue}" />
+                                <ui:TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource HealthLabel}"
+                                              Text="Reading AorinEQ's settings" />
+                                <ui:TextBlock x:Name="HealthIncludeValue" Grid.Row="2" Grid.Column="1"
+                                              Style="{StaticResource HealthValue}" />
+                                <ui:TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource HealthLabel}"
+                                              Text="Last checked" />
+                                <ui:TextBlock x:Name="HealthCheckedValue" Grid.Row="3" Grid.Column="1"
+                                              Style="{StaticResource HealthValue}" />
+                            </Grid>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button x:Name="SetupGuideButton" Content="Setup guide"
+                                       Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
+                            <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="8,0,0,0"
+                                       Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
+                        </StackPanel>
                     </ui:CardControl>
                 </StackPanel>
             </ScrollViewer>
@@ -498,22 +625,6 @@
                                             NavigateUri="https://github.com/weejiaquan/aorineq"
                                             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                             Icon="{ui:SymbolIcon Open24}" />
-                    </ui:CardControl>
-
-                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Equalizer APO" />
-                    <ui:CardControl Margin="{StaticResource RowMargin}">
-                        <ui:CardControl.Header>
-                            <StackPanel>
-                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Status" />
-                                <ui:TextBlock x:Name="EapoStatusText" Style="{StaticResource RowSubtitle}" />
-                            </StackPanel>
-                        </ui:CardControl.Header>
-                        <StackPanel Orientation="Horizontal">
-                            <ui:Button x:Name="SetupGuideButton" Content="Setup guide"
-                                       Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
-                            <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="8,0,0,0"
-                                       Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
-                        </StackPanel>
                     </ui:CardControl>
                 </StackPanel>
             </ScrollViewer>

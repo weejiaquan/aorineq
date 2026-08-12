@@ -50,6 +50,14 @@ public partial class App : System.Windows.Application
     private bool _processingProtocolLinks;
     private System.Windows.Threading.DispatcherTimer? _updateTimer;
     private bool _updateCheckRunning;
+    /// <summary>Equalizer APO health: one tracker, fed from four triggers (default-device change,
+    /// session unlock, resume from sleep, and a slow timer). See <see cref="SetupEapoHealthMonitor"/>.</summary>
+    private readonly EapoHealthTracker _eapoHealth = new();
+    private System.Windows.Threading.DispatcherTimer? _healthTimer;
+    private bool _healthEventsSubscribed;
+    /// <summary>Whether <see cref="EapoDependency"/> said yes at the last check — the edge is what
+    /// forces a fresh reading when a user starts (or stops) depending on Equalizer APO.</summary>
+    private bool _eapoApplies;
     // Monotonic token for SettingsWindow state syncs (dispatcher thread only): each sync bumps it
     // before its async autostart query, and only the newest token may apply its result — an older
     // in-flight query (e.g. from opening Settings mid-toggle) can no longer overwrite fresher state.
@@ -289,13 +297,6 @@ public partial class App : System.Windows.Application
             if (_uacDeclined)
                 _tray.ShowWarning("Not elevated — volume keys won't work in elevated games.");
 
-            // Installed-but-inactive is NOT blocking (running EAPO on a non-default device is
-            // legitimate) — one balloon pointing at the Settings setup guide. eapo mode only:
-            // in system mode volume changes are audible regardless of where EAPO is enabled.
-            if (!systemMode && EapoDetection.Detect() == EapoStatus.InstalledInactive)
-                _tray.ShowWarning("Equalizer APO isn't enabled on your current playback device — "
-                    + "volume changes won't be audible there. See Settings → Setup guide.");
-
             MigrateLegacyAutostart();
 
             // Elevated-startup reconciliation.
@@ -358,6 +359,8 @@ public partial class App : System.Windows.Application
             AdoptEndpointState();
         RenderEqConfig();
         _tray!.Update(ActiveState.Percent, ActiveState.Muted);
+
+        SetupEapoHealthMonitor();
 
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
         try
@@ -590,7 +593,8 @@ public partial class App : System.Windows.Application
         int version = ++_stateSyncVersion;
         bool autostartEnabled = await IsAutostartEnabledAsync();
         if (version != _stateSyncVersion) return; // superseded — the newer sync's result wins
-        _settingsWindow?.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, _settings);
+        _settingsWindow?.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated,
+            _settings, _eapoHealth.Current);
     }
 
     /// <summary>Handles the SettingsWindow RunAsAdminChanged event: persists the choice, offers an
@@ -707,7 +711,8 @@ public partial class App : System.Windows.Application
         if (_settingsWindow is null)
         {
             _settingsWindow = new SettingsWindow(
-                autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, GetVersionString(), _settings);
+                autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, GetVersionString(),
+                _settings, _eapoHealth.Current);
             _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
             _settingsWindow.ProtocolLinksChanged += OnProtocolLinksToggled;
@@ -718,15 +723,20 @@ public partial class App : System.Windows.Application
             _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
             _settingsWindow.SetupGuideRequested += OpenOnboarding;
             _settingsWindow.EqualizerRequested += OpenEqEditor;
+            _settingsWindow.SwitchToSystemModeRequested += OnSwitchToSystemModeRequested;
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
             // Also rescans the skins folder (inside SyncState -> ApplyOsdSettings/PopulateSkins).
-            _settingsWindow.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, _settings);
+            _settingsWindow.SyncState(autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated,
+                _settings, _eapoHealth.Current);
         }
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
+        // The user is looking at it now, so the reading behind the health row is taken fresh —
+        // plugging in headphones or running the Configurator since the last poll must show.
+        CheckEapoHealth(force: true);
         // A routed open focuses the section's main control too — page=skins used to land ON the
         // skin picker, and landing merely NEAR it would be a regression.
         if (section is not null) _settingsWindow.Navigate(section, focusPrimary: true);
@@ -829,6 +839,16 @@ public partial class App : System.Windows.Application
         }
         RenderEqConfig();
         SaveSettings();
+        NoteEapoDependencyMayHaveChanged();
+    }
+
+    /// <summary>An EQ edit can be the moment a user starts (or stops) depending on Equalizer APO:
+    /// the first band placed in Windows volume mode, or the last one removed. Only the EDGE costs
+    /// anything — this runs on every band drag, so the reading behind it must not.</summary>
+    private void NoteEapoDependencyMayHaveChanged()
+    {
+        if (EapoDependency.Applies(_settings) != _eapoApplies)
+            CheckEapoHealth(force: true);
     }
 
     /// <summary>The EQ scope the tray submenu targets: the active device when one is known,
@@ -1163,6 +1183,164 @@ public partial class App : System.Windows.Application
                 await OpenSettingsAsync(SettingsSections.ForProtocolPage(page));
                 break;
         }
+    }
+
+    // ---------------------------------------------------------------- Equalizer APO health
+
+    /// <summary>Starts continuous Equalizer APO health monitoring, replacing the single startup
+    /// balloon this app shipped from v1.5.0 to v3.3.0.
+    ///
+    /// WHY CONTINUOUS. The registration that makes Equalizer APO run lives in the audio ENDPOINT's
+    /// property store, not in Equalizer APO's installation, so a Windows update that replaces the
+    /// audio driver silently detaches it. Checking only at startup meant a machine that was fine
+    /// when the app launched, and detached an hour later by Windows Update, said nothing at all —
+    /// and in APO preamp mode that failure is total and silent: the volume keys keep writing a
+    /// preamp value nothing reads, so the APP looks broken.
+    ///
+    /// FOUR TRIGGERS, ONE TRACKER. A default-device change is the moment the answer can change
+    /// without anything else happening (headphones in, or a driver reinstall re-enumerating the
+    /// device); it reuses the IMMNotificationClient plumbing EndpointVolume has registered since
+    /// v1.8.0 rather than adding a second notification client. A session unlock and a resume from
+    /// sleep are when a machine comes back from the update that broke it. The timer is the
+    /// backstop for everything else, and it is slow on purpose (see
+    /// <see cref="EapoHealthTracker.PollInterval"/>). All four land on
+    /// <see cref="CheckEapoHealth"/>, and the tracker collapses a burst of them into one reading.
+    ///
+    /// SHUTDOWN. <see cref="SystemEvents"/> raises on a system thread and unsubscribing does not
+    /// stop a callback already running, so both posts below are guarded exactly the way
+    /// <see cref="AppTheme"/> and <see cref="TrayIcon"/> guard theirs: posting to a dispatcher
+    /// that has begun shutting down throws, and an exception on a system thread takes the process
+    /// down mid-teardown. That has happened in this project before (v2.1.2).</summary>
+    private void SetupEapoHealthMonitor()
+    {
+        _eapoApplies = EapoDependency.Applies(_settings);
+        Microsoft.Win32.SystemEvents.SessionSwitch += OnSessionSwitch;
+        Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        _healthEventsSubscribed = true;
+
+        _healthTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = EapoHealthTracker.PollInterval,
+        };
+        _healthTimer.Tick += (_, _) => CheckEapoHealth(force: false);
+        _healthTimer.Start();
+
+        // The startup reading. Forced, because there is nothing to collapse it against and this
+        // is the one that replaces the old startup balloon.
+        CheckEapoHealth(force: true);
+    }
+
+    /// <summary>Unlocking, or switching back to this session, is when a user returns to a machine
+    /// Windows may have updated while they were away.</summary>
+    private void OnSessionSwitch(object sender, Microsoft.Win32.SessionSwitchEventArgs e)
+    {
+        if (e.Reason is Microsoft.Win32.SessionSwitchReason.SessionUnlock
+            or Microsoft.Win32.SessionSwitchReason.ConsoleConnect
+            or Microsoft.Win32.SessionSwitchReason.SessionLogon)
+            RequestHealthCheck();
+    }
+
+    /// <summary>Resume from sleep or hibernate: the audio stack re-enumerates, which is exactly
+    /// when a detached endpoint becomes observable.</summary>
+    private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume)
+            RequestHealthCheck();
+    }
+
+    /// <summary>Hops a system-thread trigger onto the UI thread, guarded — see
+    /// <see cref="SetupEapoHealthMonitor"/>'s shutdown note.</summary>
+    private void RequestHealthCheck()
+    {
+        if (!_healthEventsSubscribed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            return;
+        try
+        {
+            Dispatcher.BeginInvoke(new Action(() => CheckEapoHealth(force: false)));
+        }
+        catch (InvalidOperationException)
+        {
+            // The dispatcher began shutting down between the check and the post.
+        }
+    }
+
+    /// <summary>One health reading and everything that follows from it: repair what can be
+    /// repaired, refresh the Settings surface, and interrupt the user only when the tracker says
+    /// this is worth interrupting for.
+    ///
+    /// Dispatcher thread only. Unforced calls are collapsed by the tracker, so the four triggers
+    /// arriving together (a laptop resuming, re-enumerating its audio devices and unlocking within
+    /// a second) cost ONE registry-and-COM reading, not four — and, because the notification
+    /// decision is made from that single reading, cannot produce four balloons either.</summary>
+    private void CheckEapoHealth(bool force)
+    {
+        // The gate in front of everything: a user who does not depend on Equalizer APO is told
+        // nothing about it, and — because the tracker is reset here rather than merely muted — a
+        // fault that develops while nobody is watching is still news the first time it matters.
+        bool applies = EapoDependency.Applies(_settings);
+        if (applies != _eapoApplies)
+        {
+            _eapoApplies = applies;
+            _eapoHealth.Reset();
+            force = true;
+        }
+        if (!applies)
+        {
+            _settingsWindow?.SetEapoHealth(null, _settings.VolumeMode, applies: false);
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (!_eapoHealth.ShouldProbe(now, force))
+            return;
+
+        var snapshot = EapoHealthSnapshot.Read(now);
+
+        // Self-heal the one fault we own. The include guard already repairs config.txt when it
+        // SEES it change, but a rewrite it missed (its watcher buffer overflowed, or the file was
+        // replaced while the app was not running the guard yet) would otherwise sit there
+        // unnoticed. Repairing here and re-reading is what turns "fixed invisibly" into "fixed,
+        // and the row says so".
+        if (snapshot.IncludeLinePresent == false && _writer is not null && TryEnsureInclude())
+            snapshot = EapoHealthSnapshot.Read(now);
+
+        var update = _eapoHealth.Update(snapshot);
+        _settingsWindow?.SetEapoHealth(update.Snapshot, _settings.VolumeMode, applies: true);
+
+        if (EapoHealthCopy.Balloon(update, _settings.VolumeMode) is { } text)
+        {
+            if (update.Event == EapoHealthEvent.Recovered)
+                _tray?.ShowInfo(text);
+            else
+                // Clickable: a warning about a setting is only actionable from where the setting
+                // is, and the banner with the two buttons is on that page.
+                _tray?.ShowActionableWarning(text, () => _ = OpenSettingsAsync(SettingsSections.Volume));
+        }
+    }
+
+    /// <summary>Re-adds the Include line, best effort. Returns whether it is worth re-reading.</summary>
+    private bool TryEnsureInclude()
+    {
+        try
+        {
+            _writer!.EnsureInclude();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false; // locked or not ours to write: the row reports the truth either way
+        }
+    }
+
+    /// <summary>The health banner's "Switch to Windows volume mode" button: the same live
+    /// transition the Settings radios run, so there is exactly one path that changes volume mode
+    /// and no way for the radios, the rendered config and settings.json to end up disagreeing.
+    /// The re-sync afterwards is what re-renders the banner (which loses its mode-switch button)
+    /// and moves the radio the user did not click.</summary>
+    private void OnSwitchToSystemModeRequested()
+    {
+        OnVolumeModeChanged(VolumeModes.System);
+        _ = SyncSettingsWindowStateAsync();
     }
 
     /// <summary>Four-part assembly version — what release tags compare against (see
@@ -1683,6 +1861,15 @@ public partial class App : System.Windows.Application
             HandMuteBackToPreamp();
         }
         SaveSettings();
+        // Flushed, not just posted: everything above has already happened to the audio chain (the
+        // preamp is parked or re-applied, on disk, through the writer's own Flush), so leaving the
+        // mode itself 50 ms behind in the coalescer is the one window where settings.json and the
+        // running state can disagree — and a crash inside it comes back in the OTHER mode with a
+        // config file rendered for this one.
+        _settingsSaver.Flush();
+        // The mode decides both whether Equalizer APO matters at all and what the banner says
+        // about it, so this reading is always taken fresh.
+        CheckEapoHealth(force: true);
     }
 
     /// <summary>Shows the currently active OSD window (skin-driven or the standard OsdWindow) for
@@ -2017,6 +2204,15 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _hook?.Dispose();
+        // The health monitor goes FIRST, and for the reason documented on SetupEapoHealthMonitor:
+        // its two SystemEvents handlers run on a system thread, and _healthEventsSubscribed is
+        // what stops one already in flight from posting to a dispatcher that is draining. Clearing
+        // the flag before unsubscribing (rather than after) leaves no instant where a callback can
+        // pass the guard, and the guard's dispatcher check covers the rest.
+        _healthEventsSubscribed = false;
+        Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
+        Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _healthTimer?.Stop();
         // Unsubscribed early and for the same reason as the tray's: both listen on SystemEvents,
         // which raises on a system thread, and a theme change arriving mid-teardown must not find
         // a dispatcher that has begun shutting down.

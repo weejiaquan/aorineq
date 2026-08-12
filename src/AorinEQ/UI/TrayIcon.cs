@@ -182,25 +182,29 @@ public sealed class TrayIcon : IDisposable
         }
     }
 
-    public void ShowWarning(string text)
-    {
-        _balloonClickAction = null;
-        _icon.ShowBalloonTip(5000, "AorinEQ", text, ToolTipIcon.Warning);
-    }
+    public void ShowWarning(string text) => Show(text, ToolTipIcon.Warning, 5000, onClick: null);
 
-    public void ShowInfo(string text)
-    {
-        _balloonClickAction = null;
-        _icon.ShowBalloonTip(5000, "AorinEQ", text, ToolTipIcon.Info);
-    }
+    public void ShowInfo(string text) => Show(text, ToolTipIcon.Info, 5000, onClick: null);
 
     /// <summary>An info balloon that runs <paramref name="onClick"/> when clicked — used by the
     /// updater's "new version available — click to open the release page" notice when the exe
     /// directory isn't writable for the in-place swap.</summary>
-    public void ShowNotice(string text, Action onClick)
+    public void ShowNotice(string text, Action onClick) => Show(text, ToolTipIcon.Info, 10000, onClick);
+
+    /// <summary>A warning balloon that runs <paramref name="onClick"/> when clicked, and stays up
+    /// longer because it is asking the user to do something — the Equalizer APO health monitor's
+    /// "this stopped working, here is where to fix it". A warning nobody can act on from where it
+    /// appears is just an interruption.</summary>
+    public void ShowActionableWarning(string text, Action onClick) =>
+        Show(text, ToolTipIcon.Warning, 10000, onClick);
+
+    /// <summary>The one place a balloon is raised, so the click action is always set (or cleared)
+    /// in the same breath: a stale action left behind by an earlier balloon would fire from a
+    /// click on this one.</summary>
+    private void Show(string text, ToolTipIcon icon, int timeoutMs, Action? onClick)
     {
         _balloonClickAction = onClick;
-        _icon.ShowBalloonTip(10000, "AorinEQ", text, ToolTipIcon.Info);
+        _icon.ShowBalloonTip(timeoutMs, "AorinEQ", text, icon);
     }
 
     /// <summary>Order matters: stop the system events (they'd re-apply an icon we're about to
