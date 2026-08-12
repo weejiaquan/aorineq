@@ -127,8 +127,13 @@
             <Setter Property="Margin" Value="0,0,16,4" />
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
         </Style>
+        <!-- The value is the answer, so it is the heavier of the pair. FontWeight rather than a
+             FontTypography of its own: WPF-UI 4.3.0's FontTypography has exactly Caption, Body,
+             BodyStrong, Subtitle, Title, TitleLarge and Display — there is no "CaptionStrong", and
+             naming one compiles perfectly and then throws a XamlParseException the first time the
+             window is constructed. -->
         <Style x:Key="HealthValue" TargetType="ui:TextBlock" BasedOn="{StaticResource HealthLabel}">
-            <Setter Property="FontTypography" Value="CaptionStrong" />
+            <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
         <Style x:Key="SkinCredit" TargetType="ui:TextBlock">
@@ -323,12 +328,19 @@
                          link is about Equalizer APO's own config file. -->
                     <ui:TextBlock x:Name="EapoHealthHeading" Style="{StaticResource SectionHeading}"
                                   Text="Equalizer APO health" />
+                    <!-- Everything lives in the HEADER, with nothing in the card's content slot.
+                         A CardControl lays its header and its content out side by side, and this
+                         header is wide (the longest fact label is a sentence): measured at 900x640,
+                         the button column landed ON TOP of the fact values, and at 720x440 the last
+                         button was under the scrollbar's arrow. Stacked, the card simply grows and
+                         the section scrolls, which it already does. -->
                     <ui:CardControl x:Name="EapoHealthCard" Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
+                          <StackPanel>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
@@ -353,26 +365,25 @@
                                 <ui:TextBlock x:Name="HealthCheckedValue" Grid.Row="3" Grid.Column="1"
                                               Style="{StaticResource HealthValue}" />
                             </Grid>
-                        </ui:CardControl.Header>
-                        <StackPanel>
-                            <WrapPanel HorizontalAlignment="Right">
-                                <ui:Button x:Name="SetupGuideButton" Content="Setup guide" Margin="0,0,8,0"
+                            <WrapPanel Margin="0,14,0,0">
+                                <ui:Button x:Name="SetupGuideButton" Content="Setup guide" Margin="0,0,8,4"
                                            Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
-                                <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="0,0,8,0"
+                                <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="0,0,8,4"
                                            Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
                                 <!-- Never automatic and never silent: the click is the consent, and
                                      the confirmation it raises spells out the administrator prompt,
                                      the audio interruption and the undo before anything is written. -->
-                                <ui:Button x:Name="RepairEapoButton" Content="Repair automatically" Margin="0,0,8,0"
+                                <ui:Button x:Name="RepairEapoButton" Content="Repair automatically" Margin="0,0,8,4"
                                            Icon="{ui:SymbolIcon Wrench24}" Click="OnRepairEapo" />
-                                <ui:Button x:Name="UndoRepairButton" Content="Undo repair" Visibility="Collapsed"
+                                <ui:Button x:Name="UndoRepairButton" Content="Undo repair" Margin="0,0,0,4"
+                                           Visibility="Collapsed"
                                            Icon="{ui:SymbolIcon ArrowUndo24}" Click="OnUndoEapoRepair" />
                             </WrapPanel>
                             <ui:TextBlock x:Name="EapoRepairStatusText" Style="{StaticResource RowSubtitle}"
                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                          TextAlignment="Right" MaxWidth="380"
-                                          Visibility="Collapsed" />
-                        </StackPanel>
+                                          Margin="0,8,0,0" Visibility="Collapsed" />
+                          </StackPanel>
+                        </ui:CardControl.Header>
                     </ui:CardControl>
                 </StackPanel>
             </ScrollViewer>
