@@ -26,6 +26,8 @@ public sealed class TrayIcon : IDisposable
     private bool _disposed;
     private readonly ToolStripMenuItem _muteItem;
     private readonly ToolStripMenuItem _eqPresetMenu;
+    // NotifyIcon does not own its ContextMenuStrip, so the tray disposes it itself.
+    private readonly ContextMenuStrip _menu;
     private Action? _balloonClickAction;
 
     public event Action? OpenRequested;
@@ -81,6 +83,7 @@ public sealed class TrayIcon : IDisposable
             icon.BalloonTipClicked += (_, _) => _balloonClickAction?.Invoke();
             icon.BalloonTipClosed += (_, _) => _balloonClickAction = null;
             _icon = icon;
+            _menu = menu;
 
             // The glyph is theme- and size-dependent, and both can change while the app sits idle:
             // switching Windows to dark mode, or moving the taskbar to a monitor at another DPI.
@@ -125,14 +128,30 @@ public sealed class TrayIcon : IDisposable
     {
         // Light/dark switches arrive as General; accent/colour changes as Color.
         if (e.Category is UserPreferenceCategory.General or UserPreferenceCategory.Color)
-            _dispatcher.BeginInvoke(new Action(RefreshIcon));
+            RequestIconRefresh();
     }
 
-    private void OnDisplaySettingsChanged(object? sender, EventArgs e) =>
-        _dispatcher.BeginInvoke(new Action(RefreshIcon));
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => RequestIconRefresh();
 
-    /// <summary>Re-applies the glyph after a theme or DPI change. Guarded because a callback can
-    /// already be queued on the dispatcher when the tray is disposed at shutdown.</summary>
+    /// <summary>Hops the refresh onto the UI thread. Unsubscribing in <see cref="Dispose"/> does
+    /// not stop a callback that is already running, so the post itself is guarded: posting to a
+    /// dispatcher that has begun shutting down throws, and this runs on a system thread where an
+    /// exception would take the process down during teardown.</summary>
+    private void RequestIconRefresh()
+    {
+        if (_disposed || _dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished) return;
+        try
+        {
+            _dispatcher.BeginInvoke(new Action(RefreshIcon));
+        }
+        catch (InvalidOperationException)
+        {
+            // The dispatcher began shutting down between the check and the post.
+        }
+    }
+
+    /// <summary>Re-applies the glyph after a theme or DPI change. Guarded again because a callback
+    /// can already be queued on the dispatcher when the tray is disposed.</summary>
     private void RefreshIcon()
     {
         if (_disposed) return;
@@ -143,7 +162,13 @@ public sealed class TrayIcon : IDisposable
     /// item per preset file, the active one checked. Empty list disables the submenu.</summary>
     public void SetEqPresets(IReadOnlyList<string> names, string activeName)
     {
+        // Rebuilt every time the menu opens, so the discarded items add up over a session:
+        // DropDownItems.Clear() only unparents them. Disposed after the Clear, never before —
+        // an item is still owned by the collection until it is removed.
+        var discarded = _eqPresetMenu.DropDownItems.Cast<ToolStripItem>().ToArray();
         _eqPresetMenu.DropDownItems.Clear();
+        foreach (var item in discarded) item.Dispose();
+
         _eqPresetMenu.Enabled = names.Count > 0;
         foreach (var name in names)
         {
@@ -180,14 +205,17 @@ public sealed class TrayIcon : IDisposable
 
     /// <summary>Order matters: stop the system events (they'd re-apply an icon we're about to
     /// destroy), then take the icon off the taskbar, and only then free the glyph handles — the
-    /// shell must not be holding one when it is destroyed.</summary>
+    /// shell must not be holding one when it is destroyed. The context menu is disposed last
+    /// because NotifyIcon does not own it.</summary>
     public void Dispose()
     {
+        if (_disposed) return;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         _disposed = true;
         _icon.Visible = false;
         _icon.Dispose();
         _renderer.Dispose();
+        _menu.Dispose();
     }
 }
