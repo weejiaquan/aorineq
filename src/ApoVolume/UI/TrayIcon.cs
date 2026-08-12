@@ -10,12 +10,21 @@ public sealed class TrayIcon : IDisposable
     private readonly Icon _normalIcon;
     private readonly Icon _mutedIcon;
     private readonly ToolStripMenuItem _muteItem;
+    private readonly ToolStripMenuItem _eqPresetMenu;
     private Action? _balloonClickAction;
 
     public event Action? OpenRequested;
     public event Action? MuteToggleRequested;
     public event Action? SettingsRequested;
+    public event Action? EqualizerRequested;
     public event Action? ExitRequested;
+
+    /// <summary>An EQ preset was picked from the tray submenu, by name.</summary>
+    public event Action<string>? EqPresetSelected;
+
+    /// <summary>Raised right before the context menu opens — the app refreshes the EQ preset
+    /// submenu here so it always shows the current preset files and active selection.</summary>
+    public event Action? MenuOpening;
 
     public TrayIcon()
     {
@@ -23,13 +32,17 @@ public sealed class TrayIcon : IDisposable
         _mutedIcon = CreateGlyphIcon("\uE74F");
 
         _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
+        _eqPresetMenu = new ToolStripMenuItem("EQ preset");
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("Open volume slider", null, (_, _) => OpenRequested?.Invoke()));
         menu.Items.Add(_muteItem);
+        menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null, (_, _) => EqualizerRequested?.Invoke()));
+        menu.Items.Add(_eqPresetMenu);
         menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => SettingsRequested?.Invoke()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
+        menu.Opening += (_, _) => MenuOpening?.Invoke();
 
         _icon = new NotifyIcon
         {
@@ -53,6 +66,24 @@ public sealed class TrayIcon : IDisposable
         _icon.Icon = muted ? _mutedIcon : _normalIcon;
         _icon.Text = muted ? "apo-volume: muted" : $"apo-volume: {percent}%";
         _muteItem.Checked = muted;
+    }
+
+    /// <summary>Rebuilds the "EQ preset" submenu for the active device's scope: one checkable
+    /// item per preset file, the active one checked. Empty list disables the submenu.</summary>
+    public void SetEqPresets(IReadOnlyList<string> names, string activeName)
+    {
+        _eqPresetMenu.DropDownItems.Clear();
+        _eqPresetMenu.Enabled = names.Count > 0;
+        foreach (var name in names)
+        {
+            var item = new ToolStripMenuItem(name)
+            {
+                Checked = string.Equals(name, activeName, StringComparison.OrdinalIgnoreCase),
+            };
+            var chosen = name;
+            item.Click += (_, _) => EqPresetSelected?.Invoke(chosen);
+            _eqPresetMenu.DropDownItems.Add(item);
+        }
     }
 
     public void ShowWarning(string text)

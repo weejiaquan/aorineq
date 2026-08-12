@@ -44,6 +44,9 @@ public partial class SettingsWindow : Window
     /// <summary>Raised when the user clicks "Setup guide…" — App owns the onboarding window.</summary>
     public event Action? SetupGuideRequested;
 
+    /// <summary>Raised when the user clicks "Open equalizer…" — App owns the EQ editor window.</summary>
+    public event Action? EqualizerRequested;
+
     public SettingsWindow(bool autostartEnabled, bool runAsAdmin, bool isElevated, string version, Settings settings)
     {
         InitializeComponent();
@@ -110,6 +113,8 @@ public partial class SettingsWindow : Window
     }
 
     private void OnOpenSetupGuide(object sender, RoutedEventArgs e) => SetupGuideRequested?.Invoke();
+
+    private void OnOpenEqualizer(object sender, RoutedEventArgs e) => EqualizerRequested?.Invoke();
 
     /// <summary>Re-syncs every control (General tab and OSD tab alike) from current app state.
     /// Called both after autostart/RunAsAdmin changes and every time Settings is (re)opened —

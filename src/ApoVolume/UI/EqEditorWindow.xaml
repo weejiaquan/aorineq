@@ -1,0 +1,133 @@
+<Window x:Class="ApoVolume.UI.EqEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Equalizer — apo-volume" Width="1000" Height="640"
+        MinWidth="820" MinHeight="520" WindowStartupLocation="CenterScreen"
+        Background="#FF1E1E24" Focusable="True">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Scope tabs: Global + one per render device; the Windows-default device is marked. -->
+        <ListBox x:Name="ScopeTabs" Grid.Row="0" SelectionChanged="OnScopeSelected"
+                 Background="Transparent" BorderThickness="0" Margin="0,0,0,6"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                 ScrollViewer.VerticalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="10,4" />
+                    <Setter Property="Margin" Value="0,0,4,0" />
+                    <Setter Property="Foreground" Value="#DDD" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <Border x:Name="Bd" CornerRadius="4" Padding="{TemplateBinding Padding}"
+                                        Background="#2A2A33">
+                                    <ContentPresenter />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#3D6EB5" />
+                                    </Trigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#556" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListBox.ItemContainerStyle>
+        </ListBox>
+
+        <!-- Preset bar -->
+        <DockPanel Grid.Row="1" Margin="0,0,0,8" LastChildFill="False">
+            <TextBlock Text="Preset:" Foreground="#BBB" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox x:Name="PresetCombo" Width="230" SelectionChanged="OnPresetSelected" />
+            <Button Content="Save" Padding="10,3" Margin="6,0,0,0" Click="OnSavePreset" />
+            <Button Content="Save As…" Padding="10,3" Margin="4,0,0,0" Click="OnSavePresetAs" />
+            <Button Content="Delete" Padding="10,3" Margin="4,0,0,0" Click="OnDeletePreset" />
+            <Button Content="Import file…" Padding="10,3" Margin="10,0,0,0" Click="OnImportFile" />
+            <Button Content="AutoEq…" Padding="10,3" Margin="4,0,0,0" Click="OnAutoEq" />
+            <CheckBox x:Name="EqEnabledCheck" Content="EQ enabled" Foreground="#DDD"
+                      VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnEqEnabledChanged"
+                      Unchecked="OnEqEnabledChanged" />
+            <Button Content="Auto-preamp" Padding="10,3" Margin="14,0,0,0" Click="OnAutoPreamp"
+                    ToolTip="Set the preset preamp to cancel the chain's maximum boost" />
+            <TextBlock x:Name="PreampReadout" Foreground="#9AC" VerticalAlignment="Center"
+                       Margin="12,0,0,0" />
+        </DockPanel>
+
+        <!-- Plot + side panel -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="170" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="#FF15151A" CornerRadius="6" ClipToBounds="True">
+                <Canvas x:Name="Plot" Background="Transparent" ClipToBounds="True"
+                        SizeChanged="OnPlotSizeChanged"
+                        MouseLeftButtonDown="OnPlotMouseDown" MouseMove="OnPlotMouseMove"
+                        MouseLeftButtonUp="OnPlotMouseUp" MouseWheel="OnPlotMouseWheel"
+                        MouseRightButtonUp="OnPlotRightClick" />
+            </Border>
+
+            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                <TextBlock Text="Selected band" Foreground="#BBB" FontWeight="SemiBold" />
+                <TextBlock Text="Type" Foreground="#999" Margin="0,8,0,2" FontSize="11" />
+                <ComboBox x:Name="BandTypeCombo" SelectionChanged="OnBandTypeChanged" />
+                <TextBlock Text="Frequency (Hz)" Foreground="#999" Margin="0,8,0,2" FontSize="11" />
+                <TextBox x:Name="FcBox" LostFocus="OnBandBoxCommit" KeyDown="OnBandBoxKeyDown" />
+                <TextBlock Text="Gain (dB)" Foreground="#999" Margin="0,8,0,2" FontSize="11" />
+                <TextBox x:Name="GainBox" LostFocus="OnBandBoxCommit" KeyDown="OnBandBoxKeyDown" />
+                <TextBlock Text="Q" Foreground="#999" Margin="0,8,0,2" FontSize="11" />
+                <TextBox x:Name="QBox" LostFocus="OnBandBoxCommit" KeyDown="OnBandBoxKeyDown" />
+                <Button x:Name="RemoveBandButton" Content="Remove band" Padding="8,3" Margin="0,10,0,0"
+                        Click="OnRemoveBand" />
+                <Button x:Name="DbRangeButton" Padding="8,3" Margin="0,8,0,0" Click="OnToggleDbRange" />
+
+                <TextBlock Text="Output level (post-EQ)" Foreground="#BBB" FontWeight="SemiBold"
+                           Margin="0,18,0,4" />
+                <Grid Height="120">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Background="#26262E" Margin="0,0,4,0" CornerRadius="2">
+                        <Grid>
+                            <Rectangle x:Name="RmsBarL" Fill="#4C9F6E" VerticalAlignment="Bottom" Height="0" />
+                            <Rectangle x:Name="PeakTickL" Fill="#C8E6C9" VerticalAlignment="Bottom"
+                                       Height="2" Margin="0,0,0,0" />
+                        </Grid>
+                    </Border>
+                    <Border Grid.Column="1" Background="#26262E" Margin="0,0,4,0" CornerRadius="2">
+                        <Grid>
+                            <Rectangle x:Name="RmsBarR" Fill="#4C9F6E" VerticalAlignment="Bottom" Height="0" />
+                            <Rectangle x:Name="PeakTickR" Fill="#C8E6C9" VerticalAlignment="Bottom"
+                                       Height="2" />
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Column="2" Margin="4,0,0,0">
+                        <Button x:Name="ClipIndicator" Content="CLIP" FontWeight="Bold" FontSize="11"
+                                Padding="6,2" Background="#333" Foreground="#777"
+                                ToolTip="Latches on peaks ≥ −0.1 dBFS; click to reset"
+                                Click="OnResetClip" />
+                        <TextBlock x:Name="ClipCountText" Foreground="#999" FontSize="11"
+                                   Margin="0,4,0,0" Text="" />
+                        <TextBlock x:Name="LevelText" Foreground="#888" FontSize="11" Margin="0,8,0,0" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

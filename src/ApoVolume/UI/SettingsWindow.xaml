@@ -65,6 +65,16 @@
 
                 <Separator Margin="0,16" />
 
+                <TextBlock Text="Equalizer" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,6"
+                           Text="Per-device parametric EQ with presets, AutoEq profiles and live meters." />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button x:Name="OpenEqualizerButton" Content="Open equalizer…"
+                            Click="OnOpenEqualizer" Padding="8,2" />
+                </StackPanel>
+
+                <Separator Margin="0,16" />
+
                 <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
                 <CheckBox x:Name="AutoUpdateBox" Content="Keep apo-volume up to date automatically"
                           Margin="0,4,0,6" Checked="OnAutoUpdateChanged" Unchecked="OnAutoUpdateChanged" />
