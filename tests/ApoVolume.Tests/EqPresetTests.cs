@@ -113,14 +113,25 @@ public class EqPresetTests
     }
 
     [Fact]
-    public void Parse_converts_bandwidth_to_q()
+    public void Parse_converts_bandwidth_to_q_with_the_full_rbj_formula()
     {
-        // RBJ: 1/Q = 2*sinh(ln2/2 * BW); BW = 1 oct -> Q ~= 1.414? no: Q = 1/(2*sinh(ln2/2)) = 1.4142/2... compute in test.
-        var preset = EqPreset.Parse("t", "Filter 1: ON PK Fc 1000 Hz Gain 3.0 dB BW Oct 1");
-        var band = Assert.Single(preset.Bands);
-        double expectedQ = 1.0 / (2.0 * Math.Sinh(Math.Log(2) / 2.0 * 1.0));
-        _out.WriteLine($"BW 1 oct -> Q {band.Q} (expected {expectedQ})");
-        Assert.Equal(expectedQ, band.Q, 3);
+        // RBJ: 1/Q = 2·sinh(ln2/2 · BW · ω0/sin ω0) — the ω0/sin ω0 term matters near Nyquist.
+        var preset = EqPreset.Parse("t", """
+            Filter 1: ON PK Fc 1000 Hz Gain 3.0 dB BW Oct 1
+            Filter 2: ON PK Fc 12000 Hz Gain 3.0 dB BW Oct 1
+            """);
+        Assert.Equal(2, preset.Bands.Count);
+        double ExpectedQ(double fc)
+        {
+            double w0 = 2 * Math.PI * fc / EqResponse.SampleRate;
+            return 1.0 / (2.0 * Math.Sinh(Math.Log(2) / 2.0 * 1.0 * w0 / Math.Sin(w0)));
+        }
+        _out.WriteLine($"1k: Q {preset.Bands[0].Q} (expected {ExpectedQ(1000)}); "
+            + $"12k: Q {preset.Bands[1].Q} (expected {ExpectedQ(12000)})");
+        Assert.Equal(ExpectedQ(1000), preset.Bands[0].Q, 4);
+        Assert.Equal(ExpectedQ(12000), preset.Bands[1].Q, 4);
+        // Near Nyquist the corrected Q is visibly smaller than the naive conversion.
+        Assert.True(preset.Bands[1].Q < 1.0 / (2.0 * Math.Sinh(Math.Log(2) / 2.0)) - 0.05);
     }
 
     [Fact]

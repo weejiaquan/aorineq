@@ -129,10 +129,15 @@ public static class EqResponse
 
     /// <summary>Clipping-prevention preamp suggestion: the negation of the summed response's
     /// maximum where positive (0 when the chain never boosts), rounded down to 0.1 dB so the
-    /// suggestion never under-compensates.</summary>
+    /// suggestion never under-compensates. The search grid includes every band's exact center
+    /// frequency — a narrow high-Q boost peaks AT its Fc, which a fixed log grid can miss.</summary>
     public static double SuggestPreampDb(IEnumerable<EqBand> bands)
     {
-        var response = ResponseDb(bands, LogFrequencies(512));
+        var chain = bands as IReadOnlyList<EqBand> ?? bands.ToArray();
+        var freqs = LogFrequencies(512)
+            .Concat(chain.Select(b => Math.Clamp(b.Fc, MinFrequency, MaxFrequency)))
+            .ToArray();
+        var response = ResponseDb(chain, freqs);
         double max = response.Length == 0 ? 0 : response.Max();
         return max <= 0 ? 0 : -Math.Ceiling(max * 10) / 10.0;
     }

@@ -125,7 +125,7 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
         if (type is null)
             return null;
 
-        double? fc = null, gain = null, q = null;
+        double? fc = null, gain = null, q = null, bwOct = null;
         for (int i = 2; i < tokens.Length - 1; i++)
         {
             switch (tokens[i].ToUpperInvariant())
@@ -140,15 +140,20 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
                     q ??= ReadNumber(tokens[i + 1]);
                     break;
                 case "BW":
-                    // "BW Oct <n>": bandwidth in octaves; RBJ conversion to Q.
-                    if (i + 2 < tokens.Length && tokens[i + 1].Equals("Oct", StringComparison.OrdinalIgnoreCase)
-                        && ReadNumber(tokens[i + 2]) is { } bw && bw > 0)
-                        q ??= 1.0 / (2.0 * Math.Sinh(Math.Log(2) / 2.0 * bw));
+                    if (i + 2 < tokens.Length && tokens[i + 1].Equals("Oct", StringComparison.OrdinalIgnoreCase))
+                        bwOct ??= ReadNumber(tokens[i + 2]);
                     break;
             }
         }
         if (fc is null)
             return null; // Fc is required for every supported type
+        if (q is null && bwOct is { } bw && bw > 0)
+        {
+            // Full RBJ bandwidth-to-Q: 1/Q = 2·sinh(ln2/2 · BW · ω0/sin ω0). The ω0/sin ω0
+            // term needs Fc, which is why the conversion happens after the token scan.
+            double w0 = 2 * Math.PI * Math.Clamp(fc.Value, MinFc, MaxFc) / EqResponse.SampleRate;
+            q = 1.0 / (2.0 * Math.Sinh(Math.Log(2) / 2.0 * bw * w0 / Math.Sin(w0)));
+        }
         double defaultQ = type == EqBandType.Notch ? DefaultNotchQ : DefaultQ;
         return Clamp(new EqBand(type.Value, fc.Value, gain ?? 0, q ?? defaultQ));
     }

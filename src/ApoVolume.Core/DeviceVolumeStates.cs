@@ -2,15 +2,15 @@ namespace ApoVolume.Core;
 
 /// <summary>Per-device volume model for eapo mode: one <see cref="VolumeState"/> per endpoint,
 /// with the ACTIVE state following the Windows default render device. A device seen for the
-/// first time seeds from the legacy top-level Percent/Muted (single-device users keep their
-/// exact pre-v2 behavior); devices with persisted per-device state restore it. Not thread-safe
-/// by design — all access happens on the dispatcher thread, like <see cref="VolumeState"/>.</summary>
+/// first time seeds from the CURRENT active state (which starts at the legacy top-level
+/// Percent/Muted, so single-device users keep their exact pre-v2 behavior and a device plugged
+/// in mid-session inherits the volume in use, not a stale startup value); devices with
+/// persisted per-device state restore it. Not thread-safe by design — all access happens on
+/// the dispatcher thread, like <see cref="VolumeState"/>.</summary>
 public sealed class DeviceVolumeStates
 {
     private readonly Dictionary<string, VolumeState> _states = new();
     private readonly Dictionary<string, DeviceVolumeSetting> _persisted;
-    private readonly int _seedPercent;
-    private readonly bool _seedMuted;
     private readonly VolumeState _fallback;
     private int _stepPercent;
 
@@ -24,13 +24,11 @@ public sealed class DeviceVolumeStates
 
     public DeviceVolumeStates(Settings settings)
     {
-        _seedPercent = settings.Percent;
-        _seedMuted = settings.Muted;
         _stepPercent = settings.StepPercent;
         _persisted = settings.DeviceVolumes is null
             ? new Dictionary<string, DeviceVolumeSetting>()
             : new Dictionary<string, DeviceVolumeSetting>(settings.DeviceVolumes);
-        _fallback = new VolumeState(_seedPercent, _seedMuted, _stepPercent);
+        _fallback = new VolumeState(settings.Percent, settings.Muted, _stepPercent);
         Active = _fallback;
     }
 
@@ -61,7 +59,7 @@ public sealed class DeviceVolumeStates
         {
             state = _persisted.TryGetValue(endpointId, out var saved)
                 ? new VolumeState(saved.Percent, saved.Muted, _stepPercent)
-                : new VolumeState(_seedPercent, _seedMuted, _stepPercent);
+                : new VolumeState(Active.Percent, Active.Muted, _stepPercent); // live seed
             _states[endpointId] = state;
         }
         ActiveId = endpointId;

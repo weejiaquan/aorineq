@@ -49,13 +49,16 @@ public class DeviceVolumeStatesTests
         var states = new DeviceVolumeStates(Settings.Default with { Percent = 50 });
         var a = states.SwitchTo(DevA);
         a.SetPercent(70);
+        // A first-seen device inherits the volume currently in USE (codex r1: a startup-time
+        // seed goes stale the moment the user changes volume mid-session).
         var b = states.SwitchTo(DevB);
-        Assert.Equal(50, b.Percent); // B seeded fresh, not from A's live 70
+        Assert.Equal(70, b.Percent);
         b.SetPercent(20);
         var aAgain = states.SwitchTo(DevA);
         _out.WriteLine($"A={aAgain.Percent} B={b.Percent}");
-        Assert.Equal(70, aAgain.Percent); // A's edit survived the away-trip
+        Assert.Equal(70, aAgain.Percent); // A's edit survived the away-trip, B's 20 didn't leak
         Assert.Same(a, aAgain);
+        Assert.Equal(20, b.Percent);
     }
 
     [Fact]
