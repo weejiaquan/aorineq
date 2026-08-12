@@ -25,6 +25,6 @@ ReleaseDate: 2026-08-12
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/weejiaquan/aorineq/releases/download/v3.3.0/AorinEQ-Setup.exe
-    InstallerSha256: 10B7AFBCA1EB15B341CD01C10F6B95398405B742557F9480AF519672F59CDEF5
+    InstallerSha256: D7669FDF06393C3AF865D030726C0D6B63D24581D0B35CF9A1CA5E0FBDB1D08D
 ManifestType: installer
 ManifestVersion: 1.6.0
