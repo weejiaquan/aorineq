@@ -41,7 +41,7 @@ public partial class EqEditorWindow : Window
 
     private readonly Func<Settings> _getSettings;
     private readonly Func<string?> _getActiveDeviceId;
-    private readonly Func<double?> _getActiveVolumeDb; // null in system volume mode
+    private readonly Func<string?, double?> _getVolumeDbFor; // per device id; null = no volume preamp (system mode / global scope)
 
     /// <summary>(deviceId, scope) — deviceId null means the Global scope. Raised on every
     /// edit; the app merges, re-renders the config file, and persists.</summary>
@@ -90,11 +90,11 @@ public partial class EqEditorWindow : Window
     }
 
     public EqEditorWindow(Func<Settings> getSettings, Func<string?> getActiveDeviceId,
-        Func<double?> getActiveVolumeDb)
+        Func<string?, double?> getVolumeDbFor)
     {
         _getSettings = getSettings;
         _getActiveDeviceId = getActiveDeviceId;
-        _getActiveVolumeDb = getActiveVolumeDb;
+        _getVolumeDbFor = getVolumeDbFor;
         InitializeComponent();
 
         BandTypeCombo.ItemsSource = Enum.GetValues<EqBandType>();
@@ -425,10 +425,11 @@ public partial class EqEditorWindow : Window
 
     private void UpdatePreampReadout()
     {
-        var volume = _getActiveVolumeDb();
-        var volumeText = volume is { } db
-            ? $"volume {db:0.0} dB"
-            : "volume: Windows (system mode)";
+        var volumeText = _scopeDeviceId is null
+            ? "global scope"
+            : _getVolumeDbFor(_scopeDeviceId) is { } db
+                ? string.Create(CultureInfo.InvariantCulture, $"volume {db:0.0} dB")
+                : "volume: Windows (system mode)";
         PreampReadout.Text = string.Create(CultureInfo.InvariantCulture,
             $"Preset preamp {_presetPreampDb:0.0} dB · {volumeText}");
     }
