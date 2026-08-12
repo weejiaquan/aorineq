@@ -1213,7 +1213,7 @@ public partial class App : System.Windows.Application
     {
         if (_endpointVolume is not null) return;
         _endpointVolume = new EndpointVolume();
-        _endpointVolume.Changed += (p, m) => Dispatcher.BeginInvoke(() => OnEndpointVolumeChanged(p, m));
+        _endpointVolume.Changed += (id, p, m) => Dispatcher.BeginInvoke(() => OnEndpointVolumeChanged(id, p, m));
         _endpointVolume.DefaultDeviceChanged += () => Dispatcher.BeginInvoke(OnDefaultDeviceChanged);
     }
 
@@ -1233,10 +1233,15 @@ public partial class App : System.Windows.Application
 
     /// <summary>External endpoint change (another app, the Windows mixer, a device switch):
     /// sync state/tray/settings SILENTLY — no OSD, matching the native Windows HUD, which only
-    /// appears for direct interaction. Never raised for our own sets (event-context filtered).</summary>
-    private void OnEndpointVolumeChanged(int percent, bool muted)
+    /// appears for direct interaction. Never raised for our own sets (event-context filtered).
+    /// <paramref name="deviceId"/> names the endpoint the notification came from: one still in
+    /// flight from the PREVIOUS default device must not be written into the new device's state
+    /// (it would persist the wrong volume for it).</summary>
+    private void OnEndpointVolumeChanged(string? deviceId, int percent, bool muted)
     {
         if (!SystemModeActive) return; // stale event raced a switch back to eapo mode
+        if (deviceId is not null && _deviceStates.ActiveId is not null && deviceId != _deviceStates.ActiveId)
+            return; // notification from a device that is no longer the active one
         ActiveState.SetPercent(percent);
         ActiveState.SetMuted(muted);
         _tray?.Update(ActiveState.Percent, ActiveState.Muted);

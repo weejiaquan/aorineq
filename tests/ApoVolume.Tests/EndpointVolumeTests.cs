@@ -91,7 +91,8 @@ public class EndpointVolumeTests
         try
         {
             var events = new ConcurrentQueue<(int Percent, bool Muted)>();
-            listener.Changed += (p, m) => events.Enqueue((p, m));
+            var deviceIds = new ConcurrentQueue<string?>();
+            listener.Changed += (id, p, m) => { events.Enqueue((p, m)); deviceIds.Enqueue(id); };
 
             // Own set: the notification carries our own event context and must be swallowed.
             Assert.True(listener.SetPercent(41));
@@ -106,6 +107,13 @@ public class EndpointVolumeTests
                 Thread.Sleep(50);
             _out.WriteLine($"events after external set: [{string.Join(", ", events)}]");
             Assert.Contains(events, e => e.Percent == 73);
+
+            // Every notification is stamped with the endpoint it came from — that stamp is
+            // what lets the app drop notifications from a no-longer-active device.
+            var expectedId = AudioEndpoint.GetDefaultRenderEndpointId();
+            _out.WriteLine($"device ids on events: [{string.Join(", ", deviceIds)}] (default {expectedId})");
+            Assert.NotEmpty(deviceIds);
+            Assert.All(deviceIds, id => Assert.Equal(expectedId, id));
         }
         finally
         {

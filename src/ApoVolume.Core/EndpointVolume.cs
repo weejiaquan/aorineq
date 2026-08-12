@@ -22,11 +22,18 @@ public sealed class EndpointVolume : IDisposable
     private readonly NotificationClient _notificationClient;
     private AudioEndpoint.IMMDeviceEnumerator? _enumerator;
     private IAudioEndpointVolume? _volume;
+    /// <summary>Endpoint id the currently activated <see cref="_volume"/> belongs to — stamped
+    /// onto every <see cref="Changed"/> so consumers can drop notifications from a device that
+    /// is no longer theirs.</summary>
+    private volatile string? _volumeDeviceId;
     private bool _disposed;
 
-    /// <summary>(percent 0-100, muted) after an external change or a default-device switch.
-    /// Raised on a COM callback thread, never for this instance's own sets.</summary>
-    public event Action<int, bool>? Changed;
+    /// <summary>(endpoint id, percent 0-100, muted) after an external change or a
+    /// default-device switch. Raised on a COM callback thread, never for this instance's own
+    /// sets. The endpoint id identifies WHICH device the notification came from — a
+    /// notification from the previous default device can still be in flight when the switch
+    /// happens, and applying it to the new device's state would corrupt it.</summary>
+    public event Action<string?, int, bool>? Changed;
 
     /// <summary>The default render endpoint changed (raised BEFORE the accompanying
     /// <see cref="Changed"/>, on a COM callback thread). Both volume modes use this to swap
@@ -204,6 +211,7 @@ public sealed class EndpointVolume : IDisposable
                         Marshal.ReleaseComObject(volume);
                         return null;
                     }
+                    _volumeDeviceId = ReadDeviceId(device);
                     _volume = volume;
                     return _volume;
                 }
@@ -234,8 +242,18 @@ public sealed class EndpointVolume : IDisposable
         }
     }
 
+    private static string? ReadDeviceId(AudioEndpoint.IMMDevice device)
+    {
+        if (device.GetId(out var idPtr) < 0 || idPtr == IntPtr.Zero)
+            return null;
+        var id = Marshal.PtrToStringUni(idPtr);
+        Marshal.FreeCoTaskMem(idPtr);
+        return id;
+    }
+
     private void ReleaseVolumeLocked()
     {
+        _volumeDeviceId = null;
         if (_volume is null) return;
         try
         {
@@ -262,7 +280,7 @@ public sealed class EndpointVolume : IDisposable
             return;
         }
         if (notification.EventContext == _eventContext) return;
-        Changed?.Invoke(ScalarToPercent(notification.MasterVolume), notification.Muted != 0);
+        Changed?.Invoke(_volumeDeviceId, ScalarToPercent(notification.MasterVolume), notification.Muted != 0);
     }
 
     /// <summary>COM callback thread: the default render endpoint changed. Re-activates on the
@@ -275,8 +293,9 @@ public sealed class EndpointVolume : IDisposable
             ReleaseVolumeLocked(); // the next GetVolume() activates the new endpoint
         }
         DefaultDeviceChanged?.Invoke();
+        // TryRead re-activates on the NEW endpoint first, so _volumeDeviceId names it.
         if (TryRead() is { } state)
-            Changed?.Invoke(state.Percent, state.Muted);
+            Changed?.Invoke(_volumeDeviceId, state.Percent, state.Muted);
     }
 
     private sealed class VolumeCallback : IAudioEndpointVolumeCallback
