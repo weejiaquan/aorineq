@@ -1,7 +1,7 @@
 <Window x:Class="ApoVolume.UI.OnboardingWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="apo-volume setup" Width="520" SizeToContent="Height"
+        Title="ApoVolume setup" Icon="/ApoVolume.ico" Width="520" SizeToContent="Height"
         ResizeMode="NoResize" WindowStartupLocation="CenterScreen" ShowInTaskbar="True">
     <StackPanel Margin="24">
         <TextBlock x:Name="HeadingText" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10"
@@ -24,7 +24,7 @@
                 </StackPanel>
             </RadioButton>
             <CheckBox x:Name="AutoUpdateBox" IsChecked="True" Margin="0,14,0,0"
-                      Content="Keep apo-volume up to date automatically" />
+                      Content="Keep ApoVolume up to date automatically" />
         </StackPanel>
         <TextBlock x:Name="GuidanceText" TextWrapping="Wrap" Margin="0,0,0,10"
                    FontWeight="SemiBold" Visibility="Collapsed" />

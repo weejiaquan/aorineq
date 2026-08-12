@@ -279,7 +279,7 @@ public partial class EqEditorWindow : Window
             return;
         if (PresetStore.ValidateName(name) is { } error)
         {
-            MessageBox.Show(this, error, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, error, "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         SavePresetNamed(name.Trim());
@@ -294,7 +294,7 @@ public partial class EqEditorWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            MessageBox.Show(this, $"Couldn't save the preset: {ex.Message}", "apo-volume",
+            MessageBox.Show(this, $"Couldn't save the preset: {ex.Message}", "ApoVolume",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -307,7 +307,7 @@ public partial class EqEditorWindow : Window
     {
         if (_presetName.Length == 0 || _presetName == "(custom)")
             return;
-        if (MessageBox.Show(this, $"Delete preset '{_presetName}'?", "apo-volume",
+        if (MessageBox.Show(this, $"Delete preset '{_presetName}'?", "ApoVolume",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         PresetStore.Delete(ApoPaths.GetPresetsRoot(), _presetName);
@@ -332,7 +332,7 @@ public partial class EqEditorWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Couldn't read the file: {ex.Message}", "apo-volume",
+            MessageBox.Show(this, $"Couldn't read the file: {ex.Message}", "ApoVolume",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -341,7 +341,7 @@ public partial class EqEditorWindow : Window
         if (preset.Bands.Count == 0)
         {
             MessageBox.Show(this, "That file doesn't contain any Equalizer APO filter lines.",
-                "apo-volume", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         try
@@ -350,7 +350,7 @@ public partial class EqEditorWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            MessageBox.Show(this, $"Couldn't import: {ex.Message}", "apo-volume",
+            MessageBox.Show(this, $"Couldn't import: {ex.Message}", "ApoVolume",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }

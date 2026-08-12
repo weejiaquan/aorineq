@@ -64,10 +64,10 @@ public partial class OnboardingWindow : Window
         EapoModeRadio.IsChecked = preselect == VolumeModes.Eapo;
         Show(Step.ModeChoice,
             heading: "How should volume keys control loudness?",
-            body: "apo-volume swallows the volume keys and shows its own OSD either way — pick "
+            body: "ApoVolume swallows the volume keys and shows its own OSD either way — pick "
                 + "what the keys actually change. You can switch anytime in Settings.",
             primary: "Continue",
-            secondary: _blocking ? "Exit apo-volume" : "Close");
+            secondary: _blocking ? "Exit ApoVolume" : "Close");
         ModePanel.Visibility = Visibility.Visible;
     }
 
@@ -80,11 +80,11 @@ public partial class OnboardingWindow : Window
             case EapoStatus.NotInstalled:
                 Show(Step.Explain,
                     heading: "Set up Equalizer APO",
-                    body: "apo-volume changes your volume through Equalizer APO, a free, open-source "
+                    body: "ApoVolume changes your volume through Equalizer APO, a free, open-source "
                         + "system-wide audio processor. It isn't installed on this PC yet.\n\n"
-                        + "apo-volume can download the official installer and start it for you.",
+                        + "ApoVolume can download the official installer and start it for you.",
                     primary: "Download and install…",
-                    secondary: _blocking ? "Exit apo-volume" : "Close");
+                    secondary: _blocking ? "Exit ApoVolume" : "Close");
                 break;
             case EapoStatus.InstalledInactive:
                 Show(Step.NeedsDevice,
@@ -94,7 +94,7 @@ public partial class OnboardingWindow : Window
                         + "Open the Configurator, tick the checkbox next to your speakers or "
                         + "headphones, and click OK.",
                     primary: "Open Configurator",
-                    secondary: _blocking ? "Exit apo-volume" : "Close");
+                    secondary: _blocking ? "Exit ApoVolume" : "Close");
                 break;
             case EapoStatus.Active:
                 Show(Step.Success,
@@ -102,7 +102,7 @@ public partial class OnboardingWindow : Window
                     body: "Equalizer APO is installed and enabled on your current playback device."
                         + (initial ? "" : "\n\nIf volume changes aren't audible yet, Windows' audio "
                         + "engine still needs a restart — use the button below (or restart your PC)."),
-                    primary: _blocking ? "Start apo-volume" : "Close",
+                    primary: _blocking ? "Start ApoVolume" : "Close",
                     secondary: initial ? null : "Restart audio now");
                 break;
         }

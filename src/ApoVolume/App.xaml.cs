@@ -72,7 +72,7 @@ public partial class App : System.Windows.Application
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show(ex.Message, "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Error);
                 Shutdown(1);
                 return;
             }
@@ -327,7 +327,7 @@ public partial class App : System.Windows.Application
         catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException
             or System.ComponentModel.Win32Exception)
         {
-            System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(ex.Message, "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
             return;
         }
@@ -356,7 +356,7 @@ public partial class App : System.Windows.Application
         }
         SetupAutoUpdate();
         if (e.Args.Contains("--updated"))
-            _tray!.ShowInfo($"Updated to apo-volume {GetVersionString()}.");
+            _tray!.ShowInfo($"Updated to ApoVolume {GetVersionString()}.");
 
         // Fresh-launch flags only (also used by E2E automation): when an instance is already
         // running, a second launch signals the OSD as usual — these are not IPC commands.
@@ -464,8 +464,8 @@ public partial class App : System.Windows.Application
     private void ShowInstanceConflictDialogAndShutdown()
     {
         System.Windows.MessageBox.Show(
-            "apo-volume appears to be running under a different account or security context in this session.",
-            "apo-volume", MessageBoxButton.OK, MessageBoxImage.Error);
+            "ApoVolume appears to be running under a different account or security context in this session.",
+            "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Error);
         Shutdown(1);
     }
 
@@ -608,7 +608,7 @@ public partial class App : System.Windows.Application
                 if (!Elevation.IsElevated)
                 {
                     var choice = System.Windows.MessageBox.Show(
-                        "Restart apo-volume elevated now?", "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        "Restart ApoVolume elevated now?", "ApoVolume", MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (choice == MessageBoxResult.Yes && TryRelaunchElevatedAndShutdown())
                         return;
                 }
@@ -625,8 +625,8 @@ public partial class App : System.Windows.Application
 
                 if (Elevation.IsElevated)
                     System.Windows.MessageBox.Show(
-                        "Restart apo-volume without elevation for this change to take full effect.",
-                        "apo-volume", MessageBoxButton.OK, MessageBoxImage.Information);
+                        "Restart ApoVolume without elevation for this change to take full effect.",
+                        "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Information);
             }
 
             await SyncSettingsWindowStateAsync();
@@ -929,12 +929,12 @@ public partial class App : System.Windows.Application
         var result = ProtocolLink.Parse(raw);
         if (result.Status == ProtocolParseStatus.UnknownAction)
         {
-            _tray?.ShowWarning("This link needs a newer version of apo-volume.");
+            _tray?.ShowWarning("This link needs a newer version of ApoVolume.");
             return;
         }
         if (result.Status != ProtocolParseStatus.Ok)
         {
-            _tray?.ShowWarning("Invalid apo-volume link.");
+            _tray?.ShowWarning("Invalid ApoVolume link.");
             return;
         }
 
@@ -1101,7 +1101,7 @@ public partial class App : System.Windows.Application
         {
             _settingsWindow?.SetUpdateStatus(
                 $"{release.TagName} is available, but {exeDir} isn't writable — get it from the release page.");
-            _tray?.ShowNotice($"apo-volume {release.TagName} is available — click to open the release page.",
+            _tray?.ShowNotice($"ApoVolume {release.TagName} is available — click to open the release page.",
                 () => OpenUrl(release.HtmlUrl));
             return;
         }
@@ -1137,7 +1137,7 @@ public partial class App : System.Windows.Application
             // Auto-restarting would spring a surprise UAC prompt; the next launch runs the
             // new exe anyway.
             _settingsWindow?.SetUpdateStatus($"Updated to {release.TagName} — applies on the next start.");
-            _tray?.ShowInfo($"Update to {release.TagName} will apply the next time apo-volume starts.");
+            _tray?.ShowInfo($"Update to {release.TagName} will apply the next time ApoVolume starts.");
             return;
         }
 
@@ -1160,7 +1160,7 @@ public partial class App : System.Windows.Application
         }
         if (proc is null)
         {
-            _tray?.ShowInfo($"Updated to {release.TagName} — restart apo-volume to finish.");
+            _tray?.ShowInfo($"Updated to {release.TagName} — restart ApoVolume to finish.");
             return;
         }
         BeginShutdown();

@@ -3,12 +3,11 @@ using System.Windows.Forms;
 
 namespace ApoVolume.UI;
 
-/// <summary>WinForms NotifyIcon wrapper: state icon, tooltip, context menu.</summary>
+/// <summary>WinForms NotifyIcon wrapper: app icon, state tooltip, context menu.</summary>
 public sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
-    private readonly Icon _normalIcon;
-    private readonly Icon _mutedIcon;
+    private readonly Icon _appIcon;
     private readonly ToolStripMenuItem _muteItem;
     private readonly ToolStripMenuItem _eqPresetMenu;
     private Action? _balloonClickAction;
@@ -28,8 +27,7 @@ public sealed class TrayIcon : IDisposable
 
     public TrayIcon()
     {
-        _normalIcon = CreateGlyphIcon("\uE767");
-        _mutedIcon = CreateGlyphIcon("\uE74F");
+        _appIcon = LoadAppIcon();
 
         _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
         _eqPresetMenu = new ToolStripMenuItem("EQ preset");
@@ -46,8 +44,8 @@ public sealed class TrayIcon : IDisposable
 
         _icon = new NotifyIcon
         {
-            Icon = _normalIcon,
-            Text = "apo-volume",
+            Icon = _appIcon,
+            Text = "ApoVolume",
             Visible = true,
             ContextMenuStrip = menu,
         };
@@ -61,10 +59,11 @@ public sealed class TrayIcon : IDisposable
         _icon.BalloonTipClosed += (_, _) => _balloonClickAction = null;
     }
 
+    /// <summary>The icon itself is the app brand and never changes; mute state reads from the
+    /// tooltip and the checked "Mute" menu item.</summary>
     public void Update(int percent, bool muted)
     {
-        _icon.Icon = muted ? _mutedIcon : _normalIcon;
-        _icon.Text = muted ? "apo-volume: muted" : $"apo-volume: {percent}%";
+        _icon.Text = muted ? "ApoVolume: muted" : $"ApoVolume: {percent}%";
         _muteItem.Checked = muted;
     }
 
@@ -89,13 +88,13 @@ public sealed class TrayIcon : IDisposable
     public void ShowWarning(string text)
     {
         _balloonClickAction = null;
-        _icon.ShowBalloonTip(5000, "apo-volume", text, ToolTipIcon.Warning);
+        _icon.ShowBalloonTip(5000, "ApoVolume", text, ToolTipIcon.Warning);
     }
 
     public void ShowInfo(string text)
     {
         _balloonClickAction = null;
-        _icon.ShowBalloonTip(5000, "apo-volume", text, ToolTipIcon.Info);
+        _icon.ShowBalloonTip(5000, "ApoVolume", text, ToolTipIcon.Info);
     }
 
     /// <summary>An info balloon that runs <paramref name="onClick"/> when clicked — used by the
@@ -104,40 +103,22 @@ public sealed class TrayIcon : IDisposable
     public void ShowNotice(string text, Action onClick)
     {
         _balloonClickAction = onClick;
-        _icon.ShowBalloonTip(10000, "apo-volume", text, ToolTipIcon.Info);
+        _icon.ShowBalloonTip(10000, "ApoVolume", text, ToolTipIcon.Info);
     }
 
-    private static Icon CreateGlyphIcon(string glyph)
+    /// <summary>Loads the shipped multi-size app icon, asking for the shell's current small-icon
+    /// size so Windows picks the matching frame instead of downscaling the 256px one.</summary>
+    private static Icon LoadAppIcon()
     {
-        using var bmp = new Bitmap(32, 32);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.Clear(Color.Transparent);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-            using var font = CreateGlyphFont();
-            g.DrawString(glyph, font, Brushes.White, 1, 3);
-        }
-        return Icon.FromHandle(bmp.GetHicon()); // two long-lived icons for app lifetime; handles freed on process exit
-    }
-
-    /// <summary>Segoe Fluent Icons (Win11), falling back to Segoe MDL2 Assets (Win10) — the glyph
-    /// codepoints used here are identical in both. GDI+ silently substitutes a default text font
-    /// when a family is missing (which would render the glyph as a box), so the substitution is
-    /// detected via Font.Name and the fallback family used explicitly instead.</summary>
-    private static Font CreateGlyphFont()
-    {
-        var font = new Font("Segoe Fluent Icons", 22, GraphicsUnit.Pixel);
-        if (font.Name.Equals("Segoe Fluent Icons", StringComparison.OrdinalIgnoreCase))
-            return font;
-        font.Dispose();
-        return new Font("Segoe MDL2 Assets", 22, GraphicsUnit.Pixel);
+        using var stream = System.Windows.Application
+            .GetResourceStream(new Uri("pack://application:,,,/ApoVolume.ico"))!.Stream;
+        return new Icon(stream, SystemInformation.SmallIconSize);
     }
 
     public void Dispose()
     {
         _icon.Visible = false;
         _icon.Dispose();
-        _normalIcon.Dispose();
-        _mutedIcon.Dispose();
+        _appIcon.Dispose();
     }
 }

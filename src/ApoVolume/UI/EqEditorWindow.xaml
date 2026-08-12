@@ -1,7 +1,7 @@
 <Window x:Class="ApoVolume.UI.EqEditorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Equalizer — apo-volume" Width="1000" Height="640"
+        Title="Equalizer — ApoVolume" Icon="/ApoVolume.ico" Width="1000" Height="640"
         MinWidth="820" MinHeight="520" WindowStartupLocation="CenterScreen"
         Background="#FF1E1E24" Focusable="True">
     <Grid Margin="10">
