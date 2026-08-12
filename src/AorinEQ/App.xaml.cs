@@ -1648,12 +1648,9 @@ public partial class App : System.Windows.Application
     /// <paramref name="deviceId"/> names the endpoint the notification came from: one still in
     /// flight from the PREVIOUS default device must not be written into the new device's state
     /// (it would persist the wrong volume for it).</summary>
-    private void OnEndpointVolumeChanged(string? deviceId, int percent, bool muted)
+    private void OnEndpointVolumeChanged(string deviceId, int percent, bool muted)
     {
         if (!SystemModeActive) return; // stale event raced a switch back to eapo mode
-        // Anything that does not positively identify itself as the active device is dropped —
-        // including an unstamped one. Writing a volume we cannot attribute into the active
-        // device's state is exactly the corruption this guard exists to prevent.
         if (_deviceStates.ActiveId is not null && deviceId != _deviceStates.ActiveId)
             return; // notification from a device that is no longer the active one
         ActiveState.SetPercent(percent);
