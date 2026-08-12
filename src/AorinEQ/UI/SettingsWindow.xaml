@@ -50,9 +50,23 @@
         <Style x:Key="AnchorCell" TargetType="ToggleButton"
                BasedOn="{StaticResource {x:Type ToggleButton}}">
             <Setter Property="Margin" Value="3" />
+            <!-- These four are what make the cell CLICKABLE, and none of them is cosmetic.
+                 An anchor cell has no Content, so with the library's default centred alignment the
+                 button sized itself to its (empty) content: measured 2x2 PIXELS inside the 38x38 the
+                 grid had reserved, with a hit-test at every one of 49 probe points across that slot
+                 landing on the Border behind it — 0% of the area the user is aiming at. That is the
+                 "I have to spam click and get lucky" report. Stretch makes the button occupy its
+                 whole slot; an explicit Background makes that whole area hit-testable, because a
+                 null Background is transparent to hit testing and would hand the clicks straight
+                 back to the Border. MinWidth/MinHeight stay pinned to 0 so the library's own minimum
+                 button size cannot blow the 3x3 grid out of its 132px box. -->
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
             <Setter Property="MinWidth" Value="0" />
             <Setter Property="MinHeight" Value="0" />
             <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
             <Style.Triggers>
                 <Trigger Property="IsChecked" Value="True">
                     <!-- The primary TEXT brush, not the accent: the accent is whatever the user set
@@ -256,17 +270,39 @@
                                 <ColumnDefinition />
                                 <ColumnDefinition />
                             </Grid.ColumnDefinitions>
-                            <ToggleButton x:Name="AnchorTopLeft" Grid.Row="0" Grid.Column="0" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <!-- Center cell: present but disabled/empty — the OSD can't be anchored to the screen
-                                 center, only its 8 edges/corners, so this exists just to complete the 3x3 grid. -->
-                            <ToggleButton Grid.Row="1" Grid.Column="1" Style="{StaticResource AnchorCell}" IsEnabled="False" IsHitTestVisible="False" />
-                            <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorBottomRight" Grid.Row="2" Grid.Column="2" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopLeft" Grid.Row="0" Grid.Column="0" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Top left" ToolTip="Top left"
+                                          Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Top centre" ToolTip="Top centre"
+                                          Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Top right" ToolTip="Top right"
+                                          Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Left centre" ToolTip="Left centre"
+                                          Click="OnAnchorClicked" />
+                            <!-- The centre is not an anchor — the OSD attaches to the 8 edges and corners only. It
+                                 is drawn as an empty gap rather than a ninth square: now that the cells fill their
+                                 slots, a filled centre is indistinguishable from a real target and invites a click
+                                 that can never do anything. Inert three ways over (disabled, no hit test, no tab
+                                 stop) and still named, so a screen reader explains the hole rather than skipping it. -->
+                            <ToggleButton Grid.Row="1" Grid.Column="1" Style="{StaticResource AnchorCell}"
+                                          Background="Transparent" BorderBrush="Transparent"
+                                          IsEnabled="False" IsHitTestVisible="False" IsTabStop="False"
+                                          AutomationProperties.Name="Centre (not an anchor)" />
+                            <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Right centre" ToolTip="Right centre"
+                                          Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Bottom left" ToolTip="Bottom left"
+                                          Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Bottom centre" ToolTip="Bottom centre"
+                                          Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomRight" Grid.Row="2" Grid.Column="2" Style="{StaticResource AnchorCell}"
+                                          AutomationProperties.Name="Bottom right" ToolTip="Bottom right"
+                                          Click="OnAnchorClicked" />
                         </Grid>
                     </ui:CardControl>
 
