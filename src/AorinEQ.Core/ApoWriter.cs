@@ -26,6 +26,11 @@ public sealed class ApoWriter : IDisposable
     public const string IncludeLine = "Include: " + VolumeFileName;
     public const string ManagedHeader = "# managed by AorinEQ - do not hand-edit";
 
+    /// <summary>The pre-v3.0.0 name of the managed file. Referenced ONLY by the one-time rename
+    /// migration below — nothing else in the app knows this name any more.</summary>
+    public const string LegacyVolumeFileName = "apo-volume.txt";
+    private const string LegacyIncludeLine = "Include: " + LegacyVolumeFileName;
+
     /// <summary>Retry budget for a failed write, and the delay before the first retry. Each
     /// step doubles, so the attempts land 25, 75, 175, 375 and 775 ms after the first failure:
     /// the last requested state reaches disk within ~0.8 s of a transient lock clearing.
@@ -290,10 +295,120 @@ public sealed class ApoWriter : IDisposable
             if (_disposed)
                 return false;
             var lines = File.Exists(ConfigTxtPath) ? File.ReadAllLines(ConfigTxtPath) : Array.Empty<string>();
-            if (lines.Any(l => l.Trim().Equals(IncludeLine, StringComparison.OrdinalIgnoreCase)))
+            if (lines.Any(l => Matches(l, IncludeLine)))
                 return false;
             File.AppendAllText(ConfigTxtPath, Environment.NewLine + IncludeLine + Environment.NewLine);
             return true;
+        }
+    }
+
+    /// <summary>ONE-TIME v3.0.0 rename migration inside the Equalizer APO config folder:
+    /// apo-volume.txt becomes aorineq.txt and config.txt's Include line follows it. A no-op on
+    /// every start after the first, and on any machine that never ran a pre-v3.0.0 build.
+    ///
+    /// The ORDER is the whole safety argument — at every point it can be interrupted, EAPO is
+    /// still including a file that exists:
+    /// <list type="number">
+    /// <item>copy (never move) the legacy file, so it stays valid and included until step 2 has
+    /// actually landed;</item>
+    /// <item>rewrite config.txt — the user's file, one line of it, atomically;</item>
+    /// <item>delete the legacy file, only once config.txt can no longer reference it.</item>
+    /// </list>
+    /// Throws IOException/UnauthorizedAccessException if the config folder fights back; the
+    /// caller simply lets the next start try again.</summary>
+    /// <returns>true when this call changed something on disk.</returns>
+    public bool MigrateLegacyInclude()
+    {
+        lock (_includeLock)
+        {
+            if (_disposed)
+                return false;
+            var legacyPath = Path.Combine(Path.GetDirectoryName(VolumeFilePath)!, LegacyVolumeFileName);
+            bool changed = false;
+
+            // 1. Carry the user's currently rendered state across under the new name. Never
+            //    overwrite an existing aorineq.txt: that one is already the live file.
+            if (File.Exists(legacyPath) && !File.Exists(VolumeFilePath))
+            {
+                File.Copy(legacyPath, VolumeFilePath);
+                changed = true;
+            }
+
+            // 2. Our line, where it stands.
+            if (File.Exists(ConfigTxtPath))
+            {
+                var lines = File.ReadAllLines(ConfigTxtPath);
+                var rewritten = RewriteLegacyInclude(lines);
+                if (!rewritten.SequenceEqual(lines))
+                {
+                    WriteConfigTxtAtomic(rewritten);
+                    changed = true;
+                }
+            }
+
+            // 3. The stale file, now that nothing includes it.
+            if (File.Exists(legacyPath))
+            {
+                File.Delete(legacyPath);
+                changed = true;
+            }
+            return changed;
+        }
+    }
+
+    /// <summary>Pure: config.txt's lines with the legacy Include line replaced by the current one
+    /// IN PLACE — EAPO applies includes in file order, so re-homing our block past the user's own
+    /// filters would silently re-order their signal chain. When the current line is already
+    /// present the legacy one is dropped instead of replaced, so migration can never duplicate
+    /// the include; a second legacy line collapses into the first. Every other line, including
+    /// its original whitespace, is returned verbatim.</summary>
+    public static IReadOnlyList<string> RewriteLegacyInclude(IReadOnlyList<string> lines)
+    {
+        bool haveInclude = lines.Any(l => Matches(l, IncludeLine));
+        var result = new List<string>(lines.Count);
+        foreach (var line in lines)
+        {
+            if (!Matches(line, LegacyIncludeLine))
+            {
+                result.Add(line);
+                continue;
+            }
+            if (haveInclude)
+                continue;
+            result.Add(IncludeLine);
+            haveInclude = true;
+        }
+        return result;
+    }
+
+    /// <summary>The same trimmed, case-insensitive comparison <see cref="EnsureInclude"/> uses —
+    /// a line the app would call "already present" must be one this migration rewrites.</summary>
+    private static bool Matches(string line, string includeLine) =>
+        line.Trim().Equals(includeLine, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Temp + rename in the same directory, on the same bounded backoff ladder the
+    /// volume file's writes use: config.txt draws the same external writers (Peace, EAPO's own
+    /// editor) and so the same transient locks, and EAPO's watcher must never read a partial
+    /// file. Rethrows the last failure once the budget is spent.</summary>
+    private void WriteConfigTxtAtomic(IReadOnlyList<string> lines)
+    {
+        var temp = ConfigTxtPath + ".tmp";
+        var content = string.Join(Environment.NewLine, lines) + Environment.NewLine;
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.WriteAllText(temp, content);
+                File.Move(temp, ConfigTxtPath, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                TryDeleteTemp(temp);
+                if (attempt >= MaxWriteRetries)
+                    throw;
+                Thread.Sleep(FirstRetryDelayMs << attempt);
+            }
         }
     }
 
