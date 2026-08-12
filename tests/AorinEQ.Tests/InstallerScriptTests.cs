@@ -105,10 +105,10 @@ public class InstallerScriptTests
     /// scheduled task depending on RunAsAdmin, and reconciles them. The installer writing either
     /// one would be a third writer with no idea what the other two decided.</summary>
     [Fact]
-    public void WritesNoAutostartEntryAndNoRegistryAtAll()
+    public void WritesNoAutostartEntryAndNoRegistryValuesAtAll()
     {
         Assert.DoesNotContain("[Registry]", Directives, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(@"CurrentVersion\Run", Directives, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("RegWrite", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("schtasks", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("{userstartup}", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("{commonstartup}", Directives, StringComparison.OrdinalIgnoreCase);
@@ -117,17 +117,33 @@ public class InstallerScriptTests
         Assert.Contains("Start with Windows", Directive("FinishedLabel")!);
     }
 
-    /// <summary>Equalizer APO's config and the aorineq:// scheme are created, migrated and
-    /// re-pointed by the running app. An installer touching either would fight it - and on
-    /// uninstall would break a second, portable copy that currently owns the registration.</summary>
+    /// <summary>Equalizer APO's config is created and migrated by the running app, and the
+    /// aorineq:// scheme is registered and re-pointed by it. The installer creates neither.</summary>
     [Fact]
-    public void LeavesEqualizerApoAndTheUrlSchemeToTheApp()
+    public void LeavesEqualizerApoAndSchemeRegistrationToTheApp()
     {
         Assert.DoesNotContain("EqualizerAPO", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("config.txt", Directives, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("aorineq:", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("URL Protocol", Directives, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(@"Software\Classes", Directives, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Uninstall's only registry work is deleting the two per-user entries the app points
+    /// at the exe being removed - a Run value and the aorineq:// handler - and each deletion is
+    /// gated on the entry still naming the directory being uninstalled. Without that gate, a
+    /// portable copy that has since taken over both entries would lose them; without the trailing
+    /// backslash, a sibling directory like ...\Programs\AorinEQ2 would match the prefix.</summary>
+    [Fact]
+    public void UninstallOnlyRemovesRegistryEntriesPointingIntoItsOwnDirectory()
+    {
+        Assert.Contains("AppDir := Lowercase(AddBackslash(AppDir));", Script);
+        Assert.Contains("RemoveStalePointersInto(ExpandConstant('{app}'));", Script);
+
+        var deletions = Regex.Matches(Script, @"^\s*(RegDeleteValue|RegDeleteKeyIncludingSubkeys)\(",
+            RegexOptions.Multiline);
+        _out.WriteLine($"{deletions.Count} registry deletions, {Regex.Matches(Script, @"Pos\(AppDir, Lowercase\(Value\)\) > 0 then").Count} guards");
+        Assert.Equal(2, deletions.Count);
+        // One guard immediately above each deletion, and nothing else deletes anything.
+        Assert.Equal(2, Regex.Matches(Script, @"Pos\(AppDir, Lowercase\(Value\)\) > 0 then\s*\n\s*RegDelete").Count);
     }
 
     /// <summary>The user's skins are artwork no reinstall can bring back, so uninstall ASKS - and
