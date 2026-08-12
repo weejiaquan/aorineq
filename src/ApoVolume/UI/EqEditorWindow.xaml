@@ -61,6 +61,8 @@
             <Button Content="AutoEq…" Padding="10,3" Margin="4,0,0,0" Click="OnAutoEq" />
             <Button Content="Edit as text…" Padding="10,3" Margin="10,0,0,0" Click="OnEditAsText"
                     ToolTip="Type or paste a whole ParametricEQ block at once" />
+            <Button Content="Copy share link" Padding="10,3" Margin="4,0,0,0" Click="OnCopyShareLink"
+                    ToolTip="Copy an apo-volume:// link containing this whole chain — paste it anywhere and whoever clicks it sees this tuning" />
             <Button Content="Flatten" Padding="10,3" Margin="10,0,0,0" Click="OnFlatten"
                     ToolTip="Set every band's gain (and this scope's preset preamp) to 0 dB" />
             <Button Content="Clear all" Padding="10,3" Margin="4,0,0,0" Click="OnClearBands"

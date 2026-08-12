@@ -13,6 +13,11 @@ public static class GatedDownload
     public static readonly byte[] ZipMagic = { (byte)'P', (byte)'K' };
     public static readonly byte[] ExeMagic = { (byte)'M', (byte)'Z' };
 
+    /// <summary>For plain-text downloads (EQ presets), which have no signature to check. The
+    /// content gate is the strict parse that follows: anything that isn't a full ParametricEQ
+    /// block — an HTML error page, say — is refused there and nothing is applied.</summary>
+    public static readonly byte[] NoMagic = Array.Empty<byte>();
+
     // GitHub's API and asset CDN both require a User-Agent.
     private const string UserAgent = "apo-volume";
 

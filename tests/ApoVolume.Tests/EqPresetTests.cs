@@ -258,4 +258,29 @@ public class EqPresetTests
             System.Globalization.CultureInfo.CurrentCulture = original;
         }
     }
+
+    [Fact]
+    public void TryParse_rejects_more_filters_than_a_scope_can_hold()
+    {
+        // The strict path is what pasted text and apo-volume:// preset links go through, so the
+        // per-scope cap the editor enforces everywhere else has to hold here too — a 20 000-line
+        // block would otherwise build a chain nothing downstream could draw or evaluate.
+        var text = string.Join(Environment.NewLine, Enumerable.Range(1, EqPreset.MaxBands + 1)
+            .Select(i => $"Filter {i}: ON PK Fc 1000 Hz Gain 0.0 dB Q 1.00"));
+
+        Assert.False(EqPreset.TryParse("huge", text, out var preset, out var error));
+        _out.WriteLine(error);
+        Assert.Contains("Too many filters", error!);
+        Assert.Empty(preset.Bands);
+    }
+
+    [Fact]
+    public void TryParse_accepts_exactly_the_cap()
+    {
+        var text = string.Join(Environment.NewLine, Enumerable.Range(1, EqPreset.MaxBands)
+            .Select(i => $"Filter {i}: ON PK Fc 1000 Hz Gain 0.0 dB Q 1.00"));
+
+        Assert.True(EqPreset.TryParse("full", text, out var preset, out var error), error);
+        Assert.Equal(EqPreset.MaxBands, preset.Bands.Count);
+    }
 }

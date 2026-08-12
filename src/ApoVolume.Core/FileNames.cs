@@ -11,6 +11,11 @@ public static class FileNames
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
 
+    /// <summary>Cap on a name's length. Generous for anything a person types, and short enough
+    /// that the resulting path stays well inside MAX_PATH — a name from an apo-volume:// link
+    /// can otherwise be thousands of characters and only fail at write time.</summary>
+    public const int MaxLength = 100;
+
     /// <summary>Returns a user-readable error for an invalid name, or null when valid.
     /// <paramref name="what"/> names the thing in messages ("Skin name", "Preset name").</summary>
     public static string? Validate(string name, string what)
@@ -18,6 +23,8 @@ public static class FileNames
         var trimmed = name.Trim();
         if (trimmed.Length == 0)
             return $"{what} cannot be empty.";
+        if (trimmed.Length > MaxLength)
+            return $"{what} is too long (limit {MaxLength} characters).";
         if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             return $"{what} contains characters not allowed in file names.";
         if (trimmed.EndsWith('.'))
