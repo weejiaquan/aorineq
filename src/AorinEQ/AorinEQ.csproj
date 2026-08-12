@@ -22,4 +22,7 @@
          NOT use this file — it draws its glyph at runtime (TrayGlyph). -->
     <Resource Include="AorinEQ.ico" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
 </Project>
