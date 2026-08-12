@@ -179,7 +179,7 @@ public class ProtocolLinkTests
     public void IsProtocolArg_matches_only_our_scheme()
     {
         Assert.True(ProtocolLink.IsProtocolArg("aorineq://install-skin?url=https://x.com/a.zip"));
-        Assert.True(ProtocolLink.IsProtocolArg("APO-VOLUME://install-skin"));
+        Assert.True(ProtocolLink.IsProtocolArg("AORINEQ://install-skin"));
         Assert.False(ProtocolLink.IsProtocolArg("--settings"));
         Assert.False(ProtocolLink.IsProtocolArg("http://aorineq://nested"));
         Assert.False(ProtocolLink.IsProtocolArg(""));
@@ -395,5 +395,55 @@ public class ProtocolLinkTests
     public void Parse_rejects_open_links_without_a_page(string raw)
     {
         Assert.Equal(ProtocolParseStatus.Malformed, ProtocolLink.Parse(raw).Status);
+    }
+
+    // ---- v3.0.0: apo-volume:// stays registered as an alias of aorineq:// ----
+
+    [Theory]
+    [InlineData("install-skin?url=https://example.com/neon-bar.zip&name=neon")]
+    [InlineData("apply-preset?type=eq&url=https://example.com/HD650.txt&scope=global")]
+    [InlineData("autoeq?model=Sennheiser%20HD%20650")]
+    [InlineData("open?page=eq")]
+    public void The_legacy_scheme_parses_into_exactly_the_same_link(string rest)
+    {
+        // One handler, no second code path: whichever class the shell launched us through, the
+        // parsed result — and therefore everything downstream, including the confirm dialog —
+        // is identical.
+        var current = ProtocolLink.Parse($"{ProtocolLink.Scheme}://{rest}");
+        var legacy = ProtocolLink.Parse($"{ProtocolLink.LegacyScheme}://{rest}");
+        _out.WriteLine($"{rest}\n  current={current.Link}\n  legacy ={legacy.Link}");
+
+        Assert.Equal(ProtocolParseStatus.Ok, current.Status);
+        Assert.Equal(current.Status, legacy.Status);
+        Assert.Equal(current.Link, legacy.Link);
+    }
+
+    [Fact]
+    public void The_legacy_scheme_is_recognized_among_process_args_and_forwardable()
+    {
+        // The shell hands us whichever scheme the link used, and the elevation bounce forwards it
+        // — a legacy link that parsed but wasn't SPOTTED would silently vanish on an elevated run.
+        const string link = "apo-volume://open?page=settings";
+
+        Assert.True(ProtocolLink.IsProtocolArg(link));
+        Assert.True(ProtocolLink.IsSafeToForward(link));
+        Assert.True(ProtocolLink.IsProtocolArg("APO-VOLUME://open?page=settings"));
+    }
+
+    [Fact]
+    public void A_third_scheme_is_still_rejected_outright()
+    {
+        Assert.False(ProtocolLink.IsProtocolArg("apovolume://open?page=eq"));
+        Assert.Equal(ProtocolParseStatus.Malformed,
+            ProtocolLink.Parse("apovolume://open?page=eq").Status);
+        Assert.Equal(ProtocolParseStatus.Malformed,
+            ProtocolLink.Parse("https://open?page=eq").Status);
+    }
+
+    [Fact]
+    public void The_current_scheme_is_aorineq_and_the_alias_is_the_old_name()
+    {
+        Assert.Equal("aorineq", ProtocolLink.Scheme);
+        Assert.Equal("apo-volume", ProtocolLink.LegacyScheme);
     }
 }

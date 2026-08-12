@@ -349,11 +349,7 @@ public partial class App : System.Windows.Application
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
         try
         {
-            var registration = new ProtocolRegistration();
-            if (_settings.ProtocolLinksEnabled)
-                registration.Register(ExePath); // idempotent; re-points a moved exe
-            else
-                registration.Unregister(); // fail-closed: purge any stale registration when off
+            ApplyProtocolRegistration(_settings.ProtocolLinksEnabled);
         }
         catch (InvalidOperationException ex)
         {
@@ -1206,8 +1202,26 @@ public partial class App : System.Windows.Application
         _ = SyncSettingsWindowStateAsync();
     }
 
+    /// <summary>Both URL classes in one pass: <c>aorineq://</c> and the pre-v3.0.0
+    /// <c>apo-volume://</c> alias, which stays registered so links already written somewhere keep
+    /// working — same exe, same handler, and <see cref="ProtocolLink.Parse"/> makes them
+    /// indistinguishable from there on. Register is idempotent and re-points a moved exe (which
+    /// is also how the updater's rename-swap leaves both classes valid); the off path purges both,
+    /// fail-closed.</summary>
+    private static void ApplyProtocolRegistration(bool enabled)
+    {
+        foreach (var scheme in new[] { ProtocolLink.Scheme, ProtocolLink.LegacyScheme })
+        {
+            var registration = new ProtocolRegistration(scheme);
+            if (enabled)
+                registration.Register(ExePath);
+            else
+                registration.Unregister();
+        }
+    }
+
     /// <summary>Handles the "Enable aorineq:// links" toggle: persist and register/unregister
-    /// the scheme. Failures balloon; the checkbox re-syncs from the persisted setting.</summary>
+    /// the schemes. Failures balloon; the checkbox re-syncs from the persisted setting.</summary>
     private void OnProtocolLinksToggled(bool on)
     {
         if (on == _settings.ProtocolLinksEnabled) return;
@@ -1217,9 +1231,7 @@ public partial class App : System.Windows.Application
             _pendingProtocolLinks.Clear(); // drop anything queued but not yet installed
         try
         {
-            var registration = new ProtocolRegistration();
-            if (on) registration.Register(ExePath);
-            else registration.Unregister();
+            ApplyProtocolRegistration(on);
         }
         catch (InvalidOperationException ex)
         {
