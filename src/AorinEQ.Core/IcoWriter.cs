@@ -34,6 +34,10 @@ public static class IcoWriter
     /// two costs cross: a DIB at 64px is 17 KB (fine), at 256px it is 270 KB (not).</summary>
     public const int MaxDibSizePx = 64;
 
+    /// <summary>Alpha at or above which a pixel counts as OPAQUE in a DIB frame's 1-bit AND mask.
+    /// See the mask loop for why it sits halfway rather than at zero.</summary>
+    public const byte MaskAlphaThreshold = 128;
+
     /// <summary>The largest dimension an ICONDIRENTRY can address. 256 is spelled 0.</summary>
     private const int MaxIconSizePx = 256;
 
@@ -139,12 +143,18 @@ public static class IcoWriter
         // icon carries transparency in its alpha channel too, and modern Windows uses that, but the
         // mask is what the legacy paths read and a mask of zeros makes the rounded tile's corners
         // come back square through them.
+        //
+        // The threshold is a HALFWAY point, not "exactly zero". The tile's rounded corners and the
+        // glyph's arcs are anti-aliased, so the pixels along every edge carry alpha 1..254; treating
+        // only alpha 0 as transparent hands a legacy reader a silhouette one pixel larger than the
+        // art, with a hard fringe of half-lit corner pixels exactly where the rounding should be.
+        // One bit cannot express a soft edge, so the edge is split down the middle.
         var maskRow = new byte[maskStride];
         for (int y = height - 1; y >= 0; y--)
         {
             Array.Clear(maskRow);
             for (int x = 0; x < width; x++)
-                if (pixels[(y * rowBytes) + (x * 4) + 3] == 0)
+                if (pixels[(y * rowBytes) + (x * 4) + 3] < MaskAlphaThreshold)
                     maskRow[x / 8] |= (byte)(0x80 >> (x % 8));
             w.Write(maskRow);
         }

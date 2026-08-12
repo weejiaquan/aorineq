@@ -688,13 +688,17 @@ public partial class App : System.Windows.Application
     /// <summary>Lazily creates (or re-syncs and shows) the single SettingsWindow instance.
     /// Queries autostart state off the dispatcher thread since ScheduledTaskAutostart.IsEnabled()
     /// shells out to schtasks (~100ms); the await resumes back here on the UI thread.</summary>
-    private async void OpenSettings() => await OpenSettingsAsync(SettingsSections.All[0]);
+    private async void OpenSettings() => await OpenSettingsAsync(section: null);
 
     /// <summary><paramref name="section"/> is the sidebar section to land on — where an
     /// <c>aorineq://open?page=</c> link points, via
     /// <see cref="SettingsSections.ForProtocolPage"/>. Navigating happens after the await,
-    /// because the window may not exist until then.</summary>
-    private async Task OpenSettingsAsync(string section)
+    /// because the window may not exist until then.
+    ///
+    /// NULL means "just show it": the window is hidden rather than destroyed on close, so opening
+    /// it from the tray leaves the user on whichever section they were last reading. Only a link
+    /// that names a page is allowed to move them.</summary>
+    private async Task OpenSettingsAsync(string? section)
     {
         int version = ++_stateSyncVersion;
         bool autostartEnabled = await IsAutostartEnabledAsync();
@@ -722,7 +726,9 @@ public partial class App : System.Windows.Application
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
-        _settingsWindow.Navigate(section);
+        // A routed open focuses the section's main control too — page=skins used to land ON the
+        // skin picker, and landing merely NEAR it would be a regression.
+        if (section is not null) _settingsWindow.Navigate(section, focusPrimary: true);
     }
 
     /// <summary>Opens the setup wizard in informational mode (Settings "Setup guide…" and the

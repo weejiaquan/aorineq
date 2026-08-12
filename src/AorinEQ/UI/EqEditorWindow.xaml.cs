@@ -126,12 +126,6 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
 
         ApplyPalette();
-        // The window chrome is rethemed by the Fluent dictionaries; the hand-drawn surfaces are
-        // not, so they re-resolve here. WPF-UI raises this on the UI thread, so it can touch the
-        // visual tree directly, and it is unsubscribed on Closed — the editor is created and
-        // destroyed repeatedly, and a static event would otherwise keep every one of them alive.
-        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += OnAppThemeChanged;
-        Closed += (_, _) => Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnAppThemeChanged;
 
         BandTypeCombo.ItemsSource = Enum.GetValues<EqBandType>();
         _capture.SamplesAvailable += OnSamples;
@@ -159,6 +153,22 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
             _frameTimer.Stop();
             _capture.Dispose();
         };
+
+        // Subscribed LAST, after everything above that can throw. ApplicationThemeManager.Changed
+        // is a STATIC event and this window is created and destroyed repeatedly, so a subscription
+        // that outlives its window roots it forever — and a constructor that threw after
+        // subscribing would never reach the OnClosed that removes it, because a window that was
+        // never shown is never closed.
+        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += OnAppThemeChanged;
+    }
+
+    /// <summary>Releases the static theme subscription. An override rather than a Closed handler:
+    /// this is the one teardown step whose omission leaks the whole window, so it belongs somewhere
+    /// that cannot be reordered away from the subscription that pairs with it.</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnAppThemeChanged;
+        base.OnClosed(e);
     }
 
     /// <summary>The Windows default render device changed while the editor is open:

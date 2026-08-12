@@ -16,14 +16,24 @@ if (args.Length != 1)
 }
 
 var frames = AppIconArt.FrameSizes.Select(AppIconArt.Draw).ToArray();
+byte[] ico;
 try
 {
-    File.WriteAllBytes(args[0], IcoWriter.Write(frames));
+    ico = IcoWriter.Write(frames);
 }
 finally
 {
     foreach (var frame in frames) frame.Dispose();
 }
+
+// Written to a temp file beside the target and moved into place, never straight over it. The
+// destination is a COMMITTED build input — the exe's Win32 icon and a WPF resource — so a write
+// that fails halfway (full disk, a scanner holding the file) would leave every later build and
+// publish stamping a truncated icon, with nothing failing to say so.
+string target = Path.GetFullPath(args[0]);
+string temp = target + ".tmp";
+File.WriteAllBytes(temp, ico);
+File.Move(temp, target, overwrite: true);
 
 Console.WriteLine($"wrote {Path.GetFullPath(args[0])}: "
     + $"{string.Join(", ", AppIconArt.FrameSizes)} px");
