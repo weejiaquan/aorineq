@@ -105,6 +105,95 @@ public class AppDataMigrationTests : IDisposable
     }
 
     [Fact]
+    public void ALockedFileDeepInASubtreeOnlyStrandsItself()
+    {
+        // The subtree rename is an optimization, not the contract: one locked descendant must not
+        // abandon every sibling under it, or the app would carry on against a fresh empty skins\
+        // folder while the user's real skins sat in the legacy tree forever.
+        WriteLegacyFile(Path.Combine("skins", "seia-bar-shadow", "skin.json"), "{}");
+        WriteLegacyFile(Path.Combine("skins", "seia-bar-shadow", "bar.png"), "PNG");
+        WriteLegacyFile(Path.Combine("skins", "other-skin", "skin.json"), "other");
+
+        using (new FileStream(Path.Combine(_legacy, "skins", "seia-bar-shadow", "bar.png"),
+                   FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            AppDataMigration.Run(_legacy, _current);
+        }
+
+        Assert.Equal("other", File.ReadAllText(Path.Combine(_current, "skins", "other-skin", "skin.json")));
+        Assert.Equal("{}", File.ReadAllText(
+            Path.Combine(_current, "skins", "seia-bar-shadow", "skin.json")));
+        // Only the locked file itself is left behind.
+        Assert.Equal("PNG", File.ReadAllText(
+            Path.Combine(_legacy, "skins", "seia-bar-shadow", "bar.png")));
+
+        AppDataMigration.Run(_legacy, _current);
+        Assert.Equal("PNG", File.ReadAllText(Path.Combine(_current, "skins", "seia-bar-shadow", "bar.png")));
+        Assert.False(Directory.Exists(_legacy));
+    }
+
+    [Fact]
+    public void AJunctionIsMovedWholeWhenNothingIsInTheWay()
+    {
+        var outside = Path.Combine(_sandbox, "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "not-ours.txt"), "leave me alone");
+        CreateJunction(Path.Combine(_legacy, "link"), outside);
+
+        AppDataMigration.Run(_legacy, _current);
+
+        // The LINK moved, and what it points at never moved at all.
+        Assert.True(Directory.Exists(Path.Combine(_current, "link")));
+        Assert.Equal("leave me alone", File.ReadAllText(Path.Combine(outside, "not-ours.txt")));
+        Assert.False(Directory.Exists(_legacy));
+    }
+
+    [Fact]
+    public void AJunctionIsNeverWalkedIntoEvenWhenItCannotBeMovedWhole()
+    {
+        // With something already at the destination the whole-subtree rename can't apply, so the
+        // per-file merge fallback is the path taken — the one that would otherwise walk THROUGH
+        // the junction. One pointing outside would drag in files the app does not own; one
+        // pointing back at its own root would recurse until the process died.
+        var outside = Path.Combine(_sandbox, "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "not-ours.txt"), "leave me alone");
+        CreateJunction(Path.Combine(_legacy, "link"), outside);
+        CreateJunction(Path.Combine(_legacy, "loop"), _legacy); // straight back at its own root
+        Directory.CreateDirectory(Path.Combine(_current, "link"));
+        Directory.CreateDirectory(Path.Combine(_current, "loop"));
+        WriteLegacyFile("settings.json", "state");
+
+        var finished = new Thread(() => AppDataMigration.Run(_legacy, _current));
+        finished.Start();
+        Assert.True(finished.Join(TimeSpan.FromSeconds(20)), "the merge recursed into a junction");
+
+        Assert.Equal("state", File.ReadAllText(Path.Combine(_current, "settings.json")));
+        // Nothing was pulled through either link, and what they point at is untouched.
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(_current, "link")));
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(_current, "loop")));
+        Assert.Equal(new[] { "not-ours.txt" },
+            Directory.GetFiles(outside).Select(Path.GetFileName).ToArray());
+        // The links themselves stay put — live state at the destination wins, as for any collision.
+        Assert.True(Directory.Exists(Path.Combine(_legacy, "link")));
+    }
+
+    private static void CreateJunction(string link, string target)
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        })!;
+        var error = p.StandardError.ReadToEnd() + p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+        Assert.True(p.ExitCode == 0, $"mklink /J failed: {error}");
+    }
+
+    [Fact]
     public void ResolveFile_prefers_the_current_root_once_the_file_is_there()
     {
         Directory.CreateDirectory(_current);

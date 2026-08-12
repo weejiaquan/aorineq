@@ -298,7 +298,22 @@ public sealed class ApoWriter : IDisposable
             // there would leave BOTH registered and EAPO would apply the managed config twice —
             // which is exactly what a migration interrupted between its file copy and its
             // config.txt rewrite would otherwise produce on the very next include-guard pass.
-            bool rewrote = RewriteLegacyIncludeOnDisk();
+            bool rewrote;
+            try
+            {
+                rewrote = RewriteLegacyIncludeOnDisk();
+            }
+            catch (IOException)
+            {
+                // config.txt is locked by another writer right this second. Falling through to the
+                // append would produce the very double include this rewrite exists to prevent, and
+                // a transient lock must never become a fatal startup error the way it would if
+                // this escaped into the writability probe — so do nothing and let the include
+                // guard, which fires on the very next touch of config.txt, try again.
+                return false;
+            }
+            // UnauthorizedAccessException deliberately still propagates: that one is an ACL
+            // problem, and it is what tells the caller to run the elevated setup pass.
             var lines = File.Exists(ConfigTxtPath) ? File.ReadAllLines(ConfigTxtPath) : Array.Empty<string>();
             if (lines.Any(l => Matches(l, IncludeLine)))
                 return rewrote;

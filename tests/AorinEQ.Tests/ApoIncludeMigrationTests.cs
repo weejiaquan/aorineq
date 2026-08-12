@@ -264,6 +264,55 @@ public class ApoIncludeMigrationTests : IDisposable
     }
 
     [Fact]
+    public void EnsureInclude_stands_down_on_a_locked_config_txt_instead_of_failing_startup()
+    {
+        // EnsureInclude doubles as the startup writability probe, and its caller treats an
+        // escaping IOException as fatal. Peace holding config.txt for a moment must not stop the
+        // app from starting — and must not produce the double include either.
+        File.WriteAllText(CurrentFile, "Preamp: 0.0 dB\r\n");
+        WriteConfigTxt("Include: apo-volume.txt");
+
+        using var w = new ApoWriter(_dir);
+        using (new FileStream(ConfigTxt, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.False(w.EnsureInclude()); // no throw, no write
+        }
+
+        // Untouched, and specifically NOT holding both includes at once.
+        Assert.Equal(new[] { "Include: apo-volume.txt" }, File.ReadAllLines(ConfigTxt));
+
+        // The include guard's next pass completes it.
+        Assert.True(w.EnsureInclude());
+        Assert.Equal(new[] { ApoWriter.IncludeLine }, File.ReadAllLines(ConfigTxt));
+    }
+
+    [Fact]
+    public void EnsureInclude_still_surfaces_a_denied_config_txt_so_the_caller_can_elevate()
+    {
+        // The ACL failure is the one that must keep escaping: it is what triggers --setup.
+        WriteConfigTxt("Include: peace.txt");
+        var denied = new FileInfo(ConfigTxt);
+        var acl = denied.GetAccessControl();
+        var rule = new System.Security.AccessControl.FileSystemAccessRule(
+            System.Security.Principal.WindowsIdentity.GetCurrent().User!,
+            System.Security.AccessControl.FileSystemRights.WriteData
+                | System.Security.AccessControl.FileSystemRights.AppendData,
+            System.Security.AccessControl.AccessControlType.Deny);
+        acl.AddAccessRule(rule);
+        denied.SetAccessControl(acl);
+        try
+        {
+            using var w = new ApoWriter(_dir);
+            Assert.Throws<UnauthorizedAccessException>(() => w.EnsureInclude());
+        }
+        finally
+        {
+            acl.RemoveAccessRule(rule);
+            denied.SetAccessControl(acl);
+        }
+    }
+
+    [Fact]
     public void The_config_txt_rewrite_stands_down_when_another_writer_changed_the_file_first()
     {
         // config.txt is not ours, so the rewrite is a read-modify-write: if Peace or EAPO's editor
