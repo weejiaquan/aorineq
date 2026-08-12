@@ -9,7 +9,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>AorinEQ</AssemblyName>
     <ApplicationIcon>AorinEQ.ico</ApplicationIcon>
-    <Version>3.1.2</Version>
+    <Version>3.2.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AorinEQ.Core\AorinEQ.Core.csproj" />

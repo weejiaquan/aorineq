@@ -59,6 +59,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     {
         _currentSettings = currentSettings;
         InitializeComponent();
+        ShareHintText.Text = SkinShare.HostingHint; // one wording, shared with the status message
         _initializing = true;
         foreach (var family in Fonts.SystemFontFamilies
             .Select(f => f.Source).OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
@@ -142,6 +143,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         NumberXBox.Text = (info.Text?.X ?? 10).ToString();
         NumberYBox.Text = (info.Text?.Y ?? 5).ToString();
         LoadTextStyle(info.Text);
+        LoadMeta(info.Meta);
         ScaleSlider.Value = info.Scale;
         FpsBox.Text = info.Fps.ToString("0.##");
         EmptyFramesBox.Text = info.EmptyFrames.ToString();
@@ -176,6 +178,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         FillStartBox.Text = "";
         FillEndBox.Text = "";
         LoadTextStyle(null); // reset styling controls to defaults
+        LoadMeta(SkinMeta.None); // a new skin starts uncredited, never with the last one's author
         _initializing = false;
         ShowLayerPath(EmptyPathText, null);
         ShowLayerPath(FullPathText, null);
@@ -628,8 +631,14 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     /// <summary>Save/Test require both layers decoded, a valid name, and a sane fill range;
-    /// Export requires a saved skin.</summary>
+    /// Export and Share require a saved skin.</summary>
     private const string RangeErrorMessage = "Fill range: the 0% position must be left of the 100% position.";
+
+    /// <summary>Shown when the typed source URL is one the loader would silently drop. Blocking
+    /// the save is deliberate: writing a skin that quietly lost the link the author typed is the
+    /// kind of thing nobody notices until the gallery page has no link on it.</summary>
+    private const string SourceUrlErrorMessage =
+        "Source URL: must be a plain https:// address with no username or password, or left empty.";
 
     private void Validate()
     {
@@ -640,10 +649,40 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             ImageErrorText.Text = RangeErrorMessage;
         else if (ImageErrorText.Text == RangeErrorMessage)
             ImageErrorText.Text = ""; // fixed without an image reload: stale error must clear
+
+        // A source URL the normalizer refuses comes back null; anything typed that vanishes is an
+        // error the author must see, not a field that quietly empties itself on save.
+        bool sourceUrlOk = SourceUrlBox.Text.Trim().Length == 0 || CurrentMeta().SourceUrl is not null;
+        MetaErrorText.Text = sourceUrlOk ? "" : SourceUrlErrorMessage;
+
         string? nameError = SkinWriter.ValidateName(NameBox.Text);
-        SaveButton.IsEnabled = imagesOk && mutedOk && rangeOk && nameError is null;
+        SaveButton.IsEnabled = imagesOk && mutedOk && rangeOk && sourceUrlOk && nameError is null;
         TestButton.IsEnabled = imagesOk && mutedOk && rangeOk;
         ExportZipButton.IsEnabled = _editingSkinName is not null;
+        ShareButton.IsEnabled = _editingSkinName is not null;
+    }
+
+    /// <summary>The metadata the Details fields currently describe, normalized by
+    /// <see cref="SkinMeta"/> — the same door the loader goes through, so what the designer
+    /// promises to save and what a reader gets back cannot diverge.</summary>
+    private SkinMeta CurrentMeta() => SkinMeta.Create(
+        TitleBox.Text, AuthorBox.Text, DescriptionBox.Text, VersionBox.Text,
+        SkinMeta.ParseTags(TagsBox.Text), SourceUrlBox.Text);
+
+    /// <summary>Populates the Details fields from a loaded skin (or clears them for a new one).
+    /// Callers hold <see cref="_initializing"/>; the two that don't set it themselves.</summary>
+    private void LoadMeta(SkinMeta meta)
+    {
+        bool wasInitializing = _initializing;
+        _initializing = true;
+        TitleBox.Text = meta.Title ?? "";
+        AuthorBox.Text = meta.Author ?? "";
+        DescriptionBox.Text = meta.Description ?? "";
+        VersionBox.Text = meta.Version ?? "";
+        TagsBox.Text = SkinMeta.FormatTags(meta.Tags);
+        SourceUrlBox.Text = meta.SourceUrl ?? "";
+        MetaErrorText.Text = ""; // a freshly loaded skin's metadata is normalized by definition
+        _initializing = wasInitializing;
     }
 
     /// <summary>Builds the SkinText from the current controls, or null when Show is unchecked.</summary>
@@ -784,7 +823,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             customRange ? fillEnd : null,
             // Rounded so slider tick accumulation (12 × 0.05) can't miss the 0.6 default check.
             MutedFrames: _mutedSource is null || IsGif(_mutedSource) ? 1 : ParseFrames(MutedFramesBox),
-            MutedDim: Math.Round(MutedDimSlider.Value, 2));
+            MutedDim: Math.Round(MutedDimSlider.Value, 2),
+            Meta: CurrentMeta());
     }
 
     // ----- preview dragging: the percent number and the two fill-range handles are all
@@ -950,23 +990,57 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Exports the loaded skin's on-disk state (save first to include unsaved edits).</summary>
     private void OnExportZip(object sender, RoutedEventArgs e)
     {
-        if (_editingSkinName is null) return;
+        if (ExportToZip("Export skin as zip") is not { } zipPath) return;
+        StatusText.Text = $"Exported '{_editingSkinName}' to {zipPath}. " +
+            "(Exports the last saved state — Save first to include current edits.)";
+    }
+
+    /// <summary>Share: the same export, plus the aorineq:// install link on the clipboard. The
+    /// link is a TEMPLATE — the zip has to be hosted somewhere over https before any URL can point
+    /// at it — so the status line says so rather than implying a finished link.</summary>
+    private void OnShare(object sender, RoutedEventArgs e)
+    {
+        if (ExportToZip("Share skin as zip") is not { } zipPath) return;
+
+        var link = SkinShare.BuildInstallLinkTemplate(_editingSkinName!);
+        try
+        {
+            System.Windows.Clipboard.SetText(link);
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            // Another process can hold the clipboard open; the zip is still exported, so say what
+            // did happen and hand over the link rather than reporting a blanket failure.
+            StatusText.Text = $"Exported '{_editingSkinName}' to {zipPath}, but the clipboard was "
+                + $"busy ({ex.Message}). The install link is: {link}";
+            return;
+        }
+        StatusText.Text = $"Exported '{_editingSkinName}' to {zipPath} (including a preview image) "
+            + $"and copied this install link: {link} — {SkinShare.HostingHint}";
+    }
+
+    /// <summary>Asks where to write the zip and exports the loaded skin there. Returns the path
+    /// written, or null when there was nothing to export, the user cancelled, or it failed (the
+    /// status line already says which).</summary>
+    private string? ExportToZip(string dialogTitle)
+    {
+        if (_editingSkinName is null) return null;
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Filter = "Skin zip (*.zip)|*.zip",
             FileName = _editingSkinName + ".zip",
-            Title = "Export skin as zip",
+            Title = dialogTitle,
         };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(this) != true) return null;
         try
         {
             SkinArchive.Export(Path.Combine(ApoPaths.GetSkinsRoot(), _editingSkinName), dialog.FileName);
-            StatusText.Text = $"Exported '{_editingSkinName}' to {dialog.FileName}. " +
-                "(Exports the last saved state — Save first to include current edits.)";
+            return dialog.FileName;
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
             StatusText.Text = ex.Message;
+            return null;
         }
     }
 

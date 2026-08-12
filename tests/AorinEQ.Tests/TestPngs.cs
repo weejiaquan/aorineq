@@ -39,6 +39,21 @@ internal static class TestPngs
         Chunk("IEND", Array.Empty<byte>());
     }
 
+    /// <summary>Writes a PNG signature plus a well-formed IHDR and NOTHING else: enough for
+    /// <c>PngHeader</c> (and so for <c>SkinLoader</c>, which only reads headers) but impossible
+    /// for any decoder — what a truncated download looks like. <see cref="Write"/> is NOT that:
+    /// its tiny IDAT decodes fine.</summary>
+    public static void WriteHeaderOnly(string path, int width, int height)
+    {
+        var bytes = new List<byte> { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        bytes.AddRange(new byte[] { 0, 0, 0, 13 }); // IHDR chunk length
+        bytes.AddRange(System.Text.Encoding.ASCII.GetBytes("IHDR"));
+        bytes.AddRange(new[] { (byte)(width >> 24), (byte)(width >> 16), (byte)(width >> 8), (byte)width });
+        bytes.AddRange(new[] { (byte)(height >> 24), (byte)(height >> 16), (byte)(height >> 8), (byte)height });
+        bytes.AddRange(new byte[] { 8, 6, 0, 0, 0 }); // 8-bit RGBA, no interlace
+        File.WriteAllBytes(path, bytes.ToArray());
+    }
+
     /// <summary>Writes a minimal GIF89a: header + logical screen descriptor + trailer. Enough
     /// for GifHeader (which only reads the header) — carries no decodable image data.</summary>
     public static void WriteGif(string path, int width, int height)

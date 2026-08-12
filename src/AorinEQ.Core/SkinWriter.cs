@@ -4,11 +4,13 @@ namespace AorinEQ.Core;
 
 /// <summary>Everything a skin save carries besides the images. Defaults mirror
 /// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers, a null
-/// fill range meaning "the bar spans the full image width", and the 0.6 mute dim.</summary>
+/// fill range meaning "the bar spans the full image width", the 0.6 mute dim, and no
+/// authorship metadata at all.</summary>
 public sealed record SkinConfig(SkinText? Text, double Scale,
     double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1,
     int? FillStartX = null, int? FillEndX = null,
-    int MutedFrames = 1, double MutedDim = 0.6);
+    int MutedFrames = 1, double MutedDim = 0.6,
+    SkinMeta? Meta = null);
 
 /// <summary>Writes a skin folder (empty.png + full.png + optional skin.json) for the skin
 /// designer. Image content validation stays with the caller (PngHeader before save,
@@ -51,17 +53,28 @@ public static class SkinWriter
 
             var jsonPath = Path.Combine(folder, "skin.json");
             bool showText = config.Text is { Show: true };
+            var meta = config.Meta ?? SkinMeta.None;
             if (showText || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
                 || config.MutedFrames != 1 || config.MutedDim != 0.6
-                || config.FillStartX is not null || config.FillEndX is not null)
+                || config.FillStartX is not null || config.FillEndX is not null
+                || !meta.IsEmpty)
             {
                 // Anonymous shape matches SkinLoader's SkinJson (case-insensitive on read);
                 // null fields are omitted rather than written (WhenWritingNull). Text styling
                 // fields are only emitted when they differ from the loader's defaults, so a
-                // plain positioned number stays {show,x,y}.
+                // plain positioned number stays {show,x,y}. The metadata block is written the
+                // same way — every field absent when unset, and an empty tag list written as
+                // NOTHING rather than as [] — so a skin with no credits (i.e. every skin
+                // authored before 3.2) resaves byte-identically.
                 var json = JsonSerializer.Serialize(new
                 {
+                    title = meta.Title,
+                    author = meta.Author,
+                    description = meta.Description,
+                    version = meta.Version,
+                    tags = meta.Tags.Count == 0 ? null : meta.Tags,
+                    sourceUrl = meta.SourceUrl,
                     percentText = showText ? BuildPercentText(config.Text!) : null,
                     scale = config.Scale,
                     fps = config.Fps,

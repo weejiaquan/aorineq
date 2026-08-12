@@ -18,17 +18,24 @@ public sealed record SkinText(bool Show, int X, int Y,
 /// EmptyFrames/FullFrames/MutedFrames are the declared sheet frame counts (always 1 for GIF layers
 /// — a GIF's actual frame count and per-frame delays are discovered at decode time in the UI
 /// layer). MutedPath is the optional muted-state artwork (null = dim the empty layer by MutedDim
-/// instead).</summary>
+/// instead). Meta is the optional authorship/gallery metadata, never null: a skin without any is
+/// <see cref="SkinMeta.None"/>, and it is populated even for an INVALID skin so a picker can still
+/// say whose broken skin it is.</summary>
 public sealed record SkinInfo(string Name, string Folder, string EmptyPath, string FullPath,
     int Width, int Height, SkinText? Text, double Scale,
     double Fps, int EmptyFrames, int FullFrames, bool EmptyIsGif, bool FullIsGif,
     int FillStartX, int FillEndX,
-    string? MutedPath, bool MutedIsGif, int MutedFrames, double MutedDim, string? Error)
+    string? MutedPath, bool MutedIsGif, int MutedFrames, double MutedDim,
+    SkinMeta Meta, string? Error)
 {
     public bool IsValid => Error is null;
 
     /// <summary>Whether the skin ships dedicated muted-state artwork.</summary>
     public bool HasMuted => MutedPath is not null;
+
+    /// <summary>The credit a picker shows for this skin: its title and author when it has them,
+    /// its folder name otherwise.</summary>
+    public string DisplayLabel => Meta.DisplayLabel(Name);
 }
 
 /// <summary>Loads and validates skin folders. Each layer ("empty", "full") resolves to
@@ -80,9 +87,10 @@ public static class SkinLoader
         double mutedDim = DefaultMutedDim;
         int? fillStartJson = null;
         int? fillEndJson = null;
+        SkinMeta meta = SkinMeta.None;
 
         SkinInfo Bad(string error) => new(name, folder, emptyPath, fullPath, 0, 0, text, scale,
-            fps, 1, 1, false, false, 0, 0, null, false, 1, DefaultMutedDim, error);
+            fps, 1, 1, false, false, 0, 0, null, false, 1, DefaultMutedDim, meta, error);
 
         try
         {
@@ -131,6 +139,11 @@ public static class SkinLoader
                     mutedDim = Math.Clamp(dim, 0.0, 1.0);
                 fillStartJson = parsed?.FillStartX;
                 fillEndJson = parsed?.FillEndX;
+                if (parsed is not null)
+                    meta = SkinMeta.Create(
+                        JsonString(parsed.Title), JsonString(parsed.Author),
+                        JsonString(parsed.Description), JsonString(parsed.Version),
+                        JsonStrings(parsed.Tags), JsonString(parsed.SourceUrl));
             }
 
             var empty = ResolveLayer(folder, "empty", emptyFrames);
@@ -176,7 +189,8 @@ public static class SkinLoader
                 empty.LogicalWidth, empty.LogicalHeight, text, scale,
                 fps, empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
                 empty.IsGif, full.IsGif, fillStart, fillEnd,
-                mutedPath, mutedIsGif, mutedPath is null || mutedIsGif ? 1 : mutedFrames, mutedDim, null);
+                mutedPath, mutedIsGif, mutedPath is null || mutedIsGif ? 1 : mutedFrames, mutedDim,
+                meta, null);
         }
         catch (Exception ex)
         {
@@ -224,6 +238,25 @@ public static class SkinLoader
             .ToList();
     }
 
+    /// <summary>The one string of a metadata element, or null when it is any other JSON kind.
+    /// Wrong types are IGNORED rather than fatal: a nonsense credit field in a downloaded
+    /// skin.json must not cost the user the artwork the file is actually for.</summary>
+    private static string? JsonString(JsonElement? element) =>
+        element is { ValueKind: JsonValueKind.String } value ? value.GetString() : null;
+
+    /// <summary>The string entries of a metadata array, skipping any that aren't strings; null
+    /// when the value isn't an array at all. Same ignore-don't-throw policy as
+    /// <see cref="JsonString"/>.</summary>
+    private static IEnumerable<string>? JsonStrings(JsonElement? element)
+    {
+        if (element is not { ValueKind: JsonValueKind.Array } array)
+            return null;
+        return array.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString()!)
+            .ToList();
+    }
+
     private sealed class SkinJson
     {
         public SkinTextJson? PercentText { get; set; }
@@ -235,6 +268,18 @@ public static class SkinLoader
         public double? MutedDim { get; set; }
         public int? FillStartX { get; set; }
         public int? FillEndX { get; set; }
+
+        // The metadata fields deserialize as raw JsonElements, unlike everything above, because
+        // a wrong TYPE here must not throw: System.Text.Json would reject "title": 42 for a
+        // string property and the whole skin would fail to load over a credit line. Kind checks
+        // in JsonString/JsonStrings then keep only what is usable. (JsonElement values produced
+        // by Deserialize are clones, so they outlive the document they came from.)
+        public JsonElement? Title { get; set; }
+        public JsonElement? Author { get; set; }
+        public JsonElement? Description { get; set; }
+        public JsonElement? Version { get; set; }
+        public JsonElement? Tags { get; set; }
+        public JsonElement? SourceUrl { get; set; }
     }
 
     private sealed class SkinTextJson

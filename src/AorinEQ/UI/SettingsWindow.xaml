@@ -100,6 +100,15 @@
             <Setter Property="Margin" Value="0,2,0,0" />
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
         </Style>
+        <!-- Who made the skin the user is running. Caption-sized like a subtitle but on the PRIMARY
+             foreground on purpose: a credit is the answer to a question the user asked, not
+             explanatory chrome, and TextFillColorSecondaryBrush measures ~3.15:1 in light theme. -->
+        <Style x:Key="SkinCredit" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="Caption" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -371,6 +380,10 @@
                                 <ui:TextBlock Style="{StaticResource RowTitle}" Text="Active skin" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Used when the OSD style is set to Custom skin." />
+                                <!-- Credits for the selected skin. Collapsed (not blank) when the
+                                     skin carries none, so an uncredited skin costs no layout. -->
+                                <ui:TextBlock x:Name="SkinCreditText" Style="{StaticResource SkinCredit}"
+                                              Visibility="Collapsed" />
                             </StackPanel>
                         </ui:CardControl.Header>
                         <ComboBox x:Name="SkinCombo" MinWidth="200" SelectionChanged="OnSkinChanged" />
