@@ -68,6 +68,9 @@ public partial class EqEditorWindow : Window
     private string _presetName = "";
     private double _presetPreampDb;
     private bool _eqEnabled = true;
+    /// <summary>Whether the last three bands are Simple mode's sliders (persisted per scope as
+    /// <see cref="EqScopeSetting.MacroBands"/>) rather than bands the user means as bands.</summary>
+    private bool _macroBands;
 
     private int _selectedBand = -1;
     private int _dbRange = 24;
@@ -134,6 +137,11 @@ public partial class EqEditorWindow : Window
             PopulateScopeTabs();
             RefreshPresetList();
             ApplyEditorMode();
+            // Pin the resolved face the first time the editor opens. Without this, a first-time
+            // user who starts in Simple and moves a slider then HAS bands — and would be resolved
+            // into Advanced on the next open, having never asked for it.
+            if (EqEditorModes.Normalize(_getSettings().EqEditorMode) == EqEditorModes.Unset)
+                EditorModeChanged?.Invoke(_editorMode);
             _capture.Start();
             _frameTimer.Start();
         };
@@ -201,18 +209,45 @@ public partial class EqEditorWindow : Window
         _presetName = scope?.PresetName ?? "";
         _presetPreampDb = scope?.PresetPreampDb ?? 0;
         _eqEnabled = scope?.Enabled ?? true;
+        _macroBands = scope?.MacroBands ?? false;
         _selectedBand = _bands.Count > 0 ? 0 : -1;
 
         _syncing = true;
         EqEnabledCheck.IsChecked = _eqEnabled;
         _syncing = false;
         StripHintText.Text = "";
+        RebuildFromModel();
+    }
+
+    /// <summary>THE routine that makes every editor surface show the current scope's model: the
+    /// preset label, the numeric side panel, the band strip, the Simple-mode sliders and note,
+    /// and the plot. Every path that replaces or reshapes the chain — a preset switch, an AutoEq
+    /// or file import, pasted text, Clear all, an apo-volume:// preset link, a scope switch, a
+    /// mode switch — ends here.
+    ///
+    /// It exists because the strip used to be rebuilt only by the paths that incrementally
+    /// changed it (+ / × / a node drag), so a bulk replace left it showing the previous chain
+    /// while the curve was already correct. Surfaces that are refreshed separately drift; this
+    /// one cannot.</summary>
+    private void RebuildFromModel()
+    {
+        // A replaced chain can be shorter than the one that was selected from.
+        _selectedBand = EqStripModel.ClampSelection(_selectedBand, _bands.Count);
         SyncPresetCombo();
         SyncBandPanel();
         RebuildBandStrip();
+        SyncSimpleControls();
         RedrawAll();
-        if (SimpleMode)
-            EnterSimpleMode();
+    }
+
+    /// <summary>Replaces the whole chain from an external source (a preset, a file, pasted text,
+    /// a link). Selection starts at the first band, and the macro trio stops being the sliders'
+    /// — the new chain is not the one they were controlling.</summary>
+    private void ReplaceChain(IReadOnlyList<EqBand> bands)
+    {
+        _bands = bands.ToList();
+        _macroBands = false;
+        _selectedBand = _bands.Count > 0 ? 0 : -1;
     }
 
     // ---- Simple / Advanced ----
@@ -249,54 +284,39 @@ public partial class EqEditorWindow : Window
         // Read-only curve: no dragging, no double-click-to-add, no wheel-to-Q.
         Plot.IsHitTestVisible = !simple;
 
-        if (simple)
-            EnterSimpleMode();
-        else
-            RedrawCurves(); // bring the band nodes back
+        RebuildFromModel();
     }
 
-    /// <summary>Puts the macro trio in place for the current scope (creating it at 0 dB when the
-    /// chain doesn't already end in it), syncs the sliders to what is really there, and says out
-    /// loud when other bands are along for the ride.</summary>
-    private void EnterSimpleMode()
+    /// <summary>Points the Simple-mode controls at the current scope. Deliberately READ-ONLY:
+    /// merely switching to Simple mode (or opening the editor in it) must not touch the chain —
+    /// an earlier shape wrote three 0 dB bands here, which renamed the scope's preset to
+    /// "(custom)" and rewrote apo-volume.txt before the user had adjusted anything. The trio is
+    /// created by the first slider move instead, which IS a real edit.</summary>
+    private void SyncSimpleControls()
     {
-        bool room = EqSimpleMode.HasRoom(_bands);
+        if (!SimpleMode)
+            return;
+        bool room = EqSimpleMode.HasRoom(_bands, _macroBands);
         BassSlider.IsEnabled = MidSlider.IsEnabled = TrebleSlider.IsEnabled = room;
-        if (!room)
-        {
-            SimpleNoteText.Text = $"This scope already has {_bands.Count} bands — there's no room "
-                + $"for the bass/mid/treble controls (the limit is {EqPreset.MaxBands}). "
-                + "Switch to Advanced to edit it.";
-            ShowMacroGains(new MacroGains(0, 0, 0));
-            return;
-        }
-
-        var gains = EqSimpleMode.ReadOrZero(_bands);
-        var updated = EqSimpleMode.Apply(_bands, gains);
-        if (!updated.SequenceEqual(_bands))
-        {
-            // Creating the trio at 0 dB changes nothing audible, but it IS an edit of the chain,
-            // so it goes through the same push-and-persist path as any other.
-            _bands = updated.ToList();
-            _selectedBand = -1;
-            OnBandsEdited(countChanged: true);
-        }
-        ShowMacroGains(gains);
-        UpdateCoexistenceNote();
+        ShowMacroGains(EqSimpleMode.ReadOrZero(_bands, _macroBands));
+        SimpleNoteText.Text = !room
+            ? $"This scope already has {_bands.Count} bands — there's no room for the "
+                + $"bass/mid/treble controls (the limit is {EqPreset.MaxBands}). "
+                + "Switch to Advanced to edit it."
+            : CoexistenceNote();
     }
 
-    private void UpdateCoexistenceNote()
+    /// <summary>Says out loud when other bands are along for the ride, so nothing about them is
+    /// a surprise: they are left exactly as they are.</summary>
+    private string CoexistenceNote()
     {
-        var foreign = EqSimpleMode.ForeignBands(_bands);
+        var foreign = EqSimpleMode.ForeignBands(_bands, _macroBands);
         if (foreign.Count == 0)
-        {
-            SimpleNoteText.Text = "";
-            return;
-        }
+            return "";
         var what = _presetName.Length > 0 && _presetName != EqPreset.CustomName
             ? $"'{_presetName}'"
             : "your existing chain";
-        SimpleNoteText.Text = $"Adjusting bass/mid/treble on top of {what} "
+        return $"Adjusting bass/mid/treble on top of {what} "
             + $"({foreign.Count} band{(foreign.Count == 1 ? "" : "s")}) — those bands are left "
             + "untouched. Switch to Advanced to edit them.";
     }
@@ -331,14 +351,19 @@ public partial class EqEditorWindow : Window
             Math.Round(BassSlider.Value, 1),
             Math.Round(MidSlider.Value, 1),
             Math.Round(TrebleSlider.Value, 1));
+        if (!EqSimpleMode.HasRoom(_bands, _macroBands))
+            return;
         int before = _bands.Count;
-        _bands = EqSimpleMode.Apply(_bands, gains).ToList();
+        _bands = EqSimpleMode.Apply(_bands, _macroBands, gains).ToList();
+        // The sliders now own this chain's tail — recorded per scope so a chain that merely ends
+        // in those three shapes is never mistaken for theirs.
+        _macroBands = true;
         UpdateMacroReadouts(gains);
         OnBandsEdited(countChanged: _bands.Count != before);
     }
 
     private EqScopeSetting CurrentScope() =>
-        new(_presetName, _presetPreampDb, _eqEnabled, _bands.ToArray());
+        new(_presetName, _presetPreampDb, _eqEnabled, _bands.ToArray(), _macroBands);
 
     private void PushScope() => ScopeChanged?.Invoke(_scopeDeviceId, CurrentScope());
 
@@ -350,14 +375,19 @@ public partial class EqEditorWindow : Window
     {
         if (_presetName.Length > 0 && _presetName != EqPreset.CustomName)
             _presetName = EqPreset.CustomName;
-        SyncPresetCombo();
         PushScope();
+        if (countChanged)
+        {
+            RebuildFromModel();
+            return;
+        }
+        // Value-only edit (a drag, a typed field, Flatten): refresh in place rather than
+        // rebuilding, so the controls the user is typing in keep their focus and caret.
+        SyncPresetCombo();
         RedrawCurves();
         SyncBandPanel();
-        if (countChanged)
-            RebuildBandStrip();
-        else
-            RefreshBandStripValues();
+        RefreshBandStripValues();
+        SyncSimpleControls(); // e.g. Flatten must pull the macro sliders back to 0
     }
 
     // ---- Preset bar ----
@@ -393,11 +423,9 @@ public partial class EqEditorWindow : Window
         }
         _presetName = preset.Name;
         _presetPreampDb = preset.PreampDb;
-        _bands = preset.Bands.ToList();
-        _selectedBand = _bands.Count > 0 ? 0 : -1;
+        ReplaceChain(preset.Bands);
         PushScope();
-        SyncBandPanel();
-        RedrawAll();
+        RebuildFromModel();
     }
 
     private void OnSavePreset(object sender, RoutedEventArgs e)
@@ -507,17 +535,16 @@ public partial class EqEditorWindow : Window
             ApplyPreset(preset);
     }
 
-    /// <summary>A freshly imported/downloaded preset becomes the current scope's chain.</summary>
+    /// <summary>A freshly imported/downloaded preset becomes the current scope's chain (AutoEq,
+    /// "Import file…"). A bulk replace like this goes through <see cref="RebuildFromModel"/>, so
+    /// the band strip shows the new chain rather than the previous one.</summary>
     private void ApplyPreset(EqPreset preset)
     {
         _presetName = preset.Name;
         _presetPreampDb = preset.PreampDb;
-        _bands = preset.Bands.ToList();
-        _selectedBand = _bands.Count > 0 ? 0 : -1;
+        ReplaceChain(preset.Bands);
         PushScope();
-        SyncPresetCombo();
-        SyncBandPanel();
-        RedrawAll();
+        RebuildFromModel();
     }
 
     private void OnEqEnabledChanged(object sender, RoutedEventArgs e)
@@ -708,21 +735,22 @@ public partial class EqEditorWindow : Window
             return;
         }
         _syncing = true;
-        for (int i = 0; i < _bands.Count; i++)
+        var model = EqStripModel.Build(_bands, _selectedBand);
+        for (int i = 0; i < model.Count; i++)
         {
-            var band = _bands[i];
+            var cell = model[i];
             var column = _columns[i];
-            column.Index.Text = (i + 1).ToString(CultureInfo.InvariantCulture);
-            column.Type.SelectedItem = band.Type;
+            column.Index.Text = cell.Number.ToString(CultureInfo.InvariantCulture);
+            column.Type.SelectedItem = cell.Type;
             // Don't fight the user's caret: skip the box currently being typed in.
             if (!column.Fc.IsKeyboardFocusWithin)
-                column.Fc.Text = band.Fc.ToString("0.##", CultureInfo.InvariantCulture);
+                column.Fc.Text = cell.Fc;
             if (!column.Gain.IsKeyboardFocusWithin)
-                column.Gain.Text = band.GainDb.ToString("0.0", CultureInfo.InvariantCulture);
+                column.Gain.Text = cell.GainDb;
             if (!column.Q.IsKeyboardFocusWithin)
-                column.Q.Text = band.Q.ToString("0.00", CultureInfo.InvariantCulture);
-            column.Gain.IsEnabled = band.HasGain; // gainless types have no Gain token at all
-            column.Frame.BorderBrush = i == _selectedBand
+                column.Q.Text = cell.Q;
+            column.Gain.IsEnabled = cell.GainEnabled; // gainless types have no Gain token at all
+            column.Frame.BorderBrush = cell.Selected
                 ? new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x5A))
                 : System.Windows.Media.Brushes.Transparent;
         }
@@ -791,9 +819,8 @@ public partial class EqEditorWindow : Window
         if (dialog.ShowDialog() != true || dialog.Result is not { } parsed)
             return;
         // Replaces the scope wholesale — the dialog guarantees the text parsed cleanly first.
-        _bands = parsed.Bands.ToList();
         _presetPreampDb = parsed.PreampDb;
-        _selectedBand = _bands.Count > 0 ? 0 : -1;
+        ReplaceChain(parsed.Bands);
         StripHintText.Text = "";
         OnBandsEdited(countChanged: true);
     }
@@ -841,8 +868,7 @@ public partial class EqEditorWindow : Window
 
     private void OnClearBands(object sender, RoutedEventArgs e)
     {
-        _bands.Clear();
-        _selectedBand = -1;
+        ReplaceChain(Array.Empty<EqBand>());
         _presetPreampDb = 0;
         StripHintText.Text = "";
         OnBandsEdited(countChanged: true);
@@ -860,9 +886,10 @@ public partial class EqEditorWindow : Window
         {
             var band = _bands[_selectedBand];
             BandTypeCombo.SelectedItem = band.Type;
-            FcBox.Text = band.Fc.ToString("0.##", CultureInfo.InvariantCulture);
-            GainBox.Text = band.GainDb.ToString("0.0", CultureInfo.InvariantCulture);
-            QBox.Text = band.Q.ToString("0.00", CultureInfo.InvariantCulture);
+            // Same formatting as the strip, so one value never reads two ways.
+            FcBox.Text = EqStripModel.FormatFc(band.Fc);
+            GainBox.Text = EqStripModel.FormatGain(band.GainDb);
+            QBox.Text = EqStripModel.FormatQ(band.Q);
             GainBox.IsEnabled = band.HasGain;
         }
         else

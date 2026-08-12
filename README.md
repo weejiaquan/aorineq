@@ -262,8 +262,10 @@ else that speaks that format.
 ### `apo-volume://` EQ links
 
 A site, a forum post or a chat message can hand someone a tuning with one click. Nothing is ever
-applied or saved without a confirmation dialog that shows the source, the band count, the
-preamp, which scope it will land in, and the **response curve itself**.
+downloaded, applied or saved without a confirmation dialog that shows the source, which scope it
+will land in, the band count, the preamp, and the **response curve itself**. For a hosted preset
+the file is only fetched when you press **Preview** (which just draws it) or one of the two
+accept buttons — a link on its own never makes apo-volume touch the network.
 
 **A preset inside the link** (no hosting needed) — this is what the editor's **Copy share link**
 button produces:

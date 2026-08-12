@@ -75,6 +75,25 @@ public class EqShareTests
         Assert.Equal(preset.Serialize(), result.Link.Preset!.Serialize());
     }
 
+    /// <summary>A built share link must always parse — otherwise "Copy share link" hands the
+    /// user something that fails on the other side. A name the receiver would reject (one that
+    /// predates a naming rule, say) is dropped rather than carried into a broken link.</summary>
+    [Fact]
+    public void Share_url_drops_a_name_the_receiver_would_refuse()
+    {
+        var preset = new EqPreset(new string('x', FileNames.MaxLength + 1), 0, EveryBandType().Bands);
+        Assert.NotNull(PresetStore.ValidateName(preset.Name));
+
+        Assert.True(EqShare.TryBuildShareUrl(preset, out var url, out var error), error);
+        _out.WriteLine($"{preset.Name.Length}-char name -> {url.Length}-char url");
+
+        var result = ProtocolLink.Parse(url);
+        Assert.Equal(ProtocolParseStatus.Ok, result.Status);
+        Assert.Equal(EqShare.DefaultPresetName, result.Link!.Name);
+        Assert.Equal(preset.Serialize().Replace(preset.Name, ""),
+            result.Link.Preset!.Serialize().Replace(EqShare.DefaultPresetName, ""));
+    }
+
     [Fact]
     public void Share_url_omits_an_unsaved_preset_name_so_the_receiver_names_it()
     {

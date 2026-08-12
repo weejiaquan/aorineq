@@ -140,15 +140,17 @@ public static class EqShare
 
     /// <summary>Builds the full <c>apo-volume://apply-preset</c> share link for a preset, or
     /// fails when the chain simply doesn't fit a URL. The name is carried only when it names a
-    /// real saved preset — an unsaved "(custom)" chain arrives as
-    /// <see cref="DefaultPresetName"/> instead of a meaningless label.</summary>
+    /// real saved preset AND would survive the receiver's own validation — an unsaved "(custom)"
+    /// chain, or one whose name predates a naming rule, arrives as
+    /// <see cref="DefaultPresetName"/> rather than producing a link that won't parse.</summary>
     public static bool TryBuildShareUrl(EqPreset preset, out string url, out string? error)
     {
         var query = new StringBuilder(ProtocolLink.Scheme).Append("://")
             .Append(ProtocolLink.ApplyPresetAction)
             .Append("?type=").Append(ProtocolLink.EqPresetType)
             .Append("&data=").Append(Encode(preset));
-        if (preset.Name.Length > 0 && preset.Name != EqPreset.CustomName)
+        if (preset.Name.Length > 0 && preset.Name != EqPreset.CustomName
+            && PresetStore.ValidateName(preset.Name) is null)
             query.Append("&name=").Append(Uri.EscapeDataString(preset.Name));
 
         var candidate = query.ToString();

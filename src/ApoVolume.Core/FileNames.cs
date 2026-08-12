@@ -16,15 +16,25 @@ public static class FileNames
     /// can otherwise be thousands of characters and only fail at write time.</summary>
     public const int MaxLength = 100;
 
-    /// <summary>Returns a user-readable error for an invalid name, or null when valid.
-    /// <paramref name="what"/> names the thing in messages ("Skin name", "Preset name").</summary>
-    public static string? Validate(string name, string what)
+    /// <summary>Returns a user-readable error for a name being ACCEPTED — typed in, or arriving
+    /// from an apo-volume:// link — or null when it's fine. <paramref name="what"/> names the
+    /// thing in messages ("Skin name", "Preset name").</summary>
+    public static string? Validate(string name, string what) =>
+        name.Trim().Length > MaxLength
+            ? $"{what} is too long (limit {MaxLength} characters)."
+            : ValidatePathSafety(name, what);
+
+    /// <summary>Whether a name is safe to turn into a path segment. This is the check for names
+    /// already on disk (loading, deleting): the length cap above is a policy for what we accept,
+    /// and applying it to existing files would make anything named before it shipped
+    /// unselectable and undeletable.</summary>
+    public static bool IsPathSafe(string name) => ValidatePathSafety(name, "Name") is null;
+
+    private static string? ValidatePathSafety(string name, string what)
     {
         var trimmed = name.Trim();
         if (trimmed.Length == 0)
             return $"{what} cannot be empty.";
-        if (trimmed.Length > MaxLength)
-            return $"{what} is too long (limit {MaxLength} characters).";
         if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             return $"{what} contains characters not allowed in file names.";
         if (trimmed.EndsWith('.'))
