@@ -310,6 +310,15 @@ public partial class SettingsWindow : Window
     /// the skin designer saves, so the picker reflects new/renamed skins immediately.</summary>
     public void RefreshSkins() => PopulateSkins(SelectedTag(SkinCombo) ?? "");
 
+    /// <summary>Scrolls the skin picker into view and focuses it — where an
+    /// <c>apo-volume://open?page=skins</c> link lands, since skins live inside this window
+    /// rather than in one of their own.</summary>
+    public void FocusSkins()
+    {
+        SkinCombo.BringIntoView();
+        SkinCombo.Focus();
+    }
+
     private void OnRescanSkins(object sender, RoutedEventArgs e)
     {
         PopulateSkins(SelectedTag(SkinCombo) ?? "");

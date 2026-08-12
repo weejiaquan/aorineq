@@ -77,4 +77,17 @@ public class PresetStoreTests : IDisposable
             Assert.Null(PresetStore.ValidateName(sanitized));
         }
     }
+
+    [Fact]
+    public void ValidateName_rejects_a_name_too_long_for_a_path()
+    {
+        // A name arrives from an apo-volume:// link as well as from a text box, and the link cap
+        // allows thousands of characters — without this the failure would surface as a
+        // PathTooLongException at write time, long after the link was accepted.
+        Assert.Null(PresetStore.ValidateName(new string('a', FileNames.MaxLength)));
+        var error = PresetStore.ValidateName(new string('a', FileNames.MaxLength + 1));
+        _out.WriteLine(error);
+        Assert.NotNull(error);
+        Assert.Contains("too long", error!);
+    }
 }

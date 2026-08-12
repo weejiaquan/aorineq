@@ -675,7 +675,12 @@ public partial class App : System.Windows.Application
     /// <summary>Lazily creates (or re-syncs and shows) the single SettingsWindow instance.
     /// Queries autostart state off the dispatcher thread since ScheduledTaskAutostart.IsEnabled()
     /// shells out to schtasks (~100ms); the await resumes back here on the UI thread.</summary>
-    private async void OpenSettings()
+    private async void OpenSettings() => await OpenSettingsAsync(focusSkins: false);
+
+    /// <summary><paramref name="focusSkins"/> scrolls to and focuses the skin picker — where an
+    /// <c>apo-volume://open?page=skins</c> link lands. It must happen after the await, because
+    /// the window may not exist until then.</summary>
+    private async Task OpenSettingsAsync(bool focusSkins)
     {
         int version = ++_stateSyncVersion;
         bool autostartEnabled = await IsAutostartEnabledAsync();
@@ -703,6 +708,8 @@ public partial class App : System.Windows.Application
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
+        if (focusSkins)
+            _settingsWindow.FocusSkins();
     }
 
     /// <summary>Opens the setup wizard in informational mode (Settings "Setup guide…" and the
@@ -920,10 +927,9 @@ public partial class App : System.Windows.Application
         }
     }
 
-    /// <summary>One apo-volume:// link, end to end: strict parse (balloon-only on anything
-    /// off), the confirm dialog (the trust boundary — nothing downloads before a click), the
-    /// gated zip download, the staged <see cref="SkinArchive.Import"/>, and — for Install &amp;
-    /// Use — the live switch to the new skin.</summary>
+    /// <summary>One apo-volume:// link, end to end: strict parse (balloon-only on anything off),
+    /// then the action's own handler. Every action that changes state confirms first; the
+    /// <c>open</c> action changes nothing, so it just brings a window up.</summary>
     private async Task HandleProtocolLinkAsync(string raw)
     {
         var result = ProtocolLink.Parse(raw);
@@ -939,15 +945,39 @@ public partial class App : System.Windows.Application
         }
 
         var link = result.Link!;
+        switch (link.Action)
+        {
+            case ProtocolLink.InstallSkinAction:
+                await HandleSkinInstallAsync(link);
+                break;
+            case ProtocolLink.ApplyPresetAction:
+                await HandleEqPresetLinkAsync(link);
+                break;
+            case ProtocolLink.AutoEqAction:
+                OpenEqEditor();
+                _eqEditor?.OpenAutoEqImport(link.Model!);
+                break;
+            case ProtocolLink.OpenAction:
+                await OpenProtocolPageAsync(link.Page!);
+                break;
+        }
+    }
+
+    /// <summary>An <c>install-skin</c> link: the confirm dialog (the trust boundary — nothing
+    /// downloads before a click), the gated zip download, the staged
+    /// <see cref="SkinArchive.Import"/>, and — for Install &amp; Use — the live switch to the
+    /// new skin.</summary>
+    private async Task HandleSkinInstallAsync(ProtocolLink link)
+    {
         bool overwrites = Directory.Exists(Path.Combine(ApoPaths.GetSkinsRoot(), link.Name));
-        var choice = SkinInstallDialog.Confirm(link.Name, new Uri(link.Url).Host, overwrites);
+        var choice = SkinInstallDialog.Confirm(link.Name, new Uri(link.Url!).Host, overwrites);
         if (choice == SkinInstallChoice.Cancel)
             return;
 
         var staging = Path.Combine(Path.GetTempPath(), "apo-skin-" + Guid.NewGuid().ToString("N") + ".zip");
         try
         {
-            await GatedDownload.DownloadAsync(link.Url, staging, SkinArchive.MaxZipBytes,
+            await GatedDownload.DownloadAsync(link.Url!, staging, SkinArchive.MaxZipBytes,
                 GatedDownload.ZipMagic, link.Sha256);
             SkinArchive.Import(staging, ApoPaths.GetSkinsRoot(), link.Name);
         }
@@ -975,6 +1005,137 @@ public partial class App : System.Windows.Application
         {
             _settingsWindow?.RefreshSkins();
             _tray?.ShowInfo($"Skin '{link.Name}' installed.");
+        }
+    }
+
+    /// <summary>Cap on a downloaded ParametricEQ preset. Real files are under a kilobyte; a
+    /// megabyte is room for anything legitimate and far below what could hurt.</summary>
+    private const long MaxPresetTextBytes = 1024 * 1024;
+
+    /// <summary>An <c>apply-preset&amp;type=eq</c> link: resolve the preset (inline payload, or a
+    /// gated https download that must parse as a whole ParametricEQ block), then confirm — the
+    /// dialog shows the source, the band count, the preamp, the target scope and the response
+    /// CURVE, so the user sees the tuning before accepting it.
+    ///
+    /// For a hosted link the fetch necessarily happens before the dialog, because the curve and
+    /// the band count ARE the content. The transport is gated exactly like every other download
+    /// (https-only with per-hop revalidation, size cap, optional sha256 pin) and the file is
+    /// parsed, never executed; the boundary that matters — nothing is applied or written without
+    /// a click — is unchanged.</summary>
+    private async Task HandleEqPresetLinkAsync(ProtocolLink link)
+    {
+        EqPreset preset;
+        string source;
+        if (link.Preset is { } inline)
+        {
+            preset = inline;
+            source = EqPresetLinkDialog.SharedLinkSource;
+        }
+        else
+        {
+            var staging = Path.Combine(Path.GetTempPath(),
+                "apo-preset-" + Guid.NewGuid().ToString("N") + ".txt");
+            try
+            {
+                await GatedDownload.DownloadAsync(link.Url!, staging, MaxPresetTextBytes,
+                    GatedDownload.NoMagic, link.Sha256);
+                var text = await File.ReadAllTextAsync(staging);
+                // Strict: the whole block parses or nothing is applied.
+                if (!EqPreset.TryParse(link.Name, text, out preset, out var parseError))
+                {
+                    _tray?.ShowWarning($"That preset link didn't contain a usable "
+                        + $"Equalizer APO preset. {parseError}");
+                    return;
+                }
+                if (preset.Bands.Count == 0)
+                {
+                    _tray?.ShowWarning("That preset link contains no filters.");
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException
+                or UnauthorizedAccessException)
+            {
+                _tray?.ShowWarning($"Preset download failed: {ex.Message}");
+                return;
+            }
+            finally
+            {
+                try { File.Delete(staging); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            source = new Uri(link.Url!).Host;
+        }
+
+        var (deviceId, scopeDescription) = ResolveEqLinkScope(link.Scope);
+        bool overwrites = PresetStore.List(ApoPaths.GetPresetsRoot())
+            .Contains(link.Name, StringComparer.OrdinalIgnoreCase);
+        var choice = EqPresetLinkDialog.Confirm(preset, source, scopeDescription, overwrites);
+        if (choice == EqPresetLinkChoice.Cancel)
+            return;
+
+        try
+        {
+            PresetStore.Save(ApoPaths.GetPresetsRoot(), link.Name, preset.Serialize());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _tray?.ShowWarning($"Couldn't save the preset: {ex.Message}");
+            return;
+        }
+
+        if (choice == EqPresetLinkChoice.ApplyAndSave)
+        {
+            var current = deviceId is null
+                ? _settings.GlobalEq
+                : _settings.DeviceEq is not null && _settings.DeviceEq.TryGetValue(deviceId, out var s) ? s : null;
+            OnEqScopeChanged(deviceId, new EqScopeSetting(
+                link.Name, preset.PreampDb, current?.Enabled ?? true, preset.Bands.ToArray()));
+            _eqEditor?.RefreshFromApp();
+            _tray?.ShowInfo($"EQ preset '{link.Name}' applied to {scopeDescription}.");
+        }
+        else
+        {
+            _eqEditor?.RefreshFromApp();
+            _tray?.ShowInfo($"EQ preset '{link.Name}' saved.");
+        }
+    }
+
+    /// <summary>Turns a link's requested scope into the scope the app actually has: "global" is
+    /// always available, "device" means whatever the user is listening on right now — and when
+    /// there IS no active render device, the preset lands on the global chain instead of being
+    /// dropped. The description is what the confirm dialog names, so the user always sees where
+    /// it will really go.</summary>
+    private (string? DeviceId, string Description) ResolveEqLinkScope(string scope)
+    {
+        if (scope == EqLinkScopes.Global)
+            return (null, "the global EQ (every device)");
+        if (_deviceStates.ActiveId is not { } activeId)
+            return (null, "the global EQ (no active playback device right now)");
+        var name = AudioEndpoint.GetRenderEndpoints()
+            .FirstOrDefault(e => e.Id == activeId)?.FriendlyName;
+        return (activeId, name is null ? "the current playback device" : $"'{name}'");
+    }
+
+    /// <summary>An <c>open</c> link: bring up the named window. Nothing changes state, which is
+    /// why these links need no confirmation.</summary>
+    private async Task OpenProtocolPageAsync(string page)
+    {
+        switch (page)
+        {
+            case ProtocolPages.Eq:
+                OpenEqEditor();
+                break;
+            case ProtocolPages.Designer:
+                OpenSkinDesigner();
+                break;
+            case ProtocolPages.Skins:
+                await OpenSettingsAsync(focusSkins: true);
+                break;
+            default:
+                await OpenSettingsAsync(focusSkins: false);
+                break;
         }
     }
 

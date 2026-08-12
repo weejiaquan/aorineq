@@ -33,10 +33,12 @@ namespace ApoVolume.UI;
 /// app's settings on scope switches, so the config file always reflects what's on screen.</summary>
 public partial class EqEditorWindow : Window
 {
-    private const double FMin = 20, FMax = 20000;
-    private const int CurvePoints = 240;
+    // Frequency axis, curve resolution and dB scales live in EqCurveRenderer, which the
+    // read-only previews (the apply-preset dialog, Simple mode) draw with too.
+    private const double FMin = EqCurveRenderer.FMin, FMax = EqCurveRenderer.FMax;
+    private const int CurvePoints = EqCurveRenderer.CurvePoints;
     private const int FftSize = 4096;
-    private static readonly int[] DbRanges = { 12, 24, 30 };
+    private static readonly int[] DbRanges = EqCurveRenderer.DbRanges;
     private static readonly double[] GridFrequencies = { 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
     private const double SpectrumTopDb = 0, SpectrumBottomDb = -90;
 
@@ -210,8 +212,8 @@ public partial class EqEditorWindow : Window
     /// drag doesn't tear down the controls the user may be typing in.</summary>
     private void OnBandsEdited(bool countChanged = false)
     {
-        if (_presetName.Length > 0 && _presetName != "(custom)")
-            _presetName = "(custom)";
+        if (_presetName.Length > 0 && _presetName != EqPreset.CustomName)
+            _presetName = EqPreset.CustomName;
         SyncPresetCombo();
         PushScope();
         RedrawCurves();
@@ -233,20 +235,20 @@ public partial class EqEditorWindow : Window
     {
         _syncing = true;
         var names = PresetStore.List(ApoPaths.GetPresetsRoot()).ToList();
-        bool custom = _presetName.Length == 0 || _presetName == "(custom)"
+        bool custom = _presetName.Length == 0 || _presetName == EqPreset.CustomName
             || !names.Contains(_presetName, StringComparer.OrdinalIgnoreCase);
         if (custom)
-            names.Insert(0, "(custom)");
+            names.Insert(0, EqPreset.CustomName);
         PresetCombo.ItemsSource = names;
         PresetCombo.SelectedItem = custom
-            ? "(custom)"
+            ? EqPreset.CustomName
             : names.First(n => string.Equals(n, _presetName, StringComparison.OrdinalIgnoreCase));
         _syncing = false;
     }
 
     private void OnPresetSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (_syncing || PresetCombo.SelectedItem is not string name || name == "(custom)")
+        if (_syncing || PresetCombo.SelectedItem is not string name || name == EqPreset.CustomName)
             return;
         if (PresetStore.Load(ApoPaths.GetPresetsRoot(), name) is not { } preset)
         {
@@ -264,7 +266,7 @@ public partial class EqEditorWindow : Window
 
     private void OnSavePreset(object sender, RoutedEventArgs e)
     {
-        if (_presetName.Length == 0 || _presetName == "(custom)")
+        if (_presetName.Length == 0 || _presetName == EqPreset.CustomName)
         {
             OnSavePresetAs(sender, e);
             return;
@@ -274,7 +276,7 @@ public partial class EqEditorWindow : Window
 
     private void OnSavePresetAs(object sender, RoutedEventArgs e)
     {
-        var name = PromptForName("Save preset as", _presetName == "(custom)" ? "" : _presetName);
+        var name = PromptForName("Save preset as", _presetName == EqPreset.CustomName ? "" : _presetName);
         if (name is null)
             return;
         if (PresetStore.ValidateName(name) is { } error)
@@ -305,13 +307,13 @@ public partial class EqEditorWindow : Window
 
     private void OnDeletePreset(object sender, RoutedEventArgs e)
     {
-        if (_presetName.Length == 0 || _presetName == "(custom)")
+        if (_presetName.Length == 0 || _presetName == EqPreset.CustomName)
             return;
         if (MessageBox.Show(this, $"Delete preset '{_presetName}'?", "ApoVolume",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         PresetStore.Delete(ApoPaths.GetPresetsRoot(), _presetName);
-        _presetName = "(custom)"; // the chain stays audible; only the file is gone
+        _presetName = EqPreset.CustomName; // the chain stays audible; only the file is gone
         PushScope();
         SyncPresetCombo();
     }
@@ -357,9 +359,14 @@ public partial class EqEditorWindow : Window
         ApplyPreset(preset);
     }
 
-    private void OnAutoEq(object sender, RoutedEventArgs e)
+    private void OnAutoEq(object sender, RoutedEventArgs e) => OpenAutoEqImport("");
+
+    /// <summary>Opens the AutoEq search, optionally pre-searched — the editor is where an
+    /// imported profile lands, so an <c>apo-volume://autoeq</c> deep link comes through here
+    /// and follows exactly the same download-and-apply path as the toolbar button.</summary>
+    public void OpenAutoEqImport(string model)
     {
-        var dialog = new AutoEqImportDialog { Owner = this };
+        var dialog = new AutoEqImportDialog(model) { Owner = this };
         if (dialog.ShowDialog() == true && dialog.ImportedPreset is { } preset)
             ApplyPreset(preset);
     }
@@ -655,6 +662,37 @@ public partial class EqEditorWindow : Window
         OnBandsEdited(countChanged: true);
     }
 
+    /// <summary>Puts this scope's whole chain on the clipboard as an apo-volume:// link. The
+    /// preset travels INSIDE the link (nothing is hosted anywhere), so it can be pasted into a
+    /// chat or a forum post and whoever clicks it gets the same confirm-and-preview dialog a
+    /// hosted preset link shows.</summary>
+    private void OnCopyShareLink(object sender, RoutedEventArgs e)
+    {
+        if (_bands.Count == 0)
+        {
+            StripHintText.Text = "There are no bands to share yet.";
+            return;
+        }
+        if (!EqShare.TryBuildShareUrl(
+                new EqPreset(_presetName, _presetPreampDb, _bands.ToArray()), out var url, out var error))
+        {
+            MessageBox.Show(this, error, "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            System.Windows.Clipboard.SetText(url);
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            // Another process can hold the clipboard open; that's a transient failure, not a bug.
+            MessageBox.Show(this, $"Couldn't copy the link: {ex.Message}", "ApoVolume",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        StripHintText.Text = $"Share link copied ({url.Length} characters).";
+    }
+
     private void OnFlatten(object sender, RoutedEventArgs e)
     {
         // Gains to 0 and the scope's preset preamp to 0, keeping every band's type/Fc/Q so the
@@ -800,18 +838,13 @@ public partial class EqEditorWindow : Window
 
     // ---- Plot: coordinate mapping ----
 
-    private double XFromFreq(double freq) =>
-        Plot.ActualWidth * Math.Log(Math.Clamp(freq, FMin, FMax) / FMin) / Math.Log(FMax / FMin);
+    private double XFromFreq(double freq) => EqCurveRenderer.XFromFreq(freq, Plot.ActualWidth);
 
-    private double FreqFromX(double x) =>
-        FMin * Math.Exp(Math.Clamp(x, 0, Plot.ActualWidth) / Math.Max(Plot.ActualWidth, 1)
-            * Math.Log(FMax / FMin));
+    private double FreqFromX(double x) => EqCurveRenderer.FreqFromX(x, Plot.ActualWidth);
 
-    private double YFromDb(double db) =>
-        Plot.ActualHeight / 2 - db * Plot.ActualHeight / (2.0 * _dbRange);
+    private double YFromDb(double db) => EqCurveRenderer.YFromDb(db, Plot.ActualHeight, _dbRange);
 
-    private double DbFromY(double y) =>
-        (Plot.ActualHeight / 2 - y) * 2.0 * _dbRange / Math.Max(Plot.ActualHeight, 1);
+    private double DbFromY(double y) => EqCurveRenderer.DbFromY(y, Plot.ActualHeight, _dbRange);
 
     private double YFromSpectrumDb(double db) =>
         Plot.ActualHeight * (1 - (Math.Clamp(db, SpectrumBottomDb, SpectrumTopDb) - SpectrumBottomDb)

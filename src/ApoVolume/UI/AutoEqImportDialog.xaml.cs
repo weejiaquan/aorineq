@@ -29,10 +29,19 @@ public partial class AutoEqImportDialog : Window
             Entry.Source.Length > 0 ? $"{Entry.Name}  —  {Entry.Source}" : Entry.Name;
     }
 
-    public AutoEqImportDialog()
+    /// <summary><paramref name="initialSearch"/> pre-fills the search box — how an
+    /// <c>apo-volume://autoeq?model=…</c> deep link lands the user on their headphone. It only
+    /// narrows the list; the download still needs an explicit pick and Import.</summary>
+    public AutoEqImportDialog(string initialSearch = "")
     {
         InitializeComponent();
-        Loaded += async (_, _) => await LoadIndexAsync(refresh: false);
+        SearchBox.Text = initialSearch;
+        Loaded += async (_, _) =>
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            await LoadIndexAsync(refresh: false);
+        };
     }
 
     /// <summary>Index load/refresh. Catches EVERYTHING: this runs from async void handlers

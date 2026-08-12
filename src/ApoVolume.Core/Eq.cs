@@ -47,6 +47,35 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
     /// <summary>Q for NO lines that carry none — the conventional narrow notch.</summary>
     public const double DefaultNotchQ = 30.0;
 
+    /// <summary>The name a scope carries when its chain doesn't match any saved preset file —
+    /// shown in the editor's preset box and never written to disk as a preset name.</summary>
+    public const string CustomName = "(custom)";
+
+    /// <summary>The canonical Equalizer APO token for a band type (the Q-carrying forms).</summary>
+    public static string TypeToken(EqBandType type) => type switch
+    {
+        EqBandType.Peak => "PK",
+        EqBandType.LowShelf => "LSC",
+        EqBandType.HighShelf => "HSC",
+        EqBandType.Notch => "NO",
+        EqBandType.LowPass => "LPQ",
+        EqBandType.HighPass => "HPQ",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
+
+    /// <summary>The band type a filter token names, or null when it isn't one we support. The
+    /// Q-less aliases (LS/HS/LP/HP/PEQ) are accepted; case is ignored.</summary>
+    public static EqBandType? ParseTypeToken(string token) => token.ToUpperInvariant() switch
+    {
+        "PK" or "PEQ" => EqBandType.Peak,
+        "LS" or "LSC" => EqBandType.LowShelf,
+        "HS" or "HSC" => EqBandType.HighShelf,
+        "NO" => EqBandType.Notch,
+        "LP" or "LPQ" => EqBandType.LowPass,
+        "HP" or "HPQ" => EqBandType.HighPass,
+        _ => null,
+    };
+
     /// <summary>EAPO ParametricEQ text: a Preamp line (only when non-zero) followed by
     /// numbered Filter lines. Invariant culture; Gain 1 decimal, Q 2 decimals, Fc up to 2
     /// decimals with trailing zeros trimmed (AutoEq's own shapes round-trip byte-for-byte).</summary>
@@ -63,16 +92,7 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
     public static string FormatFilterLine(int number, EqBand band)
     {
         var inv = CultureInfo.InvariantCulture;
-        string type = band.Type switch
-        {
-            EqBandType.Peak => "PK",
-            EqBandType.LowShelf => "LSC",
-            EqBandType.HighShelf => "HSC",
-            EqBandType.Notch => "NO",
-            EqBandType.LowPass => "LPQ",
-            EqBandType.HighPass => "HPQ",
-            _ => throw new ArgumentOutOfRangeException(nameof(band)),
-        };
+        string type = TypeToken(band.Type);
         string gain = band.HasGain ? string.Create(inv, $" Gain {band.GainDb:0.0} dB") : "";
         return string.Create(inv, $"Filter {number}: ON {type} Fc {band.Fc:0.##} Hz{gain} Q {band.Q:0.00}");
     }
@@ -129,16 +149,7 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
         }
         if (tokens.Length < 2)
             return new FilterLineResult(null, "expected a filter type after ON.");
-        EqBandType? type = tokens[1].ToUpperInvariant() switch
-        {
-            "PK" or "PEQ" => EqBandType.Peak,
-            "LS" or "LSC" => EqBandType.LowShelf,
-            "HS" or "HSC" => EqBandType.HighShelf,
-            "NO" => EqBandType.Notch,
-            "LP" or "LPQ" => EqBandType.LowPass,
-            "HP" or "HPQ" => EqBandType.HighPass,
-            _ => null,
-        };
+        EqBandType? type = ParseTypeToken(tokens[1]);
         if (type is null)
             return new FilterLineResult(null,
                 $"unsupported filter type '{tokens[1]}' (supported: PK, LSC, HSC, NO, LPQ, HPQ).");
@@ -212,6 +223,14 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
             }
             if (result.Band is { } band)
                 bands.Add(band);
+        }
+        // The cap the editor enforces on every other entry point applies here too: a pasted or
+        // downloaded block longer than a scope can hold is refused whole rather than truncated.
+        if (bands.Count > MaxBands)
+        {
+            preset = new EqPreset(name, 0, Array.Empty<EqBand>());
+            error = $"Too many filters ({bands.Count}); the limit is {MaxBands} per scope.";
+            return false;
         }
         preset = new EqPreset(name, preamp, bands);
         error = null;
