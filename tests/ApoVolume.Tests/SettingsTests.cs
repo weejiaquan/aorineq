@@ -169,6 +169,28 @@ public class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void ProtocolLinks_and_AutoUpdate_default_on_when_missing_from_older_settings()
+    {
+        // An existing pre-1.9 settings.json has neither field — both features default ON.
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":50,\"Muted\":false}");
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded: ProtocolLinksEnabled={s.ProtocolLinksEnabled} AutoUpdate={s.AutoUpdate}");
+        Assert.True(s.ProtocolLinksEnabled);
+        Assert.True(s.AutoUpdate);
+    }
+
+    [Fact]
+    public void ProtocolLinks_and_AutoUpdate_off_roundtrip()
+    {
+        new Settings(50, false, ProtocolLinksEnabled: false, AutoUpdate: false).Save(_path);
+        _out.WriteLine("saved json: " + File.ReadAllText(_path));
+        var s = Settings.Load(_path);
+        Assert.False(s.ProtocolLinksEnabled);
+        Assert.False(s.AutoUpdate);
+    }
+
+    [Fact]
     public void All_fields_roundtrip()
     {
         var orig = new Settings(
