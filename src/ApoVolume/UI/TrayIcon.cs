@@ -1,13 +1,19 @@
 using System.Drawing;
 using System.Windows.Forms;
+using ApoVolume.Core;
 
 namespace ApoVolume.UI;
 
-/// <summary>WinForms NotifyIcon wrapper: app icon, state tooltip, context menu.</summary>
+/// <summary>WinForms NotifyIcon wrapper: app icon (normal/muted art), state tooltip, context
+/// menu.</summary>
 public sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
-    private readonly Icon _appIcon;
+    // Both icons are loaded once and kept for the tray's lifetime: each owns its HICON and frees
+    // it on Dispose, so swapping between these two instances allocates no handles. Creating an
+    // Icon per Update (as the pre-v2.0.1 glyph pair did via Bitmap.GetHicon) leaked one each time.
+    private readonly Icon _normalIcon;
+    private readonly Icon _mutedIcon;
     private readonly ToolStripMenuItem _muteItem;
     private readonly ToolStripMenuItem _eqPresetMenu;
     private Action? _balloonClickAction;
@@ -27,7 +33,8 @@ public sealed class TrayIcon : IDisposable
 
     public TrayIcon()
     {
-        _appIcon = LoadAppIcon();
+        _normalIcon = LoadIcon(muted: false);
+        _mutedIcon = LoadIcon(muted: true);
 
         _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
         _eqPresetMenu = new ToolStripMenuItem("EQ preset");
@@ -44,7 +51,7 @@ public sealed class TrayIcon : IDisposable
 
         _icon = new NotifyIcon
         {
-            Icon = _appIcon,
+            Icon = _normalIcon,
             Text = "ApoVolume",
             Visible = true,
             ContextMenuStrip = menu,
@@ -59,11 +66,13 @@ public sealed class TrayIcon : IDisposable
         _icon.BalloonTipClosed += (_, _) => _balloonClickAction = null;
     }
 
-    /// <summary>The icon itself is the app brand and never changes; mute state reads from the
-    /// tooltip and the checked "Mute" menu item.</summary>
+    /// <summary>Mute is visible three ways: the icon art itself, the tooltip, and the checked
+    /// "Mute" menu item. The icon is the only one visible without hovering or opening the menu,
+    /// which is why the muted variant exists.</summary>
     public void Update(int percent, bool muted)
     {
         _icon.Text = muted ? "ApoVolume: muted" : $"ApoVolume: {percent}%";
+        _icon.Icon = muted ? _mutedIcon : _normalIcon;
         _muteItem.Checked = muted;
     }
 
@@ -106,12 +115,12 @@ public sealed class TrayIcon : IDisposable
         _icon.ShowBalloonTip(10000, "ApoVolume", text, ToolTipIcon.Info);
     }
 
-    /// <summary>Loads the shipped multi-size app icon, asking for the shell's current small-icon
-    /// size so Windows picks the matching frame instead of downscaling the 256px one.</summary>
-    private static Icon LoadAppIcon()
+    /// <summary>Loads one of the shipped multi-size icons, asking for the shell's current
+    /// small-icon size so Windows picks the matching frame instead of downscaling the 256px one.</summary>
+    private static Icon LoadIcon(bool muted)
     {
         using var stream = System.Windows.Application
-            .GetResourceStream(new Uri("pack://application:,,,/ApoVolume.ico"))!.Stream;
+            .GetResourceStream(new Uri(AppIcons.ResourceUri(muted)))!.Stream;
         return new Icon(stream, SystemInformation.SmallIconSize);
     }
 
@@ -119,6 +128,7 @@ public sealed class TrayIcon : IDisposable
     {
         _icon.Visible = false;
         _icon.Dispose();
-        _appIcon.Dispose();
+        _normalIcon.Dispose();
+        _mutedIcon.Dispose();
     }
 }

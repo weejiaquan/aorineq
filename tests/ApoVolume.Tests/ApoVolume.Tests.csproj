@@ -34,9 +34,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The very file the app ships as its ApplicationIcon and WPF resource, so AppIconTests
-         checks the shipped asset rather than a copy that could drift. -->
+    <!-- The very files the app ships as its ApplicationIcon and WPF resources, so AppIconTests
+         checks the shipped assets rather than copies that could drift. -->
     <None Include="..\..\src\ApoVolume\ApoVolume.ico" Link="ApoVolume.ico"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\ApoVolume\ApoVolume-muted.ico" Link="ApoVolume-muted.ico"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
