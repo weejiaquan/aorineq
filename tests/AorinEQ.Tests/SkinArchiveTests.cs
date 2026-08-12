@@ -421,6 +421,29 @@ public class SkinArchiveTests : IDisposable
     }
 
     [Fact]
+    public void Export_to_a_relative_path_lands_where_the_caller_meant()
+    {
+        // The scratch archive has to be built beside the SAME destination the move targets, so a
+        // relative path must be resolved once, not twice.
+        var skin = MakeRenderableSkinFolder("relative-src");
+        var previous = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(_dir);
+            SkinArchive.Export(skin, "relative-out.zip");
+            var written = Path.Combine(_dir, "relative-out.zip");
+            _out.WriteLine($"wrote {written}: exists={File.Exists(written)}");
+            Assert.True(File.Exists(written));
+            Assert.Contains(SkinPreview.FileName, EntryNames(written));
+            Assert.Empty(Directory.GetFiles(_dir, ".aorineq-export-*"));
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(previous);
+        }
+    }
+
+    [Fact]
     public void Export_over_an_existing_zip_replaces_it_completely()
     {
         var first = MakeRenderableSkinFolder("v1-src");

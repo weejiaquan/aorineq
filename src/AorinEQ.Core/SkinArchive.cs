@@ -45,9 +45,14 @@ public static class SkinArchive
         // generation got far enough to produce a usable one.
         var scratchPreview = Path.Combine(Path.GetTempPath(),
             "aorineq-preview-" + Guid.NewGuid().ToString("N") + ".png");
+        // Resolved ONCE, and everything below uses the resolved path. A relative zipPath resolves
+        // against the current directory, which is process-wide mutable state — resolving it twice
+        // could put the scratch file beside one destination and move it to another, which is
+        // exactly the same-volume rename this is here to guarantee.
+        var destination = Path.GetFullPath(zipPath);
         // Beside the destination, not in %TEMP%: the move below has to be a same-volume rename.
         var scratchZip = Path.Combine(
-            Path.GetDirectoryName(Path.GetFullPath(zipPath)) ?? ".",
+            Path.GetDirectoryName(destination) ?? Path.GetPathRoot(destination) ?? ".",
             ".aorineq-export-" + Guid.NewGuid().ToString("N") + ".tmp");
         string? previewPath = null;
         try
@@ -75,7 +80,7 @@ public static class SkinArchive
             }
             // Only now is anything at the destination touched, and the move REPLACES it whole —
             // so the result is exactly this export, never a mix with a previous one.
-            File.Move(scratchZip, zipPath, overwrite: true);
+            File.Move(scratchZip, destination, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
