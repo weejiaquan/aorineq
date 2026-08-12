@@ -757,7 +757,11 @@ public partial class App : System.Windows.Application
             _eqEditor = new EqEditorWindow(
                 () => _settings,
                 () => _deviceStates.ActiveId,
-                () => SystemModeActive ? null : ActiveState.CurrentDb);
+                deviceId => SystemModeActive || deviceId is null
+                    ? null
+                    : _deviceStates.Snapshot().TryGetValue(deviceId, out var v)
+                        ? VolumeState.ToDb(v.Percent, v.Muted)
+                        : 0.0);
             _eqEditor.ScopeChanged += OnEqScopeChanged;
             _eqEditor.Closed += (_, _) => _eqEditor = null;
             if (_writer is null)
