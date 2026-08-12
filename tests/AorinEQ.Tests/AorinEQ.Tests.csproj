@@ -21,6 +21,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Test collections run one at a time. This suite does not mock: it spawns schtasks.exe,
+         writes the real registry, drives real COM and, in one test, sets the process-wide current
+         directory. Process CWD is not a per-collection thing - while it points at a test's scratch
+         folder, any child process another collection starts inherits it and HOLDS that folder open,
+         so the owning test's cleanup fails with "used by another process". That was reproducible
+         here roughly one run in four, and it is exactly the kind of failure that teaches people to
+         re-run a red build instead of reading it. -->
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- AppIconTests loads the shipped .ico through the two frameworks that do so at runtime:
          WIC/WPF for the windows' Icon, System.Drawing for the tray's HICON. Referencing the
          assemblies directly rather than via UseWPF/UseWindowsForms keeps this project's
@@ -42,21 +53,10 @@
          rather than a copy of it. Nothing else in the build reads this file. -->
     <None Include="..\..\installer\AorinEQ.iss" Link="AorinEQ.iss"
           CopyToOutputDirectory="PreserveNewest" />
-    <!-- And the real build files, so VersionSingleSourceTests reads the version the build actually
-         imports and the project bodies that must not override it. MSBuild only ever looks for
-         Directory.Build.props by walking UP from a project directory, so the copy that lands in
-         bin\ is inert. -->
-    <None Include="..\..\Directory.Build.props" Link="Directory.Build.props"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\src\AorinEQ\AorinEQ.csproj" Link="AorinEQ.csproj"
-          CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\src\AorinEQ.Core\AorinEQ.Core.csproj" Link="AorinEQ.Core.csproj"
-          CopyToOutputDirectory="PreserveNewest" />
-    <!-- The SDK's default None glob excludes the project file itself, so this is an Include like
-         the rest and not a duplicate item. -->
-    <None Include="AorinEQ.Tests.csproj" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\..\tools\AppIconGen\AppIconGen.csproj" Link="AppIconGen.csproj"
-          CopyToOutputDirectory="PreserveNewest" />
+    <!-- Directory.Build.props and the project files are deliberately NOT linked here:
+         VersionSingleSourceTests walks the repository for them instead, because a list fixed at
+         build time cannot express "no project, including one added later, redeclares the
+         version". -->
   </ItemGroup>
 
 </Project>

@@ -1,8 +1,8 @@
-# The .sha256 sidecar guard, in one place.
+# The checks a release has to pass, in one place.
 #
-# Dot-source this file to get the two functions. It is shared by publish.ps1 (which WRITES the
-# sidecars a release ships) and by .github/workflows/release.yml (which, after uploading, downloads
-# the assets back off the release and checks the bytes GitHub actually stored). Both therefore parse
+# Dot-source this file to get the functions. It is shared by publish.ps1 (which WRITES the sidecars
+# a release ships) and by .github/workflows/release.yml (which, after uploading, downloads the
+# assets back off the release and checks the bytes GitHub actually stored). Both therefore parse
 # a sidecar the way the SHIPPED UpdateChecker.ParseSha256Text parses it, rather than the way the
 # writer intended it - which is the whole point of the guard, and the reason it is not written twice.
 #
@@ -53,4 +53,28 @@ function Publish-Sha256Sidecar {
     Set-Content -Path "$Path.sha256" -Value "$hash *$name" -NoNewline -Encoding ascii
 
     return Test-Sha256Sidecar -Path $Path
+}
+
+# The version a built file carries, as Major.Minor.Build.
+#
+# Everything version-shaped in this product is written three different ways for good reasons, and
+# comparing them naively throws a false mismatch: the SDK stamps the exe "3.3.0.0", Inno stamps the
+# setup "3.3.0" (so a [Version] equality test fails on two identical versions), and a release tag is
+# "v3.3.0" or "v3.3.0-rc1". Reduce all of them to three parts and compare those.
+function Get-ShortVersion {
+    param([Parameter(Mandatory)][string] $Path)
+
+    $v = [Version](Get-Item $Path).VersionInfo.FileVersion
+    return "$($v.Major).$($v.Minor).$([Math]::Max($v.Build, 0))"
+}
+
+# The same three parts, out of a release tag: v3.3.0 -> 3.3.0, v3.3.0-rc1 -> 3.3.0.
+function Get-TagVersion {
+    param([Parameter(Mandatory)][string] $Tag)
+
+    $version = ($Tag -replace '^v', '') -replace '-.*$', ''
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+        throw "release tag '$Tag' does not name a version: expected vMAJOR.MINOR.PATCH, optionally with a -suffix."
+    }
+    return $version
 }

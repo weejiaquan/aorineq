@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The same gate a pull request passes - the whole suite, at -warnaserror, on a clean runner.
+  # The same gate a pull request passes - the suite, at -warnaserror, on a clean runner.
   # A failure here means no release is created at all.
   gate:
     permissions:
@@ -39,15 +39,34 @@ jobs:
     runs-on: windows-latest
     # The only elevated scope in either workflow, and the narrowest one that can create a release
     # and upload assets. No packages, no id-token, no actions, and no secret beyond the automatic
-    # GITHUB_TOKEN - nothing here talks to anything but this repository's own releases.
+    # GITHUB_TOKEN - nothing here talks to anything but this repository's own releases. GH_TOKEN is
+    # granted per step, to the three that call gh, rather than to the whole job: the build steps
+    # run repository-controlled scripts and have no business holding a write-capable token.
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      # Full history, so the tagged commit can be proven to be on master below.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      # A tag is not a review. Anyone who can push a tag could otherwise ship a commit that never
+      # went through a pull request - and, less dramatically but more likely, this is the check that
+      # catches tagging a commit a rebase has replaced. That has happened here: a release was once
+      # published stamped with a commit hash nobody else had, which is the same dishonesty the
+      # digest check exists to prevent. Tag AFTER the merge.
+      - name: Refuse a tag that is not on master
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin master
+          if ($LASTEXITCODE -ne 0) { throw "could not fetch origin/master" }
+          git merge-base --is-ancestor HEAD FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) {
+              throw "$env:GITHUB_REF_NAME points at $env:GITHUB_SHA, which is not on master. Merge first, then tag the merged commit."
+          }
+          "$env:GITHUB_REF_NAME -> $env:GITHUB_SHA is contained in master"
+
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -63,27 +82,48 @@ jobs:
       - name: Publish the four assets
         run: ./publish.ps1
 
-      # publish.ps1 has already generated each sidecar and verified it as shipped. This asserts the
-      # other half of the contract - that the files it produced are the four named ones - before
-      # anything is uploaded.
-      - name: Check the asset name contract
+      # publish.ps1 has already generated each sidecar and verified it as shipped, and refused to
+      # continue unless the installer's version matches the exe it carries. Two things it cannot
+      # know are checked here, before anything is uploaded: that the files are the four named ones,
+      # and that the tag names the version that was actually built. Tagging v9.9.9 on a 3.3.0 commit
+      # would otherwise publish a release whose title contradicts every binary in it.
+      - name: Check the asset name and version contracts
         shell: pwsh
         run: |
+          . ./tools/ReleaseChecks.ps1
+
           $expected = @('AorinEQ.exe', 'AorinEQ.exe.sha256', 'AorinEQ-Setup.exe', 'AorinEQ-Setup.exe.sha256')
           $actual = (Get-ChildItem publish -File | Select-Object -ExpandProperty Name | Sort-Object)
           $missing = $expected | Where-Object { $_ -notin $actual }
-          if ($missing) { throw "publish.ps1 did not produce: $($missing -join ', '). The asset names are a contract - see the header of this workflow." }
+          if ($missing) {
+              throw "publish.ps1 did not produce: $($missing -join ', '). The asset names are a contract - see the header of this workflow."
+          }
           foreach ($name in $expected) { "{0,-26} {1,12} bytes" -f $name, (Get-Item "publish/$name").Length }
+
+          $tagVersion = Get-TagVersion -Tag $env:GITHUB_REF_NAME
+          $exeVersion = Get-ShortVersion -Path 'publish/AorinEQ.exe'
+          if ($tagVersion -ne $exeVersion) {
+              throw "tag $env:GITHUB_REF_NAME names version $tagVersion but the exe that was built is $exeVersion. Bump Directory.Build.props, or tag the version you meant."
+          }
+          "tag $env:GITHUB_REF_NAME matches the built version $exeVersion"
 
       # Created as a DRAFT, so the assets are verified as GitHub stored them BEFORE the release
       # becomes visible to the updater or the website. A failure in the next step leaves a draft
       # nobody can download rather than a published release with a digest that does not match.
+      #
+      # Deliberately NOT idempotent: re-running after a failure here stops at "a release with that
+      # tag already exists" rather than uploading over it. Clobbering an existing release is the one
+      # operation in this pipeline that could destroy something users depend on, and it is worth a
+      # human deleting the draft by hand.
       - name: Create the draft release
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = $env:GITHUB_REF_NAME
           $ghArgs = @('release', 'create', $tag, '--draft', '--title', $tag, '--generate-notes')
-          # A tag like v1.2.3-rc1 or v0.0.0-ci-test is a pre-release; a plain vMAJOR.MINOR.PATCH is not.
+          # A tag like v3.3.0-rc1 is a pre-release; a plain vMAJOR.MINOR.PATCH is not. GitHub's
+          # "latest", which the in-app updater reads, excludes both drafts and pre-releases.
           if ($tag -match '-') { $ghArgs += '--prerelease' }
           $ghArgs += @(
               'publish/AorinEQ.exe', 'publish/AorinEQ.exe.sha256',
@@ -96,8 +136,10 @@ jobs:
       # the same rules the shipped UpdateChecker.ParseSha256Text uses - describes them.
       - name: Verify the published assets
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          . ./tools/Sha256Sidecar.ps1
+          . ./tools/ReleaseChecks.ps1
           $tag = $env:GITHUB_REF_NAME
           gh release download $tag --dir verify --clobber
           if ($LASTEXITCODE -ne 0) { throw "gh release download failed with exit code $LASTEXITCODE" }
@@ -119,6 +161,8 @@ jobs:
       # Only now is it a release. Everything above has to have passed for this line to run.
       - name: Publish the release
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release edit $env:GITHUB_REF_NAME --draft=false
           if ($LASTEXITCODE -ne 0) { throw "gh release edit failed with exit code $LASTEXITCODE" }
@@ -137,7 +181,7 @@ jobs:
       #
       #   1. sign publish\AorinEQ.exe        after `dotnet publish`, BEFORE ISCC packages it
       #   2. sign publish\AorinEQ-Setup.exe  after ISCC produces it
-      #   3. regenerate both sidecars        Publish-Sha256Sidecar (tools/Sha256Sidecar.ps1) is
+      #   3. regenerate both sidecars        Publish-Sha256Sidecar (tools/ReleaseChecks.ps1) is
       #                                      idempotent and re-verifies as shipped, so calling it
       #                                      again over the signed bytes is the whole of step 3
       #
@@ -154,10 +198,11 @@ jobs:
       #     (actions/upload-artifact -> signpath/github-action-submit-signing-request ->
       #     the signed artifact comes back), so the two anchor points become two calls to
       #     publish.ps1 split at the ISCC boundary (-SkipInstaller, then -InstallerOnly) with the
-      #     SignPath action in between, and a final -InstallerOnly-side signing round for the setup.
-      #     Add `id-token: write` to THIS job's permissions (SignPath's action authenticates the
+      #     SignPath action in between, and a second SignPath round for the setup. Add
+      #     `id-token: write` to THIS job's permissions (SignPath's action authenticates the
       #     workflow run via the GitHub OIDC token) plus the SIGNPATH_API_TOKEN secret, and register
       #     this file's path and the v* tag as the trusted build in the SignPath project. Nothing
-      #     else in this workflow changes: the name contract, the draft-then-verify ordering and the
-      #     post-upload verification all still apply, and they now cover the signed bytes.
+      #     else in this workflow changes: the name and version contracts, the draft-then-verify
+      #     ordering and the post-upload verification all still apply, and they then cover the
+      #     signed bytes.
       # ------------------------------------------------------------------------------------------

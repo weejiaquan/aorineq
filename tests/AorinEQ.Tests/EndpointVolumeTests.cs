@@ -8,6 +8,7 @@ namespace AorinEQ.Tests;
 /// <summary>Real COM tests against this machine's default render endpoint (repo convention: no
 /// mocks) — they audibly move the actual Windows volume while running. Every test that changes
 /// state snapshots the endpoint's initial volume/mute first and RESTORES it in finally.</summary>
+[Trait(Requires.Key, Requires.AudioEndpoint)]
 public class EndpointVolumeTests
 {
     private readonly ITestOutputHelper _out;

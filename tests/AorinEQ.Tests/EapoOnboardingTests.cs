@@ -14,6 +14,7 @@ public class EapoOnboardingTests
     public EapoOnboardingTests(ITestOutputHelper output) => _out = output;
 
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
     public void GetInstallPath_finds_the_real_install()
     {
         var path = EapoDetection.GetInstallPath();
@@ -23,6 +24,7 @@ public class EapoOnboardingTests
     }
 
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
     public void GetConfiguratorPath_points_at_an_existing_exe()
     {
         var path = EapoDetection.GetConfiguratorPath();
@@ -33,6 +35,7 @@ public class EapoOnboardingTests
     }
 
     [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void Default_render_endpoint_id_resolves_and_has_a_guid_tail()
     {
         var id = AudioEndpoint.GetDefaultRenderEndpointId();
@@ -56,6 +59,9 @@ public class EapoOnboardingTests
     }
 
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
+    // Active means active ON THE DEFAULT DEVICE, so this one needs both.
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void Detect_reports_active_on_this_machine()
     {
         // This dev machine runs AorinEQ against a working EAPO on the default device.
