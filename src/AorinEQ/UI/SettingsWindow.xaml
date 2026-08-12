@@ -17,10 +17,31 @@
     <Window.Resources>
         <!-- The card idiom for a settings row: icon + title + subtitle on the left, control on the
              right. Applied to every CardControl so the six sections stay visually identical. -->
-        <Thickness x:Key="RowMargin">0,0,0,8</Thickness>
+        <!-- Cards inside a group sit tight; the air goes ABOVE the group heading instead, which
+     is what makes a heading read as owning the cards under it rather than floating
+     between them. Win11 Settings proportions. -->
+        <Thickness x:Key="RowMargin">0,0,0,4</Thickness>
+        <!-- Foreground is set EXPLICITLY on every text style here, and must stay that way. A bare
+             ui:TextBlock that is not inside a themed container (a CardControl, say) does not
+             inherit a theme foreground at all — it falls back to black, which on this window's dark
+             Mica surface renders the page titles and group headings at 1.41:1. That is exactly the
+             bug this release shipped and had to be pixel-sampled to find, because the card headers
+             next to them looked fine. -->
+        <Style x:Key="PageTitle" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="Title" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
         <Style x:Key="SectionHeading" TargetType="ui:TextBlock">
             <Setter Property="FontTypography" Value="BodyStrong" />
-            <Setter Property="Margin" Value="2,16,0,8" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Margin" Value="0,28,0,8" />
+        </Style>
+        <!-- Card row titles. Inside a CardControl they inherit correctly today, but relying on that
+             is what produced the defect above, so they say what they mean. -->
+        <Style x:Key="RowTitle" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="Body" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
         </Style>
         <!-- The 3x3 anchor picker. WPF-UI's implicit ToggleButton style is a pill whose checked
              state is a subtle fill — readable on a toolbar, but here nine of them sit side by side
@@ -34,8 +55,28 @@
             <Setter Property="Padding" Value="0" />
             <Style.Triggers>
                 <Trigger Property="IsChecked" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                    <!-- The primary TEXT brush, not the accent: the accent is whatever the user set
+                         in Windows, and this machine's is black — an accent-filled cell on a dark
+                         card would be invisible. The text brush is the one colour guaranteed to
+                         contrast with the surface in either theme. -->
+                    <Setter Property="Background" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Selected-state colouring for the volume-mode radios, applied for the same reason as
+             AnchorCell above: WPF-UI paints a checked radio's fill from the ACCENT and its inner dot
+             from the accent's foreground. With this machine's accent (black) that is a black dot on
+             a grey ring — the selected option is invisible, which is precisely what was reported.
+             Driving the fill from the primary TEXT brush makes the dot read against it in either
+             theme, whatever accent the user has chosen. -->
+        <Style x:Key="ModeRadio" TargetType="RadioButton"
+               BasedOn="{StaticResource {x:Type RadioButton}}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource TextFillColorPrimaryBrush}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -87,40 +128,42 @@
         <Grid x:Name="SectionHolder" Grid.Row="1" Visibility="Collapsed">
 
             <!-- ============================ VOLUME ============================ -->
-            <ScrollViewer x:Name="SectionVolume" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+            <ScrollViewer x:Name="SectionVolume" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Title" Text="Volume" Margin="2,0,0,4" />
-                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
-                                  Text="How the volume keys change your loudness, and how far each press moves it." />
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="Volume" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
+                                  Text="How the volume keys change your loudness, and how far each press moves it. Both modes swallow the keys and show your own OSD; they differ in what the keys actually change." />
 
                     <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Volume control" />
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Replace Windows volume" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Replace Windows volume" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
-                                              Text="Volume keys change the normal Windows volume and show your skinned OSD instead of the Windows one. Using Equalizer APO for EQ/PEQ? Your EQ is never touched — set it once, control loudness natively." />
+                                              Text="The keys move the normal Windows volume. Any Equalizer APO EQ you have set is left untouched." />
                             </StackPanel>
                         </ui:CardControl.Header>
                         <RadioButton x:Name="SystemModeRadio" GroupName="VolumeMode"
+                                     Style="{StaticResource ModeRadio}"
                                      Checked="OnVolumeModeChanged" />
                     </ui:CardControl>
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Equalizer APO preamp slider" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Equalizer APO preamp slider" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
-                                              Text="Volume keys write Equalizer APO's preamp; Windows volume stays parked. Attenuation happens inside the APO chain before your EQ — for setups where the Windows volume path is broken or you want pre-DAC level control. Requires Equalizer APO." />
+                                              Text="The keys write Equalizer APO's preamp, attenuating before your EQ. Requires Equalizer APO." />
                             </StackPanel>
                         </ui:CardControl.Header>
                         <RadioButton x:Name="EapoModeRadio" GroupName="VolumeMode"
+                                     Style="{StaticResource ModeRadio}"
                                      Checked="OnVolumeModeChanged" />
                     </ui:CardControl>
 
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Volume key step size" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Volume key step size" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="How many percent one press of a volume key moves." />
                             </StackPanel>
@@ -135,7 +178,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Per-device volume" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Per-device volume" />
                                 <ui:TextBlock x:Name="DeviceVolumeText" Style="{StaticResource RowSubtitle}" />
                             </StackPanel>
                         </ui:CardControl.Header>
@@ -148,7 +191,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Start with Windows" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Start with Windows" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Launch AorinEQ automatically when you sign in." />
                             </StackPanel>
@@ -159,7 +202,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Run as administrator" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Run as administrator" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Required for the volume keys to work while elevated games are focused." />
                                 <ui:TextBlock x:Name="ElevationStateText" Style="{StaticResource RowSubtitle}" />
@@ -172,16 +215,16 @@
             </ScrollViewer>
 
             <!-- ============================== OSD ============================== -->
-            <ScrollViewer x:Name="SectionOsd" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+            <ScrollViewer x:Name="SectionOsd" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Title" Text="On-screen display" Margin="2,0,0,4" />
-                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="On-screen display" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
                                   Text="The overlay that appears when you press a volume key." />
 
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Style" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Style" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Pick a built-in look, or your own skin." />
                             </StackPanel>
@@ -197,7 +240,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Position" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Position" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Which screen edge or corner the OSD is anchored to." />
                             </StackPanel>
@@ -230,7 +273,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Offset" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Offset" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Nudge the OSD away from its anchor, in pixels." />
                             </StackPanel>
@@ -246,7 +289,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Hide delay" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Hide delay" />
                                 <ui:TextBlock x:Name="HideDelayLabel" Style="{StaticResource RowSubtitle}" />
                             </StackPanel>
                         </ui:CardControl.Header>
@@ -257,7 +300,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Animate fade-out" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Animate fade-out" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Fade the OSD away instead of hiding it instantly." />
                             </StackPanel>
@@ -269,7 +312,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Animation duration" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Animation duration" />
                                 <ui:TextBlock x:Name="AnimationDurationLabel" Style="{StaticResource RowSubtitle}" />
                             </StackPanel>
                         </ui:CardControl.Header>
@@ -280,16 +323,16 @@
             </ScrollViewer>
 
             <!-- ============================= SKINS ============================= -->
-            <ScrollViewer x:Name="SectionSkins" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+            <ScrollViewer x:Name="SectionSkins" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Title" Text="Skins" Margin="2,0,0,4" />
-                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="Skins" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
                                   Text="Custom OSD artwork. Skins are folders of images — design your own, or install one someone shared." />
 
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Active skin" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Active skin" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Used when the OSD style is set to Custom skin." />
                             </StackPanel>
@@ -300,13 +343,13 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Manage skins" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Manage skins" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Design a new skin, install one shared as a zip, or open the folder they live in." />
                             </StackPanel>
                         </ui:CardControl.Header>
                         <StackPanel Orientation="Horizontal">
-                            <ui:Button x:Name="SkinDesignerButton" Appearance="Primary" Content="Skin designer"
+                            <ui:Button x:Name="SkinDesignerButton" Content="Skin designer"
                                        Icon="{ui:SymbolIcon PaintBrush24}" Click="OnOpenSkinDesigner" />
                             <ui:Button x:Name="ImportSkinButton" Content="Import…" Margin="8,0,0,0"
                                        Icon="{ui:SymbolIcon ArrowDownload24}" Click="OnImportSkin"
@@ -321,7 +364,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Enable aorineq:// links" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Enable aorineq:// links" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Install shared skins and EQ presets straight from websites — always asks first." />
                             </StackPanel>
@@ -333,37 +376,37 @@
             </ScrollViewer>
 
             <!-- =========================== EQUALIZER =========================== -->
-            <ScrollViewer x:Name="SectionEqualizer" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+            <ScrollViewer x:Name="SectionEqualizer" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Title" Text="Equalizer" Margin="2,0,0,4" />
-                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="Equalizer" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
                                   Text="Per-device parametric EQ with presets, AutoEq profiles and live meters." />
 
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Equalizer editor" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Equalizer editor" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Draggable curve, band strip, presets, AutoEq import and post-EQ meters." />
                             </StackPanel>
                         </ui:CardControl.Header>
-                        <ui:Button x:Name="OpenEqualizerButton" Appearance="Primary" Content="Open equalizer"
+                        <ui:Button x:Name="OpenEqualizerButton" Content="Open equalizer"
                                    Icon="{ui:SymbolIcon Options24}" Click="OnOpenEqualizer" />
                     </ui:CardControl>
                 </StackPanel>
             </ScrollViewer>
 
             <!-- ============================ UPDATES ============================ -->
-            <ScrollViewer x:Name="SectionUpdates" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+            <ScrollViewer x:Name="SectionUpdates" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Title" Text="Updates" Margin="2,0,0,4" />
-                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="Updates" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
                                   Text="AorinEQ updates itself in place from its GitHub releases." />
 
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Keep AorinEQ up to date" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Keep AorinEQ up to date" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="Check for a new version at startup and once a day, and install it automatically." />
                             </StackPanel>
@@ -375,7 +418,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Check for updates" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Check for updates" />
                                 <ui:TextBlock x:Name="UpdateStatusText" Style="{StaticResource RowSubtitle}" />
                             </StackPanel>
                         </ui:CardControl.Header>
@@ -386,20 +429,25 @@
             </ScrollViewer>
 
             <!-- ============================= ABOUT ============================= -->
-            <ScrollViewer x:Name="SectionAbout" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+            <ScrollViewer x:Name="SectionAbout" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
-                    <ui:TextBlock FontTypography="Title" Text="About" Margin="2,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="About" />
 
                     <ui:CardControl Margin="0,8,0,8">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock x:Name="VersionText" FontTypography="Body" />
+                                <ui:TextBlock x:Name="VersionText" Style="{StaticResource RowTitle}" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="A skinnable volume OSD and parametric equalizer for Windows." />
                             </StackPanel>
                         </ui:CardControl.Header>
+                        <!-- Primary text, not the accent text brush. A hyperlink normally takes the
+                             accent, but the accent is the user's choice and this machine's is black:
+                             the link measured 2.37:1 against its card. A link nobody can read is not
+                             a link, so legibility wins over the convention. -->
                         <ui:HyperlinkButton Content="View on GitHub"
                                             NavigateUri="https://github.com/weejiaquan/aorineq"
+                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                                             Icon="{ui:SymbolIcon Open24}" />
                     </ui:CardControl>
 
@@ -407,7 +455,7 @@
                     <ui:CardControl Margin="{StaticResource RowMargin}">
                         <ui:CardControl.Header>
                             <StackPanel>
-                                <ui:TextBlock FontTypography="Body" Text="Status" />
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Status" />
                                 <ui:TextBlock x:Name="EapoStatusText" Style="{StaticResource RowSubtitle}" />
                             </StackPanel>
                         </ui:CardControl.Header>

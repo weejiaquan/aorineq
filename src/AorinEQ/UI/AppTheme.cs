@@ -47,8 +47,17 @@ public sealed class AppTheme : IDisposable
         SystemTheme.AppsUseLightTheme() ? ApplicationTheme.Light : ApplicationTheme.Dark;
 
     /// <summary>Pushes the current Windows theme into WPF-UI's resource dictionaries. <c>true</c>
-    /// updates the accent from the system's, which is what makes the chrome pick up a user's
-    /// accent colour change without a restart.</summary>
+    /// updates the accent from the system's, which is what makes the chrome follow a user's accent
+    /// change without a restart.
+    ///
+    /// A NOTE FOR THE NEXT PERSON WHO SEES GREY WHERE THEY EXPECTED BLUE: that is not a bug here.
+    /// The accent-derived brushes resolve from the user's ACTUAL Windows accent, and this project's
+    /// machine has it set to black — so WPF-UI derives greys, correctly. Do not "fix" it by feeding
+    /// ApplicationAccentColorManager a colour of your own; that was tried, and deriving from the raw
+    /// DWM value produced a near-black #2B2B2B accent, worse than what it replaced. What DOES need
+    /// handling is the consequence: anything whose legibility depends on the accent has to work when
+    /// the accent is black or white, which is why nothing in Settings is styled with an accent
+    /// brush alone.</summary>
     private static void ApplyCurrent() => ApplicationThemeManager.Apply(Current, Backdrop, updateAccent: true);
 
     private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
