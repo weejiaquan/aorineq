@@ -11,8 +11,9 @@ namespace AorinEQ;
 
 public partial class App : System.Windows.Application
 {
-    private const string MutexName = "AorinEQ_SingleInstance";
-    private const string ShowEventName = "AorinEQ_ShowOsd";
+    // Spelled once, in Core, because the installer's AppMutex has to match it — see AppIdentity.
+    private const string MutexName = AppIdentity.SingleInstanceMutexName;
+    private const string ShowEventName = AppIdentity.ShowOsdEventName;
 
     private Mutex? _mutex;
     private bool _ownsMutex;

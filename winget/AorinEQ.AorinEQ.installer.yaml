@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+#
+# Scope is `user` and ElevationRequirement is `elevationProhibited` because the installer is
+# PrivilegesRequired=lowest and installs into %LOCALAPPDATA%\Programs\AorinEQ. That is not a
+# packaging convenience: the in-app updater swaps the running exe in place and needs a writable
+# install directory. Running this elevated would put the app somewhere winget's own upgrade path
+# still works but the app's does not.
+#
+# ProductCode is the Inno Setup AppId with its "_is1" suffix - the key Inno registers under
+# HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall - so winget matches an existing install
+# and upgrades it rather than installing a second copy.
+
+PackageIdentifier: AorinEQ.AorinEQ
+PackageVersion: 3.3.0
+InstallerType: inno
+Scope: user
+ElevationRequirement: elevationProhibited
+UpgradeBehavior: install
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+ProductCode: '{CB5FD219-9B9D-4DE1-9FEC-E94B0963E6A1}_is1'
+ReleaseDate: 2026-08-12
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/weejiaquan/aorineq/releases/download/v3.3.0/AorinEQ-Setup.exe
+    InstallerSha256: 10B7AFBCA1EB15B341CD01C10F6B95398405B742557F9480AF519672F59CDEF5
+ManifestType: installer
+ManifestVersion: 1.6.0

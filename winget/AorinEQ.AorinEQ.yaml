@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
+#
+# Prepared for submission to microsoft/winget-pkgs, NOT yet submitted - that is an outward-facing
+# contribution under the repository owner's identity and waits on their explicit go-ahead.
+#
+# Validate locally with:  winget validate --manifest winget
+# Install from here with: winget install --manifest winget
+
+PackageIdentifier: AorinEQ.AorinEQ
+PackageVersion: 3.3.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0
