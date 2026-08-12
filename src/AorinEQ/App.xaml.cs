@@ -80,6 +80,12 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // ONE-TIME v3.0.0 rename migration, before ANYTHING reads per-user state: the folder the
+        // settings path below points at only holds this machine's history once the old
+        // %APPDATA%\apo-volume content has been moved into it. Idempotent and non-throwing, so
+        // every later start pays one directory probe and nothing else.
+        AppDataMigration.Run(AppDataMigration.LegacyRoot, ApoPaths.GetStateRoot());
+
         // Settings must be loaded before the elevation bounce below decides whether to relaunch.
         _settingsPath = Path.Combine(ApoPaths.GetStateRoot(), "settings.json");
         bool firstRun = !File.Exists(_settingsPath); // brand-new install: mode-choice onboarding below
