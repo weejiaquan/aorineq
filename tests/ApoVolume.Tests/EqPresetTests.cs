@@ -135,6 +135,89 @@ public class EqPresetTests
     }
 
     [Fact]
+    public void TryParse_roundtrips_a_serialized_scope_identically()
+    {
+        var original = new EqPreset("scope", -4.5, new[]
+        {
+            new EqBand(EqBandType.LowShelf, 105, 6.4, 0.7),
+            new EqBand(EqBandType.Peak, 1000, -3.5, 2.0),
+            new EqBand(EqBandType.HighShelf, 10000, -2.1, 0.7),
+            new EqBand(EqBandType.Notch, 60, 0, 30),
+            new EqBand(EqBandType.LowPass, 16000, 0, 0.71),
+        });
+        var text = original.Serialize();
+        _out.WriteLine(text);
+        Assert.True(EqPreset.TryParse("scope", text, out var parsed, out var error));
+        Assert.Null(error);
+        Assert.Equal(original.PreampDb, parsed.PreampDb, 3);
+        Assert.Equal(original.Bands, parsed.Bands); // records: full structural equality
+    }
+
+    [Fact]
+    public void TryParse_accepts_real_world_variations()
+    {
+        var text = "# my EQ\r\n\r\nPreamp: -6.1 dB\r\n"
+            + "Filter 1: ON PK Fc 1000 Hz Gain 3.0 dB Q 1.00\r\n"
+            + "Filter 2: OFF PK Fc 2000 Hz Gain -3.0 dB Q 1.00\r\n"
+            + "Filter 3: None\r\n";
+        Assert.True(EqPreset.TryParse("t", text, out var preset, out var error));
+        _out.WriteLine($"error={error ?? "<none>"} bands={preset.Bands.Count}");
+        Assert.Null(error);
+        Assert.Equal(-6.1, preset.PreampDb, 3);
+        var band = Assert.Single(preset.Bands); // OFF and None contribute nothing
+        Assert.Equal(1000, band.Fc, 3);
+    }
+
+    [Theory]
+    [InlineData("Filter 1: ON XX Fc 1000 Hz Gain 3.0 dB Q 1.0", "unsupported filter type")]
+    [InlineData("Filter 1: ON PK Gain 3.0 dB Q 1.0", "missing 'Fc")]
+    [InlineData("Preamp: abc dB", "expected a number")]
+    [InlineData("total nonsense here", "expected a 'Filter")]
+    [InlineData("Filter 1: MAYBE PK Fc 100 Hz Gain 1 dB Q 1", "expected ON, OFF or None")]
+    [InlineData("Filter 1", "missing ':'")]
+    public void TryParse_reports_the_failing_line_and_applies_nothing(string bad, string expectedFragment)
+    {
+        var text = "Preamp: -2.0 dB\nFilter 1: ON PK Fc 500 Hz Gain 1.0 dB Q 1.00\n" + bad;
+        Assert.False(EqPreset.TryParse("t", text, out var preset, out var error));
+        _out.WriteLine($"'{bad}' -> {error}");
+        Assert.NotNull(error);
+        Assert.Contains(expectedFragment, error);
+        Assert.Contains("Line 3", error); // 1-based line number of the offending line
+        // Nothing partially applied: the good lines before the failure are discarded too.
+        Assert.Empty(preset.Bands);
+        Assert.Equal(0, preset.PreampDb);
+    }
+
+    [Fact]
+    public void Flatten_zeroes_gains_without_dropping_bands()
+    {
+        var bands = new[]
+        {
+            new EqBand(EqBandType.LowShelf, 105, 6.4, 0.7),
+            new EqBand(EqBandType.Peak, 1000, -3.5, 2.0),
+            new EqBand(EqBandType.Notch, 60, 0, 30),
+        };
+        var flat = EqPreset.Flatten(bands);
+        foreach (var b in flat) _out.WriteLine($"{b.Type} Fc={b.Fc} Gain={b.GainDb} Q={b.Q}");
+        Assert.Equal(3, flat.Count);
+        Assert.All(flat, b => Assert.Equal(0, b.GainDb));
+        // Type, Fc and Q are untouched, so the shape can be re-edited afterwards.
+        for (int i = 0; i < bands.Length; i++)
+        {
+            Assert.Equal(bands[i].Type, flat[i].Type);
+            Assert.Equal(bands[i].Fc, flat[i].Fc);
+            Assert.Equal(bands[i].Q, flat[i].Q);
+        }
+        // Flattening the gain-bearing types really does produce a flat response. (Gainless
+        // types — NO/LP/HP — shape the chain by their nature, not by gain, so they are
+        // deliberately left shaping it; Clear all bands is the action that removes those.)
+        var gainBands = flat.Where(b => b.HasGain).ToArray();
+        Assert.Equal(2, gainBands.Length);
+        var response = EqResponse.ResponseDb(gainBands, EqResponse.LogFrequencies(64));
+        Assert.All(response, db => Assert.Equal(0, db, 6));
+    }
+
+    [Fact]
     public void Parse_clamps_hostile_values()
     {
         var preset = EqPreset.Parse("t", """

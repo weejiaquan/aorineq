@@ -9,6 +9,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Scope tabs: Global + one per render device; the Windows-default device is marked. -->
@@ -48,8 +49,9 @@
             </ListBox.ItemContainerStyle>
         </ListBox>
 
-        <!-- Preset bar -->
-        <DockPanel Grid.Row="1" Margin="0,0,0,8" LastChildFill="False">
+        <!-- Preset bar. WrapPanel, not DockPanel: at narrow widths the trailing controls must
+             wrap to a second line instead of being clipped off the right edge. -->
+        <WrapPanel Grid.Row="1" Margin="0,0,0,8" Orientation="Horizontal">
             <TextBlock Text="Preset:" Foreground="#BBB" VerticalAlignment="Center" Margin="0,0,6,0" />
             <ComboBox x:Name="PresetCombo" Width="230" SelectionChanged="OnPresetSelected" />
             <Button Content="Save" Padding="10,3" Margin="6,0,0,0" Click="OnSavePreset" />
@@ -57,6 +59,12 @@
             <Button Content="Delete" Padding="10,3" Margin="4,0,0,0" Click="OnDeletePreset" />
             <Button Content="Import file…" Padding="10,3" Margin="10,0,0,0" Click="OnImportFile" />
             <Button Content="AutoEq…" Padding="10,3" Margin="4,0,0,0" Click="OnAutoEq" />
+            <Button Content="Edit as text…" Padding="10,3" Margin="10,0,0,0" Click="OnEditAsText"
+                    ToolTip="Type or paste a whole ParametricEQ block at once" />
+            <Button Content="Flatten" Padding="10,3" Margin="10,0,0,0" Click="OnFlatten"
+                    ToolTip="Set every band's gain (and this scope's preset preamp) to 0 dB" />
+            <Button Content="Clear all" Padding="10,3" Margin="4,0,0,0" Click="OnClearBands"
+                    ToolTip="Remove every band from this scope" />
             <CheckBox x:Name="EqEnabledCheck" Content="EQ enabled" Foreground="#DDD"
                       VerticalAlignment="Center" Margin="16,0,0,0" Checked="OnEqEnabledChanged"
                       Unchecked="OnEqEnabledChanged" />
@@ -64,7 +72,7 @@
                     ToolTip="Set the preset preamp to cancel the chain's maximum boost" />
             <TextBlock x:Name="PreampReadout" Foreground="#9AC" VerticalAlignment="Center"
                        Margin="12,0,0,0" />
-        </DockPanel>
+        </WrapPanel>
 
         <!-- Plot + side panel -->
         <Grid Grid.Row="2">
@@ -130,5 +138,24 @@
                 </Grid>
             </StackPanel>
         </Grid>
+
+        <!-- Peace-style band strip: one typable column per band, no fixed band count. -->
+        <Border Grid.Row="3" Background="#FF15151A" CornerRadius="6" Margin="0,8,0,0" Padding="6">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Margin="0,0,8,0" VerticalAlignment="Center">
+                    <Button x:Name="AddBandButton" Content="+" FontSize="17" FontWeight="Bold"
+                            Width="34" Height="34" Click="OnAddBand"
+                            ToolTip="Add a band (then type its frequency)" />
+                    <TextBlock x:Name="BandCountText" Foreground="#777" FontSize="10"
+                               HorizontalAlignment="Center" Margin="0,3,0,0" />
+                </StackPanel>
+                <TextBlock x:Name="StripHintText" DockPanel.Dock="Right" Foreground="#D08A50"
+                           FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"
+                           TextWrapping="Wrap" MaxWidth="150" Text="" />
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="BandStrip" Orientation="Horizontal" />
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
     </Grid>
 </Window>
