@@ -57,8 +57,12 @@ public sealed class EndpointVolume : IDisposable
     /// default-device switch. Raised on the notification worker thread, never for this instance's
     /// own sets. The endpoint id identifies WHICH device the notification came from — a
     /// notification from the previous default device can still be in flight when the switch
-    /// happens, and applying it to the new device's state would corrupt it.</summary>
-    public event Action<string?, int, bool>? Changed;
+    /// happens, and applying it to the new device's state would corrupt it.
+    ///
+    /// The id is never null: an endpoint this class could not identify is never activated (see
+    /// <see cref="GetActivation"/>), so there is no such thing here as a reading that cannot be
+    /// attributed to a device.</summary>
+    public event Action<string, int, bool>? Changed;
 
     /// <summary>The default render endpoint changed (raised BEFORE the accompanying
     /// <see cref="Changed"/>, on the notification worker thread). Both volume modes use this to
@@ -73,7 +77,7 @@ public sealed class EndpointVolume : IDisposable
     {
         _notificationClient = new NotificationClient(this);
         // Best-effort eager start so device-change tracking works even before the first
-        // set/read; on failure every public method retries via GetVolume().
+        // set/read; on failure every public method retries via GetActivation().
         lock (_lock)
         {
             EnsureEnumeratorLocked();
@@ -84,7 +88,7 @@ public sealed class EndpointVolume : IDisposable
     /// False when no endpoint is available; the next call retries activation.</summary>
     public bool SetPercent(int percent)
     {
-        var volume = GetVolume();
+        var volume = GetActivation()?.Volume;
         if (volume is null) return false;
         try
         {
@@ -111,7 +115,7 @@ public sealed class EndpointVolume : IDisposable
     /// <summary>Sets the endpoint mute state. Same error contract as <see cref="SetPercent"/>.</summary>
     public bool SetMuted(bool muted)
     {
-        var volume = GetVolume();
+        var volume = GetActivation()?.Volume;
         if (volume is null) return false;
         try
         {
@@ -136,10 +140,20 @@ public sealed class EndpointVolume : IDisposable
 
     /// <summary>Reads the endpoint's current (percent, muted), or null when no endpoint is
     /// available (retried lazily on the next call).</summary>
-    public (int Percent, bool Muted)? TryRead()
+    public (int Percent, bool Muted)? TryRead() =>
+        TryReadStamped() is { } read ? (read.Percent, read.Muted) : null;
+
+    /// <summary>The same read, carrying the endpoint id of the activation it actually came from.
+    ///
+    /// The id and the volume object are taken together under the lock, so the two always describe
+    /// the SAME activation. Reading <see cref="_volumeDeviceId"/> afterwards instead would be a
+    /// race: another thread's failed call can <see cref="DropVolume"/> and re-activate between the
+    /// read and the stamp, and the reading would go out labelled with a device it did not come
+    /// from — or with none at all.</summary>
+    private (string DeviceId, int Percent, bool Muted)? TryReadStamped()
     {
-        var volume = GetVolume();
-        if (volume is null) return null;
+        var activation = GetActivation();
+        if (activation is not var (volume, deviceId)) return null;
         try
         {
             if (volume.GetMasterVolumeLevelScalar(out float scalar) < 0)
@@ -152,7 +166,7 @@ public sealed class EndpointVolume : IDisposable
                 DropVolume();
                 return null;
             }
-            return (ScalarToPercent(scalar), muted != 0);
+            return (deviceId, ScalarToPercent(scalar), muted != 0);
         }
         catch (COMException)
         {
@@ -230,14 +244,24 @@ public sealed class EndpointVolume : IDisposable
         catch (InvalidCastException) { }
     }
 
-    /// <summary>The activated endpoint-volume interface for the CURRENT default render device,
-    /// activating (and registering the volume-change callback) lazily. Null when unavailable.</summary>
-    private IAudioEndpointVolume? GetVolume()
+    /// <summary>The endpoint-volume interface for the CURRENT default render device TOGETHER WITH
+    /// the id of the endpoint it belongs to, activating (and registering the volume-change
+    /// callback) lazily. Null when unavailable.
+    ///
+    /// The pair is returned, rather than the volume alone plus a field read afterwards, so callers
+    /// cannot accidentally label a reading with a different activation than it came from.
+    ///
+    /// AN ENDPOINT WHOSE ID CANNOT BE READ IS NOT ACTIVATED. Everything built on this class is
+    /// per-device — which device a notification belongs to decides whose saved volume it becomes —
+    /// so an endpoint that cannot say what it is cannot take part. Failing here keeps the lazy
+    /// retry contract (the next call tries again) instead of producing a stream of readings nobody
+    /// downstream is able to attribute.</summary>
+    private (IAudioEndpointVolume Volume, string DeviceId)? GetActivation()
     {
         lock (_lock)
         {
             if (_disposed) return null;
-            if (_volume is not null) return _volume;
+            if (_volume is not null && _volumeDeviceId is not null) return (_volume, _volumeDeviceId);
             EnsureEnumeratorLocked();
             if (_enumerator is null) return null;
             try
@@ -254,7 +278,8 @@ public sealed class EndpointVolume : IDisposable
                         return null;
                     // Read the id BEFORE registering: the callback must be able to name its own
                     // endpoint from the moment it can fire.
-                    string? deviceId = ReadDeviceId(device);
+                    if (ReadDeviceId(device) is not { } deviceId)
+                        return null;
                     var volume = (IAudioEndpointVolume)Marshal.GetObjectForIUnknown(ptr);
                     var callback = new VolumeCallback(this, deviceId);
                     if (volume.RegisterControlChangeNotify(callback) < 0)
@@ -265,7 +290,7 @@ public sealed class EndpointVolume : IDisposable
                     _volumeCallback = callback;
                     _volumeDeviceId = deviceId;
                     _volume = volume;
-                    return _volume;
+                    return (volume, deviceId);
                 }
                 finally
                 {
@@ -328,7 +353,7 @@ public sealed class EndpointVolume : IDisposable
     /// activation. NOT re-read from the instance: a notification that was already travelling when
     /// the default device changed would otherwise be stamped with the device that replaced it, and
     /// the old device's volume would be written into the new one's state.</param>
-    private void OnVolumeNotification(IntPtr data, string? deviceId)
+    private void OnVolumeNotification(IntPtr data, string deviceId)
     {
         if (data == IntPtr.Zero || _disposed) return;
         AudioVolumeNotificationData notification;
@@ -380,18 +405,18 @@ public sealed class EndpointVolume : IDisposable
         if (_disposed) return;
         DefaultDeviceChanged?.Invoke();
         if (_disposed) return;
-        // TryRead re-activates on the NEW endpoint first, so _volumeDeviceId names it.
-        if (TryRead() is { } state)
-            Changed?.Invoke(_volumeDeviceId, state.Percent, state.Muted);
+        // Stamped from the activation the reading came from, not from a field read afterwards.
+        if (TryReadStamped() is { } state)
+            Changed?.Invoke(state.DeviceId, state.Percent, state.Muted);
     }
 
     /// <summary>One per activation, carrying the endpoint id it was registered against.</summary>
     private sealed class VolumeCallback : IAudioEndpointVolumeCallback
     {
         private readonly EndpointVolume _owner;
-        private readonly string? _deviceId;
+        private readonly string _deviceId;
 
-        public VolumeCallback(EndpointVolume owner, string? deviceId)
+        public VolumeCallback(EndpointVolume owner, string deviceId)
         {
             _owner = owner;
             _deviceId = deviceId;
