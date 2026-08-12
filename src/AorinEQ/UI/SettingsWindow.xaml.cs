@@ -30,6 +30,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// on Loaded. Null once it has been.</summary>
     private string? _pendingSection;
 
+    /// <summary>Whether <see cref="_pendingSection"/> should also take keyboard focus.</summary>
+    private bool _pendingFocus;
+
     public event Action<bool>? AutostartChanged;
     public event Action<bool>? RunAsAdminChanged;
 
@@ -128,10 +131,14 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// constructor throws. The request is therefore recorded and applied on Loaded. That also
     /// makes a deep link that arrives while Settings is still opening land on the right section
     /// instead of being lost.</summary>
-    public void Navigate(string section)
+    /// <param name="focusPrimary">Also move keyboard focus to the section's main control. Set for
+    /// deep links, which used to land the caret ON the thing the link is about; left off when the
+    /// user clicks the sidebar, where stealing focus into a combo box would be surprising.</param>
+    public void Navigate(string section, bool focusPrimary = false)
     {
         if (!_sections.ContainsKey(section)) return;
         _pendingSection = section;
+        _pendingFocus = focusPrimary;
         if (IsLoaded) ApplyPendingSection();
     }
 
@@ -139,12 +146,37 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_pendingSection is not { } section || !_sections.TryGetValue(section, out var body)) return;
         _pendingSection = null;
+        bool focusPrimary = _pendingFocus;
+        _pendingFocus = false;
 
         // ReplaceContent does not raise SelectionChanged, so the sidebar is set separately; doing
         // it in this order means the handler below is a no-op when the user drives the sidebar.
         Nav.ReplaceContent(body);
         var item = NavItemFor(section);
         foreach (var other in NavItems()) other.IsActive = ReferenceEquals(other, item);
+
+        if (focusPrimary) FocusPrimaryControl(section);
+    }
+
+    /// <summary>Focus target for a deep link: the one control the linked-to section is about.
+    /// Queued at Loaded priority because the frame has only just been given the section and its
+    /// content is not focusable until the layout pass has run.</summary>
+    private void FocusPrimaryControl(string section)
+    {
+        FrameworkElement? primary = section switch
+        {
+            SettingsSections.Skins => SkinCombo,
+            SettingsSections.Osd => StyleCombo,
+            SettingsSections.Updates => CheckUpdatesButton,
+            SettingsSections.Equalizer => OpenEqualizerButton,
+            _ => null,
+        };
+        if (primary is null) return;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            primary.BringIntoView();
+            primary.Focus();
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private IEnumerable<Wpf.Ui.Controls.NavigationViewItem> NavItems() =>
