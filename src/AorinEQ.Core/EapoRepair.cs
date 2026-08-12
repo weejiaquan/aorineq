@@ -69,6 +69,11 @@ public enum EapoRepairOutcome
     Refused,
     /// <summary>Written, verification failed, and the endpoint was put back exactly as it was.</summary>
     RevertedAfterFailure,
+    /// <summary>The settings ARE back, but the audio stack did not come back up with them — so
+    /// Windows may still be running the endpoint the old way, or not at all. Distinct from a clean
+    /// revert because the machine still needs something (a reboot), and distinct from a failed
+    /// revert because the registry is correct. The backup is KEPT either way.</summary>
+    RevertedButAudioNotRestarted,
     /// <summary>Something went wrong that left the endpoint changed. The backup on disk is the
     /// way out, and the caller must say so rather than pretend.</summary>
     FailedAndNotReverted,
@@ -76,7 +81,10 @@ public enum EapoRepairOutcome
     Undone,
 }
 
-public sealed record EapoRepairResult(EapoRepairOutcome Outcome, string Message);
+/// <summary>How a repair ended. <paramref name="Token"/> identifies the RUN: the launching process
+/// generates it, the elevated helper echoes it back, and a verdict carrying any other token is
+/// somebody else's — see <see cref="EapoRepair.ReadResult"/>.</summary>
+public sealed record EapoRepairResult(EapoRepairOutcome Outcome, string Message, string Token = "");
 
 /// <summary>The repair itself: back up, write, restart audio, verify, and put everything back if
 /// the verification does not hold.
@@ -131,16 +139,27 @@ public static class EapoRepair
         }
     }
 
-    /// <summary>Reads and CONSUMES the helper's verdict — deleting it, so a stale result from an
-    /// earlier run can never be shown as the outcome of this one.</summary>
-    public static EapoRepairResult? TakeResult()
+    /// <summary>A fresh run identifier. Hex, fixed length, and never used as a path or a
+    /// command — the elevated helper only ever compares it and copies it back.</summary>
+    public static string NewToken() => Guid.NewGuid().ToString("N");
+
+    public static bool IsValidToken(string? token) =>
+        token is { Length: 32 } && token.All(Uri.IsHexDigit);
+
+    /// <summary>The helper's verdict FOR THIS RUN, or null.
+    ///
+    /// Matched on the token rather than consumed by deletion, because deletion is not guaranteed
+    /// to be available: the result file is written by an elevated process into a machine-wide
+    /// folder, and the unelevated app that reads it may have no right to delete somebody else's
+    /// file there. A stale verdict from an earlier run is therefore IGNORED rather than trusted
+    /// and removed — which is the property that actually matters.</summary>
+    public static EapoRepairResult? ReadResult(string token)
     {
         try
         {
             if (!File.Exists(ResultPath)) return null;
             var result = JsonSerializer.Deserialize<EapoRepairResult>(File.ReadAllText(ResultPath));
-            File.Delete(ResultPath);
-            return result;
+            return result is not null && result.Token == token ? result : null;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
@@ -201,13 +220,36 @@ public static class EapoRepair
             return new(EapoRepairOutcome.AlreadyActive,
                 "Equalizer APO is already switched on for this device.");
 
+        // An existing backup is a record that must not be destroyed. There is one slot, so a
+        // second repair would overwrite it — and if the first was INTERRUPTED, that slot is the
+        // only description of a device nothing has checked since. Refuse rather than overwrite;
+        // the only case that is safe to replace is a completed repair of this same device, whose
+        // captured "before" state is the same one being captured again.
+        if (EapoRepairBackup.Load(BackupPath) is { } existing
+            && (existing.IsInterrupted
+                || !string.Equals(existing.EndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new(EapoRepairOutcome.Refused, existing.IsInterrupted
+                ? "An earlier repair didn't finish, and AorinEQ won't start another one over it. Undo the "
+                    + "earlier repair first — that puts the device back exactly as it was."
+                : "AorinEQ is still holding an undo for a different playback device. Undo that repair "
+                    + "first, so you don't lose the ability to put it back.");
+        }
+
         var fxBefore = EapoEndpoint.ReadFxProperties(endpointGuid);
         if (EapoEndpoint.WhyNotRepairable(fxBefore, clsids) is { } refusal)
             return new(EapoRepairOutcome.Refused, refusal);
 
+        var childBefore = EapoEndpoint.ReadChildApos(endpointGuid);
+        // The same rule the endpoint's own values are held to, applied to Equalizer APO's record:
+        // a value this build could not write back would make the REVERT throw, at the one moment
+        // it must not. Checked before anything is written, so it refuses instead.
+        if (childBefore is not null && EapoEndpoint.WhyNotRestorable(childBefore) is { } childRefusal)
+            return new(EapoRepairOutcome.Refused, childRefusal);
+
         var backup = new EapoRepairBackup(
             endpointGuid, EapoRepairBackup.Applying, DateTimeOffset.UtcNow,
-            fxBefore.ToArray(), EapoEndpoint.ReadChildApos(endpointGuid)?.ToArray());
+            fxBefore.ToArray(), childBefore?.ToArray());
         try
         {
             backup.Save(BackupPath);
@@ -282,7 +324,15 @@ public static class EapoRepair
                 "AorinEQ couldn't put the device's settings back (" + ex.Message
                 + "). Equalizer APO's own Configurator can reset this device.");
         }
-        restartAudio();
+        // The restart's RESULT decides the outcome. Restoring the registry while the audio stack
+        // stays down (or stays built the old way) is not a completed undo, and deleting the backup
+        // there would throw away the only record of what to put back.
+        if (!restartAudio())
+        {
+            return new(EapoRepairOutcome.RevertedButAudioNotRestarted,
+                "The device's settings are back exactly as they were, but Windows audio couldn't be "
+                + "restarted — restart your PC to finish. AorinEQ has kept its record until then.");
+        }
         TryDeleteBackup();
         return new(EapoRepairOutcome.Undone,
             "The device's settings are back exactly as they were before the repair.");
@@ -304,7 +354,13 @@ public static class EapoRepair
                 "The repair failed because " + why + ", and AorinEQ could not undo its change ("
                 + ex.Message + "). Use Equalizer APO's Configurator to reset this device.");
         }
-        restartAudio();
+        if (!restartAudio())
+        {
+            return new(EapoRepairOutcome.RevertedButAudioNotRestarted,
+                "The repair didn't work — " + why + " — so AorinEQ put your settings back exactly as "
+                + "they were. Windows audio couldn't be restarted afterwards, so restart your PC to "
+                + "finish. AorinEQ has kept its record until then.");
+        }
         TryDeleteBackup();
         return new(EapoRepairOutcome.RevertedAfterFailure,
             "The repair didn't work — " + why + " — so AorinEQ put everything back exactly as it was. "

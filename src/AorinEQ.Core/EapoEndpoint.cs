@@ -273,11 +273,8 @@ public static class EapoEndpoint
     /// Configurator, which knows.</summary>
     public static string? WhyNotRepairable(IReadOnlyList<RegValue> fx, ApoClsids clsids)
     {
-        foreach (var value in fx)
-        {
-            if (!value.IsRestorable)
-                return $"this device has a setting AorinEQ can't safely put back ({value.Name}).";
-        }
+        if (WhyNotRestorable(fx) is { } unrestorable)
+            return unrestorable;
         foreach (var slot in ChainedSlots)
         {
             if (Find(fx, slot) is not { } present) continue;
@@ -286,6 +283,19 @@ public static class EapoEndpoint
                 continue;
             return "this device already has another audio effect installed on it. Equalizer APO's "
                 + "own Configurator knows how to add itself alongside it — use Configurator instead.";
+        }
+        return null;
+    }
+
+    /// <summary>Why this set of values could not be written back exactly as found, or null when it
+    /// could. Applied to BOTH keys a repair touches, because a value that cannot be restored makes
+    /// the REVERT throw — at the one moment it must not.</summary>
+    public static string? WhyNotRestorable(IReadOnlyList<RegValue> values)
+    {
+        foreach (var value in values)
+        {
+            if (!value.IsRestorable)
+                return $"this device has a setting AorinEQ can't safely put back ({value.Name}).";
         }
         return null;
     }
@@ -339,13 +349,19 @@ public static class EapoEndpoint
         WriteValues(key, values);
     }
 
+    /// <summary>Removes Equalizer APO's record for one endpoint. Establishes there is something to
+    /// delete BEFORE asking for write access: "nothing to delete" is an answer an unprivileged
+    /// caller can reach, and a revert that has nothing left to do must not fail for want of a
+    /// right it does not need.</summary>
     public static void DeleteChildApos(string endpointGuid)
     {
         using var baseKey = BaseKey();
+        using (var probe = baseKey.OpenSubKey($@"{ChildApoRoot}\{endpointGuid}"))
+        {
+            if (probe is null) return;
+        }
         using var root = baseKey.OpenSubKey(ChildApoRoot, writable: true);
-        if (root is null) return;
-        if (root.GetSubKeyNames().Any(n => string.Equals(n, endpointGuid, StringComparison.OrdinalIgnoreCase)))
-            root.DeleteSubKeyTree(endpointGuid, throwOnMissingSubKey: false);
+        root?.DeleteSubKeyTree(endpointGuid, throwOnMissingSubKey: false);
     }
 
     private static void WriteValues(RegistryKey key, IReadOnlyList<RegValue> values)

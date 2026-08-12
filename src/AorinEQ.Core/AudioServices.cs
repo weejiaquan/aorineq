@@ -26,9 +26,17 @@ public static class AudioServices
         + "\"Restart-Service AudioEndpointBuilder -Force -ErrorAction Stop; "
         + "Start-Service Audiosrv -ErrorAction SilentlyContinue\"";
 
+    /// <summary>The FULL path to Windows PowerShell, never the bare name. One of the two callers
+    /// is an already-elevated process, and starting a bare "powershell.exe" resolves it through
+    /// the search path — which includes the working directory and anything a user-writable install
+    /// location can reach. An elevated process must name the binary it means.</summary>
+    public static string PowerShellPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.System),
+        "WindowsPowerShell", "v1.0", "powershell.exe");
+
     /// <summary>The helper process to run. <paramref name="elevate"/> false is only correct when
     /// the CALLER is already elevated.</summary>
-    public static ProcessStartInfo BuildStartInfo(bool elevate) => new("powershell.exe", PowerShellArguments)
+    public static ProcessStartInfo BuildStartInfo(bool elevate) => new(PowerShellPath, PowerShellArguments)
     {
         UseShellExecute = true,
         Verb = elevate ? "runas" : "",
