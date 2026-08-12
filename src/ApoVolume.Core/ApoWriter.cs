@@ -48,6 +48,7 @@ public sealed class ApoWriter : IDisposable
     private FileSystemWatcher? _watcher;
     private int _writeCount;
     private int _consecutiveFailures;
+    private int _disposeGate;
     private volatile bool _disposed;
 
     public string VolumeFilePath { get; }
@@ -159,6 +160,11 @@ public sealed class ApoWriter : IDisposable
     {
         lock (_retryLock)
         {
+            // Shutdown flips _disposed under this same lock, so a request either lands before
+            // that (and the drain, which reads this state afterwards, still writes it) or is
+            // refused. It can never slip in behind the drain and be left on the floor.
+            if (_disposed)
+                return;
             _latestModel = model;
             // Every request writes, even one that renders identically: an apo-volume.txt
             // clobbered by another tool must still be repaired by the next render.
@@ -323,7 +329,11 @@ public sealed class ApoWriter : IDisposable
 
     public void Dispose()
     {
-        _disposed = true;
+        // Single-entry teardown: a second caller must not race the drain (duplicate writes
+        // through the same temp path) or dispose the retry timer under the first one's feet.
+        if (Interlocked.Exchange(ref _disposeGate, 1) != 0)
+            return;
+        lock (_retryLock) { _disposed = true; } // shuts the WriteConfig gate in the same breath
         _watcher?.Dispose();
         lock (_includeLock) { } // wait out any in-flight EnsureInclude
         // Coalescer first: its Dispose flushes the trailing write, and _disposed already stops
