@@ -1651,7 +1651,10 @@ public partial class App : System.Windows.Application
     private void OnEndpointVolumeChanged(string? deviceId, int percent, bool muted)
     {
         if (!SystemModeActive) return; // stale event raced a switch back to eapo mode
-        if (deviceId is not null && _deviceStates.ActiveId is not null && deviceId != _deviceStates.ActiveId)
+        // Anything that does not positively identify itself as the active device is dropped —
+        // including an unstamped one. Writing a volume we cannot attribute into the active
+        // device's state is exactly the corruption this guard exists to prevent.
+        if (_deviceStates.ActiveId is not null && deviceId != _deviceStates.ActiveId)
             return; // notification from a device that is no longer the active one
         ActiveState.SetPercent(percent);
         ActiveState.SetMuted(muted);

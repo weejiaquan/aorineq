@@ -125,6 +125,52 @@ public class EndpointVolumeDeviceChangeTests
         });
     }
 
+    /// <summary>A BURST of switches faster than the notification queue drains must still leave the
+    /// backend on the device the machine actually ended on. The handler re-reads the current
+    /// default rather than activating the endpoint each notification names, precisely so that
+    /// intermediate hops cannot strand it on a device the user has already left — this is the test
+    /// that keeps that property honest.</summary>
+    [Fact]
+    public void A_burst_of_switches_converges_on_the_device_the_machine_ended_on()
+    {
+        var original = DefaultRenderDevice.Current;
+        Assert.NotNull(original);
+        var other = DefaultRenderDevice.Other(original);
+        Assert.NotNull(other);
+
+        using var ev = new EndpointVolume();
+        // The stamp on Changed names the endpoint the backend re-activated on, so the LAST one
+        // reports where it settled — no test-only API needed to see it.
+        var stamps = new ConcurrentQueue<string?>();
+        ev.Changed += (id, _, _) => stamps.Enqueue(id);
+        try
+        {
+            // No settle between them: several switches are in flight at once.
+            for (int i = 0; i < 5; i++)
+            {
+                DefaultRenderDevice.SetDefault(other!.Id);
+                DefaultRenderDevice.SetDefault(original!);
+            }
+            DefaultRenderDevice.SetDefault(other!.Id); // ends here, deliberately not the original
+            _out.WriteLine($"burst finished, machine default is {DefaultRenderDevice.Current}");
+
+            string? settled = null;
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                settled = stamps.LastOrDefault();
+                if (settled == other.Id) break;
+                Thread.Sleep(100);
+            }
+            _out.WriteLine($"stamps seen: {stamps.Count}, settled on {settled}");
+            Assert.Equal(other.Id, settled);
+        }
+        finally
+        {
+            DefaultRenderDevice.SetDefault(original!);
+        }
+    }
+
     /// <summary>Shutdown after a device change must not hang. On the bug this deadlocked outright:
     /// the callback thread was stuck inside MMDevAPI still holding the instance lock, so Dispose
     /// waited on it forever and the process never exited.</summary>

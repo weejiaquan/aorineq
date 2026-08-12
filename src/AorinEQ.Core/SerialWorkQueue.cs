@@ -14,8 +14,13 @@ namespace AorinEQ.Core;
 /// quiet one:
 ///   * FIFO. Actions run in post order, one at a time, never concurrently with each other.
 ///   * Nothing is dropped before <see cref="Dispose"/> — every posted action runs.
-///   * Nothing runs after <see cref="Dispose"/> returns. Post is refused (returns false) and work
-///     that was queued but had not started is discarded rather than run against torn-down state.
+///   * No action STARTS after <see cref="Dispose"/>. Post is refused (returns false) and work that
+///     was queued but had not begun is discarded rather than run against torn-down state. An action
+///     ALREADY RUNNING is a different matter: Dispose waits only <see cref="DisposeJoinTimeout"/>
+///     for it, so it can still be executing after Dispose returns. Owners whose actions touch state
+///     the owner is about to tear down must re-check their own disposed flag inside the action —
+///     the queue cannot make that guarantee without an unbounded wait, which is the very thing that
+///     hangs shutdown.
 ///   * <see cref="Post"/> is non-blocking regardless of what the worker is doing.
 ///   * An action that throws does not kill the worker or the process; the next action still runs.
 ///
