@@ -142,4 +142,83 @@ public class ScheduledTaskAutostartTests : IDisposable
         _out.WriteLine($"correctly rejected trailing backslash: {ex.Message}");
         Assert.Contains("backslash", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ---- v3.0.0 rename migration. Real schtasks round-trips against a throwaway legacy name —
+    // never the machine's actual "ApoVolume" task, which these tests must not touch. ----
+
+    private ScheduledTaskAutostart NewTask(string name) =>
+        new(name, highestRunLevel: false, logonTrigger: false);
+
+    [Fact]
+    public void MigrateLegacyTask_recreates_the_task_under_the_new_name_and_deletes_the_old_one()
+    {
+        var legacyName = "AorinEQTests-legacy-" + Guid.NewGuid().ToString("N");
+        var legacy = NewTask(legacyName);
+        legacy.Enable(@"C:\Tools\ApoVolume.exe");
+        try
+        {
+            Assert.True(_task.MigrateLegacyTask(legacyName, @"C:\Tools\AorinEQ.exe"));
+
+            Assert.True(_task.IsEnabled());
+            Assert.False(legacy.IsEnabled());
+            // Re-pointed at the exe we were told to run, not the legacy task's stale Command —
+            // after the updater's renaming swap that file no longer exists.
+            var xml = QueryTaskXml(_taskName);
+            _out.WriteLine(xml);
+            Assert.Contains(@"C:\Tools\AorinEQ.exe", xml);
+            Assert.DoesNotContain("ApoVolume.exe", xml);
+        }
+        finally
+        {
+            try { legacy.Disable(); } catch (InvalidOperationException) { }
+        }
+    }
+
+    [Fact]
+    public void MigrateLegacyTask_is_a_no_op_when_there_is_no_legacy_task()
+    {
+        var absent = "AorinEQTests-absent-" + Guid.NewGuid().ToString("N");
+
+        Assert.False(_task.MigrateLegacyTask(absent, @"C:\Tools\AorinEQ.exe"));
+
+        // Autostart was off and must stay off — migration never turns it ON.
+        Assert.False(_task.IsEnabled());
+    }
+
+    [Fact]
+    public void MigrateLegacyTask_still_removes_the_legacy_task_when_the_new_one_already_exists()
+    {
+        var legacyName = "AorinEQTests-legacy-" + Guid.NewGuid().ToString("N");
+        var legacy = NewTask(legacyName);
+        legacy.Enable(@"C:\Tools\ApoVolume.exe");
+        _task.Enable(@"C:\Tools\AorinEQ.exe");
+        try
+        {
+            Assert.True(_task.MigrateLegacyTask(legacyName, @"C:\Tools\AorinEQ.exe"));
+
+            Assert.True(_task.IsEnabled());
+            Assert.False(legacy.IsEnabled()); // two logon tasks would start the app twice
+        }
+        finally
+        {
+            try { legacy.Disable(); } catch (InvalidOperationException) { }
+        }
+    }
+
+    [Fact]
+    public void MigrateLegacyTask_refuses_to_migrate_a_name_onto_itself()
+    {
+        // Guard against deleting the very task just created.
+        _task.Enable(@"C:\Tools\AorinEQ.exe");
+
+        Assert.False(_task.MigrateLegacyTask(_taskName, @"C:\Tools\AorinEQ.exe"));
+
+        Assert.True(_task.IsEnabled());
+    }
+
+    [Fact]
+    public void The_legacy_task_name_is_the_apps_old_name()
+    {
+        Assert.Equal("ApoVolume", ScheduledTaskAutostart.LegacyTaskName);
+    }
 }

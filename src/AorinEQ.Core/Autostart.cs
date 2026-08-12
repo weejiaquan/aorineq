@@ -9,6 +9,11 @@ namespace AorinEQ.Core;
 public sealed class Autostart
 {
     public const string ValueName = "AorinEQ";
+
+    /// <summary>The pre-v3.0.0 Run value name. Referenced ONLY by the one-time rename migration
+    /// below.</summary>
+    public const string LegacyValueName = "ApoVolume";
+
     private readonly string _runKeyPath;
 
     public Autostart(string runKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run")
@@ -52,6 +57,32 @@ public sealed class Autostart
         {
             throw new InvalidOperationException(
                 $"Couldn't remove the autostart registry entry: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>ONE-TIME v3.0.0 rename migration: an autostart entry left under the pre-rename
+    /// value name is re-written under the current one, pointing at <paramref name="exePath"/>,
+    /// and the legacy value removed. Written BEFORE the delete, so a failure can only ever leave
+    /// autostart registered twice — never not at all. Re-pointing rather than copying the old
+    /// command is deliberate: the exe itself may have just been renamed too.</summary>
+    /// <returns>true when a legacy entry was found and migrated.</returns>
+    public bool MigrateLegacyValue(string legacyValueName, string exePath)
+    {
+        if (legacyValueName == ValueName)
+            return false;
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(_runKeyPath, writable: true);
+            if (key?.GetValue(legacyValueName) is not string)
+                return false;
+            key.SetValue(ValueName, $"\"{exePath}\"");
+            key.DeleteValue(legacyValueName, throwOnMissingValue: false);
+            return true;
+        }
+        catch (Exception ex) when (IsRegistryFailure(ex))
+        {
+            throw new InvalidOperationException(
+                $"Couldn't move the autostart registry entry to '{ValueName}': {ex.Message}", ex);
         }
     }
 
