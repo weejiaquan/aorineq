@@ -80,22 +80,29 @@ public static class AppDataMigration
         foreach (var entry in entries)
         {
             var target = Path.Combine(destination, Path.GetFileName(entry));
+            // A junction or symlink is moved as the LINK, never walked: recursing through one
+            // could follow a loop back into an ancestor forever, or reach out of the app's own
+            // tree entirely. If its rename fails it is simply left where it is.
+            if (Directory.Exists(entry) && !IsReparsePoint(entry))
+            {
+                // One rename moves the whole subtree when nothing is in the way (same volume, so
+                // it is O(1)). Any failure — a locked descendant, a target already there — falls
+                // back to merging file by file rather than abandoning everything underneath.
+                if (!TryMoveDirectory(entry, target))
+                    Merge(entry, target);
+                continue;
+            }
+            // A plain file, or a reparse point being moved whole.
+            if (Directory.Exists(entry))
+            {
+                TryMoveDirectory(entry, target);
+                continue;
+            }
+            if (File.Exists(target) || Directory.Exists(target))
+                continue; // live state wins; the legacy copy is kept, not merged and not deleted
             try
             {
-                if (Directory.Exists(entry))
-                {
-                    // Move the whole subtree in one rename when nothing is in the way (same
-                    // volume, so it is O(1)); otherwise merge into what is already there rather
-                    // than abandoning every file underneath it.
-                    if (Directory.Exists(target) || File.Exists(target))
-                        Merge(entry, target);
-                    else
-                        Directory.Move(entry, target);
-                }
-                else if (!File.Exists(target) && !Directory.Exists(target))
-                {
-                    File.Move(entry, target);
-                }
+                File.Move(entry, target); // same volume: a rename, so a failure moves nothing
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -103,6 +110,33 @@ public static class AppDataMigration
         }
 
         return TryRemoveIfEmpty(source);
+    }
+
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true; // can't tell what it is: treat it as opaque rather than walk into it
+        }
+    }
+
+    private static bool TryMoveDirectory(string source, string destination)
+    {
+        if (Directory.Exists(destination) || File.Exists(destination))
+            return false;
+        try
+        {
+            Directory.Move(source, destination);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool TryCreateDirectory(string directory)
