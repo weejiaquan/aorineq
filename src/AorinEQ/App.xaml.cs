@@ -285,6 +285,8 @@ public partial class App : System.Windows.Application
                 _tray.ShowWarning("Equalizer APO isn't enabled on your current playback device — "
                     + "volume changes won't be audible there. See Settings → Setup guide.");
 
+            MigrateLegacyAutostart();
+
             // Elevated-startup reconciliation.
             if (Elevation.IsElevated && _settings.RunAsAdmin)
             {
@@ -1832,6 +1834,31 @@ public partial class App : System.Windows.Application
             {
             }
         });
+    }
+
+    /// <summary>ONE-TIME v3.0.0 rename migration of autostart. An entry left under the pre-rename
+    /// name would start an exe that the same rename may have just moved, and this build — looking
+    /// for the new name — would report autostart as off while the stale one still fired at logon.
+    /// Both mechanisms are re-pointed at the CURRENT exe path, which is also what settles the
+    /// updater's renaming swap.
+    ///
+    /// The Run value is plain HKCU and costs a registry read. The scheduled task needs the same
+    /// elevation creating one always has, so it is only attempted on an elevated start — a
+    /// non-elevated one could only spawn a schtasks query it is guaranteed to fail after. A
+    /// legacy task means RunAsAdmin, which means the next start is elevated; until then the
+    /// legacy task keeps working.</summary>
+    private void MigrateLegacyAutostart()
+    {
+        try
+        {
+            new Autostart().MigrateLegacyValue(Autostart.LegacyValueName, ExePath);
+            if (Elevation.IsElevated)
+                new ScheduledTaskAutostart().MigrateLegacyTask(ScheduledTaskAutostart.LegacyTaskName, ExePath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _tray?.ShowWarning(ex.Message);
+        }
     }
 
     /// <summary>ONE-TIME v3.0.0 rename migration of the managed EAPO file and config.txt's Include

@@ -15,6 +15,10 @@ namespace AorinEQ.Core;
 /// </summary>
 public sealed class ScheduledTaskAutostart
 {
+    /// <summary>The pre-v3.0.0 task name. Referenced ONLY by the one-time rename migration
+    /// below.</summary>
+    public const string LegacyTaskName = "ApoVolume";
+
     private readonly string _taskName;
     private readonly bool _highestRunLevel;
     private readonly bool _logonTrigger;
@@ -74,6 +78,28 @@ public sealed class ScheduledTaskAutostart
         // Task exists but delete failed: surface the error
         throw new InvalidOperationException(
             $"Failed to delete scheduled task '{_taskName}': {result.Error}".Trim());
+    }
+
+    /// <summary>ONE-TIME v3.0.0 rename migration: a logon task registered under the pre-rename
+    /// name is re-created under this instance's name, pointing at <paramref name="exePath"/>, and
+    /// the legacy task deleted. Created BEFORE the delete, so a failure can only ever leave the
+    /// user with two autostart tasks — never with none. Re-pointing rather than copying the old
+    /// definition is deliberate: the exe itself may have just been renamed too, and the legacy
+    /// task's Command would then name a file that no longer exists.
+    ///
+    /// Needs the same elevation <see cref="Enable"/> and <see cref="Disable"/> do, so a
+    /// non-elevated run throws and simply leaves it for the next elevated one.</summary>
+    /// <returns>true when a legacy task was found and migrated.</returns>
+    public bool MigrateLegacyTask(string legacyTaskName, string exePath)
+    {
+        if (legacyTaskName == _taskName)
+            return false;
+        var legacy = new ScheduledTaskAutostart(legacyTaskName, _highestRunLevel, _logonTrigger);
+        if (!legacy.IsEnabled())
+            return false;
+        Enable(exePath);
+        legacy.Disable();
+        return true;
     }
 
     private string BuildTaskXml(string exePath)
