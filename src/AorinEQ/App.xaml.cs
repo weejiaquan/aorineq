@@ -90,6 +90,16 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // The elevated endpoint-repair helper. Handled beside --setup and for the same reason:
+        // this process exists only to do one privileged thing and exit, so it must run before the
+        // theme, the migration, the settings load and the single-instance mutex — it is not an
+        // instance of the app, and it must not fight the running one for the mutex.
+        if (e.Args.Contains("--repair-eapo") || e.Args.Contains("--undo-eapo-repair"))
+        {
+            Shutdown(RunElevatedEapoRepair(undo: e.Args.Contains("--undo-eapo-repair")));
+            return;
+        }
+
         // Before ANY window is constructed, so none is ever built against the wrong palette — the
         // onboarding wizard below can be the first thing on screen. Also the app's only theme
         // watcher; see AppTheme's remarks for why WPF-UI's own is deliberately unused.
@@ -724,6 +734,9 @@ public partial class App : System.Windows.Application
             _settingsWindow.SetupGuideRequested += OpenOnboarding;
             _settingsWindow.EqualizerRequested += OpenEqEditor;
             _settingsWindow.SwitchToSystemModeRequested += OnSwitchToSystemModeRequested;
+            _settingsWindow.RepairEapoRequested += OnEapoRepairRequested;
+            _settingsWindow.UndoEapoRepairRequested += OnEapoUndoRepairRequested;
+            _settingsWindow.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
@@ -1228,6 +1241,19 @@ public partial class App : System.Windows.Application
         // The startup reading. Forced, because there is nothing to collapse it against and this
         // is the one that replaces the old startup balloon.
         CheckEapoHealth(force: true);
+
+        // A repair that never reached its own verification — the helper was killed, the machine
+        // lost power — leaves a backup still marked "applying". The endpoint is then in a state
+        // nothing has checked, so the user is told, once, that the way out exists. Only ever a
+        // balloon: undoing somebody's audio settings without asking is exactly the behaviour this
+        // whole feature is careful not to have.
+        if (EapoRepairBackup.Load(EapoRepair.BackupPath) is { IsInterrupted: true })
+        {
+            _tray?.ShowActionableWarning(
+                "An Equalizer APO repair didn't finish last time. Open Settings to undo it if your sound "
+                + "isn't right.",
+                () => _ = OpenSettingsAsync(SettingsSections.Volume));
+        }
     }
 
     /// <summary>Unlocking, or switching back to this session, is when a user returns to a machine
@@ -1329,6 +1355,155 @@ public partial class App : System.Windows.Application
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false; // locked or not ours to write: the row reports the truth either way
+        }
+    }
+
+    // ---------------------------------------------------------------- the endpoint repair
+
+    /// <summary>The whole privileged half of the repair, inside ONE elevated process: capture,
+    /// write, restart audio, verify, and revert if the verification does not hold.
+    ///
+    /// It is one process on purpose. Splitting the write from the verify would put a UAC prompt
+    /// between them, and a user who declines that second prompt is left in exactly the half-written
+    /// state the design exists to prevent. The verdict is left in a file the launching process
+    /// consumes, because an exit code cannot carry the sentence the user needs to read.
+    ///
+    /// TARGETING. The endpoint is resolved HERE, from the current default render device, and never
+    /// taken from the command line: an elevated process must not accept the identity of the thing
+    /// it is about to modify from its own arguments. The consequence is that changing the default
+    /// device between clicking and answering the prompt repairs the device you are listening
+    /// through now, which is also the device the whole feature is about.</summary>
+    private static int RunElevatedEapoRepair(bool undo)
+    {
+        try
+        {
+            // Already elevated, so no second prompt — see this method's remarks.
+            static bool Restart() => AudioServices.RestartAndSettle(elevate: false);
+
+            EapoRepairResult result;
+            if (undo)
+            {
+                result = EapoRepairBackup.Load(EapoRepair.BackupPath) is { } backup
+                    ? EapoRepair.Undo(backup, Restart)
+                    : new EapoRepairResult(EapoRepairOutcome.Refused,
+                        "There's nothing to undo — AorinEQ has no record of changing this PC's audio settings.");
+            }
+            else
+            {
+                var guid = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId());
+                result = guid is null
+                    ? new EapoRepairResult(EapoRepairOutcome.Refused,
+                        "Windows isn't reporting a playback device right now, so there's nothing to repair.")
+                    : EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid));
+            }
+
+            EapoRepair.SaveResult(result);
+            return result.Outcome is EapoRepairOutcome.Repaired or EapoRepairOutcome.AlreadyActive
+                or EapoRepairOutcome.Undone ? 0 : 1;
+        }
+        catch (Exception ex)
+        {
+            // This process is a helper with no UI; anything unhandled would be a silent crash the
+            // launcher could only report as "it failed". Recorded instead, so the user gets a
+            // reason — and the backup file is still on disk, which is what makes it recoverable.
+            EapoRepair.SaveResult(new EapoRepairResult(EapoRepairOutcome.FailedAndNotReverted,
+                "The repair helper failed unexpectedly: " + ex.Message));
+            return 2;
+        }
+    }
+
+    /// <summary>The independent half of the verification — independent because it does not read
+    /// back anything the repair wrote. The endpoint has to still be there, and it has to still
+    /// OPEN for playback: an endpoint whose effect chain cannot load is one that fails here, which
+    /// is the failure mode that would otherwise cost the user their sound.</summary>
+    private static bool IsEndpointUsable(string endpointGuid)
+    {
+        if (!AudioEndpoint.GetRenderEndpoints().Any(
+                e => string.Equals(e.Guid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        try
+        {
+            using var probe = new LoopbackCapture();
+            if (!probe.Start()) return false;
+            probe.Stop();
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException
+            or InvalidCastException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The user asked for the automatic repair. Confirms in plain language first (this
+    /// is the one action in the app that writes to a Windows audio device), then runs the elevated
+    /// helper and reports what it says.</summary>
+    private async void OnEapoRepairRequested()
+    {
+        if (System.Windows.MessageBox.Show(EapoRepair.ConfirmationText, "AorinEQ",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        await RunEapoRepairHelperAsync("--repair-eapo", "Repairing…");
+    }
+
+    /// <summary>The user asked to undo a repair AorinEQ made.</summary>
+    private async void OnEapoUndoRepairRequested()
+    {
+        if (System.Windows.MessageBox.Show(
+                "AorinEQ will put this playback device's settings back exactly as they were before the "
+                + "repair, and restart Windows audio again. Equalizer APO will stop processing this "
+                + "device.\n\nUndo the repair?",
+                "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        await RunEapoRepairHelperAsync("--undo-eapo-repair", "Undoing…");
+    }
+
+    /// <summary>Launches the elevated helper, waits for it off the UI thread, and turns its
+    /// verdict into what the user sees. Never throws: every failure — declined elevation, a helper
+    /// that could not start, a helper that crashed — ends in a sentence rather than an exception.</summary>
+    private async Task RunEapoRepairHelperAsync(string flag, string busyText)
+    {
+        _settingsWindow?.SetEapoRepairStatus(busyText, busy: true);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(ExePath, flag)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+            System.Diagnostics.Process? proc;
+            try
+            {
+                proc = System.Diagnostics.Process.Start(psi);
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                _settingsWindow?.SetEapoRepairStatus(
+                    "Administrator permission is needed to change a playback device's settings. Nothing was changed.",
+                    busy: false);
+                return;
+            }
+            if (proc is null)
+            {
+                _settingsWindow?.SetEapoRepairStatus("Couldn't start the repair helper. Nothing was changed.", busy: false);
+                return;
+            }
+            await proc.WaitForExitAsync();
+
+            var result = EapoRepair.TakeResult();
+            _settingsWindow?.SetEapoRepairStatus(
+                result?.Message ?? "The repair helper didn't report a result. Nothing may have changed.",
+                busy: false);
+            if (result is { Outcome: EapoRepairOutcome.Repaired })
+                _tray?.ShowInfo("Equalizer APO is switched on for your playback device again.");
+        }
+        finally
+        {
+            // The endpoint's state has almost certainly changed, in either direction, and the
+            // reading behind the banner and the health row has to come from the machine rather
+            // than from what the helper claimed.
+            CheckEapoHealth(force: true);
+            _settingsWindow?.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
         }
     }
 

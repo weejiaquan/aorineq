@@ -212,7 +212,7 @@
                                 <ui:TextBlock x:Name="EapoBannerTitle" Style="{StaticResource BannerTitle}" />
                                 <ui:TextBlock x:Name="EapoBannerBody" Style="{StaticResource BannerBody}" />
                                 <WrapPanel Margin="0,14,0,0">
-                                    <ui:Button x:Name="EapoRepairButton" Margin="0,0,8,0"
+                                    <ui:Button x:Name="EapoBannerRepairButton" Margin="0,0,8,0"
                                                Icon="{ui:SymbolIcon Wrench24}"
                                                Click="OnEapoRepair" />
                                     <!-- The filled one, because it is the difference between a dead
@@ -354,11 +354,24 @@
                                               Style="{StaticResource HealthValue}" />
                             </Grid>
                         </ui:CardControl.Header>
-                        <StackPanel Orientation="Horizontal">
-                            <ui:Button x:Name="SetupGuideButton" Content="Setup guide"
-                                       Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
-                            <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="8,0,0,0"
-                                       Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
+                        <StackPanel>
+                            <WrapPanel HorizontalAlignment="Right">
+                                <ui:Button x:Name="SetupGuideButton" Content="Setup guide" Margin="0,0,8,0"
+                                           Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
+                                <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="0,0,8,0"
+                                           Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
+                                <!-- Never automatic and never silent: the click is the consent, and
+                                     the confirmation it raises spells out the administrator prompt,
+                                     the audio interruption and the undo before anything is written. -->
+                                <ui:Button x:Name="RepairEapoButton" Content="Repair automatically" Margin="0,0,8,0"
+                                           Icon="{ui:SymbolIcon Wrench24}" Click="OnRepairEapo" />
+                                <ui:Button x:Name="UndoRepairButton" Content="Undo repair" Visibility="Collapsed"
+                                           Icon="{ui:SymbolIcon ArrowUndo24}" Click="OnUndoEapoRepair" />
+                            </WrapPanel>
+                            <ui:TextBlock x:Name="EapoRepairStatusText" Style="{StaticResource RowSubtitle}"
+                                          Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                          TextAlignment="Right" MaxWidth="380"
+                                          Visibility="Collapsed" />
                         </StackPanel>
                     </ui:CardControl>
                 </StackPanel>
