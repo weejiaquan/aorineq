@@ -50,6 +50,14 @@ public partial class EqEditorWindow : Window
     /// edit; the app merges, re-renders the config file, and persists.</summary>
     public event Action<string?, EqScopeSetting>? ScopeChanged;
 
+    /// <summary>The user picked Simple or Advanced; the app persists the choice.</summary>
+    public event Action<string>? EditorModeChanged;
+
+    private string _editorMode = EqEditorModes.Advanced;
+
+    /// <summary>Simple mode: three macro sliders, a read-only curve, no band surfaces.</summary>
+    private bool SimpleMode => _editorMode == EqEditorModes.Simple;
+
     // Working copy of the current scope (pushed on every mutation, reloaded on tab switch).
     private string? _scopeDeviceId;
     /// <summary>Whether the user has picked a scope yet. Needed because null is a REAL scope
@@ -120,8 +128,12 @@ public partial class EqEditorWindow : Window
         PreviewKeyDown += OnWindowKeyDown;
         Loaded += (_, _) =>
         {
+            // The face comes first: loading a scope already has to know whether the macro bands
+            // need to exist.
+            _editorMode = EqEditorModes.Resolve(_getSettings());
             PopulateScopeTabs();
             RefreshPresetList();
+            ApplyEditorMode();
             _capture.Start();
             _frameTimer.Start();
         };
@@ -199,6 +211,130 @@ public partial class EqEditorWindow : Window
         SyncBandPanel();
         RebuildBandStrip();
         RedrawAll();
+        if (SimpleMode)
+            EnterSimpleMode();
+    }
+
+    // ---- Simple / Advanced ----
+
+    private void OnEditorModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (_syncing)
+            return;
+        var mode = SimpleModeRadio.IsChecked == true ? EqEditorModes.Simple : EqEditorModes.Advanced;
+        if (mode == _editorMode)
+            return;
+        _editorMode = mode;
+        ApplyEditorMode();
+        EditorModeChanged?.Invoke(mode);
+    }
+
+    /// <summary>Shows the face the current mode calls for. Advanced is the v2.0 editor
+    /// unchanged; Simple hides every per-band surface, makes the curve read-only and puts the
+    /// three macro bands in place.</summary>
+    private void ApplyEditorMode()
+    {
+        bool simple = SimpleMode;
+        _syncing = true;
+        SimpleModeRadio.IsChecked = simple;
+        AdvancedModeRadio.IsChecked = !simple;
+        _syncing = false;
+
+        var advanced = simple ? Visibility.Collapsed : Visibility.Visible;
+        AdvancedPresetTools.Visibility = advanced;
+        ClearAllButton.Visibility = advanced;
+        BandPanel.Visibility = advanced;
+        BandStripPanel.Visibility = advanced;
+        SimplePanel.Visibility = simple ? Visibility.Visible : Visibility.Collapsed;
+        // Read-only curve: no dragging, no double-click-to-add, no wheel-to-Q.
+        Plot.IsHitTestVisible = !simple;
+
+        if (simple)
+            EnterSimpleMode();
+        else
+            RedrawCurves(); // bring the band nodes back
+    }
+
+    /// <summary>Puts the macro trio in place for the current scope (creating it at 0 dB when the
+    /// chain doesn't already end in it), syncs the sliders to what is really there, and says out
+    /// loud when other bands are along for the ride.</summary>
+    private void EnterSimpleMode()
+    {
+        bool room = EqSimpleMode.HasRoom(_bands);
+        BassSlider.IsEnabled = MidSlider.IsEnabled = TrebleSlider.IsEnabled = room;
+        if (!room)
+        {
+            SimpleNoteText.Text = $"This scope already has {_bands.Count} bands — there's no room "
+                + $"for the bass/mid/treble controls (the limit is {EqPreset.MaxBands}). "
+                + "Switch to Advanced to edit it.";
+            ShowMacroGains(new MacroGains(0, 0, 0));
+            return;
+        }
+
+        var gains = EqSimpleMode.ReadOrZero(_bands);
+        var updated = EqSimpleMode.Apply(_bands, gains);
+        if (!updated.SequenceEqual(_bands))
+        {
+            // Creating the trio at 0 dB changes nothing audible, but it IS an edit of the chain,
+            // so it goes through the same push-and-persist path as any other.
+            _bands = updated.ToList();
+            _selectedBand = -1;
+            OnBandsEdited(countChanged: true);
+        }
+        ShowMacroGains(gains);
+        UpdateCoexistenceNote();
+    }
+
+    private void UpdateCoexistenceNote()
+    {
+        var foreign = EqSimpleMode.ForeignBands(_bands);
+        if (foreign.Count == 0)
+        {
+            SimpleNoteText.Text = "";
+            return;
+        }
+        var what = _presetName.Length > 0 && _presetName != EqPreset.CustomName
+            ? $"'{_presetName}'"
+            : "your existing chain";
+        SimpleNoteText.Text = $"Adjusting bass/mid/treble on top of {what} "
+            + $"({foreign.Count} band{(foreign.Count == 1 ? "" : "s")}) — those bands are left "
+            + "untouched. Switch to Advanced to edit them.";
+    }
+
+    private void ShowMacroGains(MacroGains gains)
+    {
+        _syncing = true;
+        BassSlider.Value = gains.BassDb;
+        MidSlider.Value = gains.MidDb;
+        TrebleSlider.Value = gains.TrebleDb;
+        _syncing = false;
+        UpdateMacroReadouts(gains);
+    }
+
+    private void UpdateMacroReadouts(MacroGains gains)
+    {
+        BassReadout.Text = FormatMacro(gains.BassDb);
+        MidReadout.Text = FormatMacro(gains.MidDb);
+        TrebleReadout.Text = FormatMacro(gains.TrebleDb);
+    }
+
+    private static string FormatMacro(double db) =>
+        string.Create(CultureInfo.InvariantCulture, $"{db:+0.0;-0.0;0.0} dB");
+
+    private void OnMacroSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_syncing || !SimpleMode)
+            return;
+        // 0.1 dB steps: what the ParametricEQ text format carries, so the slider position and
+        // the file always agree.
+        var gains = new MacroGains(
+            Math.Round(BassSlider.Value, 1),
+            Math.Round(MidSlider.Value, 1),
+            Math.Round(TrebleSlider.Value, 1));
+        int before = _bands.Count;
+        _bands = EqSimpleMode.Apply(_bands, gains).ToList();
+        UpdateMacroReadouts(gains);
+        OnBandsEdited(countChanged: _bands.Count != before);
     }
 
     private EqScopeSetting CurrentScope() =>
@@ -827,7 +963,9 @@ public partial class EqEditorWindow : Window
 
     private void OnWindowKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Delete && Keyboard.FocusedElement is not TextBox)
+        // Simple mode has no band selection to delete — and deleting a macro band from under
+        // the sliders would be a surprise.
+        if (e.Key == Key.Delete && !SimpleMode && Keyboard.FocusedElement is not TextBox)
         {
             RemoveSelectedBand();
             e.Handled = true;
@@ -965,8 +1103,9 @@ public partial class EqEditorWindow : Window
             AddCurveElement(summed, 2);
         }
 
-        // Draggable nodes (index via Tag).
-        for (int i = 0; i < _bands.Count; i++)
+        // Draggable nodes (index via Tag). Simple mode shows the curve read-only, so it draws
+        // no targets at all rather than drawing dead ones.
+        for (int i = 0; !SimpleMode && i < _bands.Count; i++)
         {
             var band = _bands[i];
             var node = new Ellipse

@@ -770,6 +770,7 @@ public partial class App : System.Windows.Application
                         ? VolumeState.ToDb(v.Percent, v.Muted)
                         : 0.0);
             _eqEditor.ScopeChanged += OnEqScopeChanged;
+            _eqEditor.EditorModeChanged += OnEqEditorModeChanged;
             _eqEditor.Closed += (_, _) => _eqEditor = null;
             if (_writer is null)
                 _tray?.ShowWarning("Equalizer APO isn't set up (or its config folder isn't "
@@ -777,6 +778,16 @@ public partial class App : System.Windows.Application
             _eqEditor.Show();
         }
         _eqEditor.Activate();
+    }
+
+    /// <summary>The editor's Simple/Advanced switch: persist the choice so the editor opens the
+    /// same way next time (and so <see cref="EqEditorModes.Resolve"/> stops guessing).</summary>
+    private void OnEqEditorModeChanged(string mode)
+    {
+        if (mode == _settings.EqEditorMode)
+            return;
+        _settings = _settings with { EqEditorMode = mode };
+        SaveSettings();
     }
 
     /// <summary>An EQ editor edit landed: merge the scope into settings (Global or the
