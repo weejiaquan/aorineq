@@ -138,30 +138,43 @@ FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%n[
   Windows" Run value, and the aorineq:// handler. Neither is created here - but once this exe is
   deleted, one that still names it is a broken autorun and a link scheme that opens nothing.
 
-  Both are removed ONLY when they point INSIDE the directory being uninstalled, matched with a
-  trailing backslash so a sibling like ...\Programs\AorinEQ2 cannot match. That guard is the whole
-  point: the user may be running a portable copy that has since taken over both entries, and it
-  must keep them.
+  Both are removed ONLY when they are OWNED by the directory being uninstalled - see PointsInto.
+  That guard is the whole point: the user may be running a portable copy that has since taken over
+  both entries, and it must keep them.
 
   DELIBERATELY NOT HANDLED: a "Start with Windows" SCHEDULED TASK, which the app uses instead of
   the Run value when Run-as-administrator is on. Its run level is HIGHEST, and by Windows' rules
   creating or deleting such a task requires elevation - which this uninstaller never asks for, by
-  design. A task left naming a deleted exe is inert (Task Scheduler logs a failed start and stops
-  there); turning "Start with Windows" off before uninstalling removes it properly. }
+  design. Nor is a warning shown for one: telling a user to delete a task named AorinEQ would be
+  wrong advice for the very common case where it points at a portable copy that is still working,
+  and proving which copy it names means reading UTF-16 XML back out of a redirected schtasks call.
+  A task left naming a deleted exe is inert - Task Scheduler logs a failed start and stops there -
+  and turning "Start with Windows" off before uninstalling removes it properly. The README says so. }
+
+{ Ownership, not mention. Both writers put the exe path FIRST and QUOTED - Autostart.Enable writes
+  "<exe>" and ProtocolRegistration writes "<exe>" "%1" - so the test is a PREFIX test. A substring
+  test would delete a portable copy's entry whose command merely names this directory in an
+  argument. If the same directory is spelled two ways (an 8.3 name, a junction) the test fails and
+  the entry is LEFT ALONE: leaving cruft behind is the safe direction to fail in, deleting someone
+  else's registration is not. }
+function PointsInto(Value, AppDir: String): Boolean;
+begin
+  Result := Pos(Lowercase('"' + AddBackslash(AppDir)), Lowercase(Value)) = 1;
+end;
+
 procedure RemoveStalePointersInto(AppDir: String);
 var
   RunKey, SchemeKey, Value: String;
 begin
-  AppDir := Lowercase(AddBackslash(AppDir));
   RunKey := 'Software\Microsoft\Windows\CurrentVersion\Run';
   SchemeKey := 'Software\Classes\aorineq';
 
   if RegQueryStringValue(HKEY_CURRENT_USER, RunKey, '{#AppName}', Value) then
-    if Pos(AppDir, Lowercase(Value)) > 0 then
+    if PointsInto(Value, AppDir) then
       RegDeleteValue(HKEY_CURRENT_USER, RunKey, '{#AppName}');
 
   if RegQueryStringValue(HKEY_CURRENT_USER, SchemeKey + '\shell\open\command', '', Value) then
-    if Pos(AppDir, Lowercase(Value)) > 0 then
+    if PointsInto(Value, AppDir) then
       RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, SchemeKey);
 end;
 

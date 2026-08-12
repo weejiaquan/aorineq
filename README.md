@@ -38,7 +38,11 @@ That builds all four release files; the installer step needs
 (`winget install --id JRSoftware.InnoSetup`).
 
 Uninstalling asks whether to keep `%APPDATA%\AorinEQ` — your skins, EQ presets and settings —
-and keeps it unless you say otherwise.
+and keeps it unless you say otherwise. If you had "Start with Windows" on *together with* "Run as
+administrator", turn it off before you uninstall: that combination uses a scheduled task, and
+Windows only lets an elevated program remove one, which the uninstaller deliberately never is.
+A leftover task is harmless — it just fails to start a program that is gone — and you can delete
+it in Task Scheduler.
 
 ## Requirements
 
