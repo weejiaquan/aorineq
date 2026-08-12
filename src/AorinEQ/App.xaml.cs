@@ -1434,6 +1434,14 @@ public partial class App : System.Windows.Application
         if (!AudioEndpoint.GetRenderEndpoints().Any(
                 e => string.Equals(e.Guid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
             return false;
+        // The playback probe below opens the DEFAULT render endpoint, so it only says anything
+        // about the repaired one while they are still the same device. If Windows switched
+        // defaults during the repair (headphones unplugged mid-prompt), a passing probe would be
+        // evidence about a device nobody touched — so that is a verification FAILURE, and the
+        // repair is put back rather than accepted on someone else's evidence.
+        if (!string.Equals(AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
+                endpointGuid, StringComparison.OrdinalIgnoreCase))
+            return false;
         try
         {
             using var probe = new LoopbackCapture();
@@ -1508,8 +1516,7 @@ public partial class App : System.Windows.Application
             // shown as this one's outcome.
             var result = EapoRepair.ReadResult(token);
             _settingsWindow?.SetEapoRepairStatus(
-                result?.Message ?? "The repair helper didn't report a result. Nothing may have changed.",
-                busy: false);
+                result?.Message ?? NoVerdictMessage(proc.ExitCode), busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
                 _tray?.ShowInfo("Equalizer APO is switched on for your playback device again.");
         }
@@ -1521,6 +1528,24 @@ public partial class App : System.Windows.Application
             CheckEapoHealth(force: true);
             _settingsWindow?.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
         }
+    }
+
+    /// <summary>What to say when the helper exited without leaving a verdict for THIS run — it was
+    /// killed, or it died before it could record anything.
+    ///
+    /// The honest answer depends on how far it got, and the backup file is what says so: the
+    /// helper writes it before its first registry write and removes it only after a clean revert,
+    /// so a backup still on disk means settings may have been changed. Saying "nothing may have
+    /// changed" in that case would understate it at the one moment the user needs to know.</summary>
+    private static string NoVerdictMessage(int exitCode)
+    {
+        var backup = EapoRepairBackup.Load(EapoRepair.BackupPath);
+        if (backup is null)
+            return $"The repair stopped before it reported anything (code {exitCode}), and it had not "
+                + "changed any settings by then.";
+        return $"The repair stopped before it reported anything (code {exitCode}), and it had already "
+            + "saved a record of your settings — so this device may have been changed. Use \"Undo repair\" "
+            + "to put it back exactly as it was.";
     }
 
     /// <summary>The health banner's "Switch to Windows volume mode" button: the same live
