@@ -87,7 +87,11 @@ public partial class App : System.Windows.Application
         AppDataMigration.Run(AppDataMigration.LegacyRoot, ApoPaths.GetStateRoot());
 
         // Settings must be loaded before the elevation bounce below decides whether to relaunch.
-        _settingsPath = Path.Combine(ApoPaths.GetStateRoot(), "settings.json");
+        // Normally the new root; the legacy file only while a migration that couldn't move it is
+        // still pending, so a locked settings.json can never make this session boot on defaults
+        // and then persist them over the top of the user's real state.
+        _settingsPath = AppDataMigration.ResolveFile(
+            ApoPaths.GetStateRoot(), AppDataMigration.LegacyRoot, "settings.json");
         bool firstRun = !File.Exists(_settingsPath); // brand-new install: mode-choice onboarding below
         var settings = Settings.Load(_settingsPath);
         _settings = settings;
@@ -1210,13 +1214,13 @@ public partial class App : System.Windows.Application
     /// indistinguishable from there on. Register is idempotent and re-points a moved exe (which
     /// is also how the updater's rename-swap leaves both classes valid); the off path purges both,
     /// fail-closed.</summary>
-    private static void ApplyProtocolRegistration(bool enabled)
+    private static void ApplyProtocolRegistration(bool enabled, string? exePath = null)
     {
         foreach (var scheme in new[] { ProtocolLink.Scheme, ProtocolLink.LegacyScheme })
         {
             var registration = new ProtocolRegistration(scheme);
             if (enabled)
-                registration.Register(ExePath);
+                registration.Register(exePath ?? ExePath);
             else
                 registration.Unregister();
         }
@@ -1322,6 +1326,9 @@ public partial class App : System.Windows.Application
 
         // The swap is done — the exe path now holds the new build; this process keeps running
         // from its renamed .old image until it exits.
+        if (!string.Equals(installedExePath, ExePath, StringComparison.OrdinalIgnoreCase))
+            RepointExternalReferencesTo(installedExePath);
+
         if (_settings.RunAsAdmin)
         {
             // Auto-restarting would spring a surprise UAC prompt; the next launch runs the
@@ -1851,9 +1858,45 @@ public partial class App : System.Windows.Application
     {
         try
         {
-            new Autostart().MigrateLegacyValue(Autostart.LegacyValueName, ExePath);
-            if (Elevation.IsElevated)
-                new ScheduledTaskAutostart().MigrateLegacyTask(ScheduledTaskAutostart.LegacyTaskName, ExePath);
+            bool value = new Autostart().MigrateLegacyValue(Autostart.LegacyValueName, ExePath);
+            bool task = Elevation.IsElevated
+                && new ScheduledTaskAutostart().MigrateLegacyTask(ScheduledTaskAutostart.LegacyTaskName, ExePath);
+            // The app keeps exactly ONE mechanism registered. A legacy install that somehow had
+            // both would come out of the two migrations above with both live, and start twice at
+            // logon — so collapse to the one this mode selects, the same way ApplyAutostart does.
+            if (value && task)
+                DisableOtherMechanism();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _tray?.ShowWarning(ex.Message);
+        }
+    }
+
+    /// <summary>Points everything that names the exe by PATH at <paramref name="exePath"/>: both
+    /// URL classes and whichever autostart mechanism is registered. The update swap keeps the
+    /// path invariant except once — the swap carrying v3.0.0's rename — and that one time this
+    /// has to run HERE rather than on the next start, because on a RunAsAdmin install the thing
+    /// that WOULD produce the next start is the scheduled task still naming the exe the swap just
+    /// removed. Best effort: on the relaunching path the successor re-registers anyway.</summary>
+    private void RepointExternalReferencesTo(string exePath)
+    {
+        try
+        {
+            if (_settings.ProtocolLinksEnabled)
+                ApplyProtocolRegistration(true, exePath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _tray?.ShowWarning(ex.Message);
+        }
+        try
+        {
+            var task = new ScheduledTaskAutostart();
+            if (task.IsEnabled())
+                task.Enable(exePath); // /Create /F is idempotent: this just refreshes the target
+            else if (new Autostart().IsEnabled())
+                new Autostart().Enable(exePath);
         }
         catch (InvalidOperationException ex)
         {

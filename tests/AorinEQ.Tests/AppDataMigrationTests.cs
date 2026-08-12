@@ -82,16 +82,81 @@ public class AppDataMigrationTests : IDisposable
     }
 
     [Fact]
-    public void ADirectoryAlreadyAtTheDestinationIsNeverMerged()
+    public void DirectoriesAreMergedSoAPopulatedDestinationNeverBlocksTheFilesUnderIt()
     {
+        // Collisions are resolved per FILE. A skins folder that already holds a skin the user
+        // installed post-rename must not strand every skin they had before it.
         WriteLegacyFile(Path.Combine("skins", "legacy-skin", "skin.json"), "{}");
+        WriteLegacyFile(Path.Combine("skins", "shared", "skin.json"), "legacy");
         Directory.CreateDirectory(Path.Combine(_current, "skins", "current-skin"));
+        Directory.CreateDirectory(Path.Combine(_current, "skins", "shared"));
+        File.WriteAllText(Path.Combine(_current, "skins", "shared", "skin.json"), "current");
 
         AppDataMigration.Run(_legacy, _current);
 
-        Assert.False(Directory.Exists(Path.Combine(_current, "skins", "legacy-skin")));
+        Assert.Equal("{}", File.ReadAllText(Path.Combine(_current, "skins", "legacy-skin", "skin.json")));
         Assert.True(Directory.Exists(Path.Combine(_current, "skins", "current-skin")));
-        Assert.True(File.Exists(Path.Combine(_legacy, "skins", "legacy-skin", "skin.json")));
+        // The one real collision keeps the live copy and keeps the legacy one too.
+        Assert.Equal("current", File.ReadAllText(Path.Combine(_current, "skins", "shared", "skin.json")));
+        Assert.Equal("legacy", File.ReadAllText(Path.Combine(_legacy, "skins", "shared", "skin.json")));
+        // ...and only the colliding file's branch survives in the legacy tree.
+        Assert.False(Directory.Exists(Path.Combine(_legacy, "skins", "legacy-skin")));
+        Assert.True(Directory.Exists(_legacy));
+    }
+
+    [Fact]
+    public void ResolveFile_prefers_the_current_root_once_the_file_is_there()
+    {
+        Directory.CreateDirectory(_current);
+        File.WriteAllText(Path.Combine(_current, "settings.json"), "current");
+        WriteLegacyFile("settings.json", "legacy");
+
+        Assert.Equal(Path.Combine(_current, "settings.json"),
+            AppDataMigration.ResolveFile(_current, _legacy, "settings.json"));
+    }
+
+    [Fact]
+    public void ResolveFile_keeps_using_the_legacy_file_while_its_move_is_still_pending()
+    {
+        // The data-loss guard: a settings.json that couldn't move must still be the file this
+        // session READS AND WRITES. Otherwise the session boots on defaults, persists them to the
+        // new root, and "never overwrite the destination" orphans the user's real state forever.
+        WriteLegacyFile("settings.json", "the user's real state");
+
+        var resolved = AppDataMigration.ResolveFile(_current, _legacy, "settings.json");
+
+        Assert.Equal(Path.Combine(_legacy, "settings.json"), resolved);
+        Assert.Equal("the user's real state", File.ReadAllText(resolved));
+    }
+
+    [Fact]
+    public void ResolveFile_points_at_the_current_root_when_neither_copy_exists()
+    {
+        // A brand-new install writes to the new location, not to a legacy folder it never had.
+        Assert.Equal(Path.Combine(_current, "settings.json"),
+            AppDataMigration.ResolveFile(_current, _legacy, "settings.json"));
+    }
+
+    [Fact]
+    public void A_locked_settings_file_survives_a_full_session_and_migrates_on_the_next_start()
+    {
+        // End-to-end of finding 1: lock it, run the migration, resolve, WRITE through the
+        // resolved path the way a session would, then unlock and start again.
+        WriteLegacyFile("settings.json", "{\"Percent\":60}");
+        string resolved;
+        using (new FileStream(Path.Combine(_legacy, "settings.json"),
+                   FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            AppDataMigration.Run(_legacy, _current);
+            resolved = AppDataMigration.ResolveFile(_current, _legacy, "settings.json");
+            Assert.Equal(Path.Combine(_legacy, "settings.json"), resolved);
+        }
+        File.WriteAllText(resolved, "{\"Percent\":75}"); // the session persists a change
+
+        AppDataMigration.Run(_legacy, _current);
+
+        Assert.Equal("{\"Percent\":75}", File.ReadAllText(Path.Combine(_current, "settings.json")));
+        Assert.False(Directory.Exists(_legacy));
     }
 
     [Fact]
