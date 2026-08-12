@@ -393,6 +393,54 @@ public class SkinArchiveTests : IDisposable
     }
 
     [Fact]
+    public void A_failed_export_leaves_the_previous_zip_intact()
+    {
+        // Exporting over an existing zip must not destroy it before the replacement exists. The
+        // pre-3.2 code deleted the destination first, so a failure at write time left the user
+        // with neither the old archive nor a new one.
+        var skin = MakeRenderableSkinFolder("replace-src");
+        var zip = Path.Combine(_dir, "replace.zip");
+        SkinArchive.Export(skin, zip);
+        var original = File.ReadAllBytes(zip);
+        _out.WriteLine($"existing zip: {original.Length} bytes");
+
+        // Hold the destination open exclusively: the replace step must fail.
+        using (File.Open(zip, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => SkinArchive.Export(skin, zip));
+            _out.WriteLine("export failure surfaced: " + ex.Message);
+        }
+
+        var after = File.ReadAllBytes(zip);
+        _out.WriteLine($"zip after the failed export: {after.Length} bytes");
+        Assert.Equal(original, after);
+        // ...and no scratch archive left lying beside it.
+        var strays = Directory.GetFiles(_dir, "*.tmp").Concat(Directory.GetFiles(_dir, ".aorineq-*")).ToArray();
+        _out.WriteLine("stray files: " + string.Join(", ", strays.Select(Path.GetFileName)));
+        Assert.Empty(strays);
+    }
+
+    [Fact]
+    public void Export_over_an_existing_zip_replaces_it_completely()
+    {
+        var first = MakeRenderableSkinFolder("v1-src");
+        var zip = Path.Combine(_dir, "versioned.zip");
+        TestPngs.WriteGif(Path.Combine(first, "muted.gif"), 300, 100);
+        SkinArchive.Export(first, zip);
+        Assert.Contains("muted.gif", EntryNames(zip));
+
+        // A second export of a skin WITHOUT the muted layer must not leave the old entry behind.
+        var second = MakeRenderableSkinFolder("v2-src");
+        SkinArchive.Export(second, zip);
+
+        var names = EntryNames(zip);
+        _out.WriteLine("entries after replace: " + string.Join(", ", names));
+        Assert.DoesNotContain("muted.gif", names);
+        Assert.Equal(new[] { "empty.png", "full.png", SkinPreview.FileName }.OrderBy(n => n, StringComparer.Ordinal),
+            names);
+    }
+
+    [Fact]
     public void Export_then_import_carries_the_authorship_metadata()
     {
         var meta = SkinMeta.Create("Neon Bar", "Ada Lovelace", "A glowing bar.", "1.2",

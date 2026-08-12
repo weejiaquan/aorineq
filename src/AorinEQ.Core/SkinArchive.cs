@@ -29,6 +29,11 @@ public static class SkinArchive
     /// decode (a truncated download) still exports, just without a thumbnail — losing the listing
     /// image is a far smaller harm than refusing to let someone share their skin.
     ///
+    /// The archive is BUILT BESIDE the destination and moved into place, the same
+    /// no-data-loss-window shape <see cref="Import"/> uses: writing straight to
+    /// <paramref name="zipPath"/> would mean deleting whatever was already there before knowing
+    /// the replacement can even be created, and a failure then left the user with neither.
+    ///
     /// Refuses to export a skin the loader rejects — nobody should share a broken skin.</summary>
     public static void Export(string skinFolder, string zipPath)
     {
@@ -40,6 +45,10 @@ public static class SkinArchive
         // generation got far enough to produce a usable one.
         var scratchPreview = Path.Combine(Path.GetTempPath(),
             "aorineq-preview-" + Guid.NewGuid().ToString("N") + ".png");
+        // Beside the destination, not in %TEMP%: the move below has to be a same-volume rename.
+        var scratchZip = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(zipPath)) ?? ".",
+            ".aorineq-export-" + Guid.NewGuid().ToString("N") + ".tmp");
         string? previewPath = null;
         try
         {
@@ -53,16 +62,20 @@ public static class SkinArchive
                 previewPath = null; // undecodable artwork: ship the skin, skip the thumbnail
             }
 
-            File.Delete(zipPath); // ZipArchiveMode.Create requires a fresh file
-            using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-            foreach (var fileName in AllowedFiles)
+            using (var archive = ZipFile.Open(scratchZip, ZipArchiveMode.Create))
             {
-                var source = Path.Combine(skinFolder, fileName);
-                if (File.Exists(source))
-                    archive.CreateEntryFromFile(source, fileName);
+                foreach (var fileName in AllowedFiles)
+                {
+                    var source = Path.Combine(skinFolder, fileName);
+                    if (File.Exists(source))
+                        archive.CreateEntryFromFile(source, fileName);
+                }
+                if (previewPath is not null)
+                    archive.CreateEntryFromFile(previewPath, SkinPreview.FileName);
             }
-            if (previewPath is not null)
-                archive.CreateEntryFromFile(previewPath, SkinPreview.FileName);
+            // Only now is anything at the destination touched, and the move REPLACES it whole —
+            // so the result is exactly this export, never a mix with a previous one.
+            File.Move(scratchZip, zipPath, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -70,9 +83,12 @@ public static class SkinArchive
         }
         finally
         {
-            try { File.Delete(scratchPreview); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
+            foreach (var scratch in new[] { scratchPreview, scratchZip })
+            {
+                try { File.Delete(scratch); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 

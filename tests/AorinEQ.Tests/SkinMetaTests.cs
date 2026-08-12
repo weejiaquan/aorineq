@@ -218,6 +218,68 @@ public class SkinMetaTests
         Assert.Equal(expected, label);
     }
 
+    [Theory]
+    [InlineData("", "", "", "", "")]
+    [InlineData("   ", "\t", "\r\n", "   ", "   ")]
+    [InlineData("‮", "‏", "", "⁦", "‪")]
+    [InlineData(null, null, null, null, "not-a-url")]
+    public void A_field_is_either_absent_or_meaningful_never_blank(
+        string? title, string? author, string? description, string? version, string? url)
+    {
+        // SkinWriter omits metadata keys on IsEmpty alone and then serializes the fields as they
+        // are, so "no field may survive normalization as an empty or whitespace string" is the
+        // invariant the byte-identical-resave guarantee rests on.
+        var meta = SkinMeta.Create(title, author, description, version, new[] { "  ", "" }, url);
+        _out.WriteLine($"meta={meta} IsEmpty={meta.IsEmpty}");
+        foreach (var (name, value) in new[]
+                 {
+                     ("Title", meta.Title), ("Author", meta.Author), ("Description", meta.Description),
+                     ("Version", meta.Version), ("SourceUrl", meta.SourceUrl),
+                 })
+            Assert.True(value is null || value.Trim().Length > 0, $"{name} survived as '{value}'");
+        foreach (var tag in meta.Tags)
+            Assert.True(tag.Trim().Length > 0, $"a blank tag survived as '{tag}'");
+
+        // ...and IsEmpty means exactly "every field absent", both ways.
+        bool everythingAbsent = meta.Title is null && meta.Author is null && meta.Description is null
+            && meta.Version is null && meta.SourceUrl is null && meta.Tags.Count == 0;
+        Assert.Equal(everythingAbsent, meta.IsEmpty);
+    }
+
+    [Fact]
+    public void Create_is_the_only_way_to_build_a_SkinMeta()
+    {
+        // The invariant above is only worth anything if nothing can bypass Create. The record's
+        // constructor is private and its properties are init-only-private, so the compiler already
+        // refuses `new SkinMeta { Author = "  " }` and `meta with { Author = "  " }` outside the
+        // type — this pins that so a future `public` slip is caught here rather than in a file
+        // somebody's gallery is trying to read.
+        var publicConstructors = typeof(SkinMeta)
+            .GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        _out.WriteLine("public constructors: " + publicConstructors.Length);
+        Assert.Empty(publicConstructors);
+
+        foreach (var property in typeof(SkinMeta).GetProperties())
+        {
+            var setter = property.GetSetMethod(nonPublic: true);
+            _out.WriteLine($"{property.Name}: setter {(setter is null ? "<none>" : setter.IsPublic ? "PUBLIC" : "non-public")}");
+            Assert.True(setter is null || !setter.IsPublic, $"{property.Name} has a public setter");
+        }
+    }
+
+    [Fact]
+    public void Normalization_is_idempotent()
+    {
+        // Loading a skin and saving it back re-normalizes what was already normalized; if that
+        // were not a no-op, a skin would drift a little on every round trip.
+        var once = SkinMeta.Create(new string('T', 200), "Ada", "line\r\none", "1.0",
+            new[] { "neon", "NEON", " bar " }, "https://example.com/x");
+        var twice = SkinMeta.Create(once.Title, once.Author, once.Description, once.Version,
+            once.Tags, once.SourceUrl);
+        _out.WriteLine($"once : {once}\ntwice: {twice}");
+        Assert.Equal(once, twice);
+    }
+
     [Fact]
     public void DisplayLabel_is_capped_so_a_long_credit_cannot_stretch_a_picker()
     {
