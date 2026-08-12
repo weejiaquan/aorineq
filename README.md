@@ -1,6 +1,6 @@
 <img width="329" height="77" alt="Screenshot 2026-07-21 015704" src="https://github.com/user-attachments/assets/a0461ee7-8981-4633-9e07-9892f67d0496" />
 
-# apo-volume
+# AorinEQ
 
 Native Windows tray volume control for USB DACs that ignore Windows volume (e.g. HiBy FC5),
 implemented as an [Equalizer APO](https://equalizerapo.com) preamp controller.
@@ -8,7 +8,7 @@ implemented as an [Equalizer APO](https://equalizerapo.com) preamp controller.
 ## Why
 
 Some USB DACs advertise USB hardware volume but ignore the host's volume commands, leaving
-the Windows volume slider dead — the slider moves, nothing changes. apo-volume intercepts
+the Windows volume slider dead — the slider moves, nothing changes. AorinEQ intercepts
 your volume keys and applies a Windows-style 0–100% volume as digital attenuation in the
 Equalizer APO chain, before audio ever reaches the DAC. You get working volume keys, an
 on-screen flyout, and a tray slider again. Works alongside
@@ -52,7 +52,7 @@ Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in
 
 Windows does not deliver keystrokes to normal apps while an elevated (admin)
 window — many games and anticheats — has focus, so volume keys appear dead
-in-game. Fix: Settings → "Run as administrator". apo-volume relaunches
+in-game. Fix: Settings → "Run as administrator". AorinEQ relaunches
 elevated (one UAC prompt), and "Start with Windows" automatically switches
 from the registry Run key to a scheduled task so elevated autostart stays
 silent at boot.
@@ -64,18 +64,18 @@ the app manually.
 
 ## First-run setup
 
-apo-volume needs [Equalizer APO](https://equalizerapo.com) (free, open-source, GPLv2). If it
-isn't installed, apo-volume opens a **setup guide** on first run: it downloads the official
+AorinEQ needs [Equalizer APO](https://equalizerapo.com) (free, open-source, GPLv2). If it
+isn't installed, AorinEQ opens a **setup guide** on first run: it downloads the official
 installer for you, starts it, and tells you exactly what to do in the one step that needs you —
 ticking your speakers/headphones in Equalizer APO's Configurator. Afterwards it verifies the
 install against your current playback device and offers a one-click **audio restart** (a reboot
 substitute). The guide can be reopened anytime from Settings → **Setup guide…**, which also
 shows a live status line and an **Open Configurator** shortcut for enabling other devices.
-apo-volume never bundles Equalizer APO — the installer always comes from its official home.
+AorinEQ never bundles Equalizer APO — the installer always comes from its official home.
 
 ## OSD styles and skins
 
-apo-volume displays volume changes as a floating on-screen indicator (OSD). Four display styles
+AorinEQ displays volume changes as a floating on-screen indicator (OSD). Four display styles
 are available via Settings → Display:
 
 - **Dark pill** — Default. Dark rounded rectangle with white text percentage, positioned top-right
@@ -83,7 +83,7 @@ are available via Settings → Display:
 - **Windows 11** — Follows your system theme and accent color. Rounded rectangle matching Windows
   design language.
 - **Minimal bar** — Horizontal or vertical bar showing fill level only, no text.
-- **Custom skin** — Load a folder-based skin from `%APPDATA%\apo-volume\skins\`.
+- **Custom skin** — Load a folder-based skin from `%APPDATA%\AorinEQ\skins\`.
 
 ### Position and appearance settings
 
@@ -100,7 +100,7 @@ All styles (including custom skins) support:
 
 ### Custom skin format
 
-Create a folder at `%APPDATA%\apo-volume\skins\<your-skin-name>\` containing:
+Create a folder at `%APPDATA%\AorinEQ\skins\<your-skin-name>\` containing:
 
 - **empty.png** — Image representing 0% volume. Any size and shape (e.g. a cat, bar, circle).
 - **full.png** — Image representing 100% volume. Must be identical dimensions to empty.png.
@@ -171,11 +171,15 @@ aorineq://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha256=<
 - `sha256` — optional but recommended. Hex SHA-256 of the zip; the download is rejected if the
   bytes don't match.
 
-Clicking a link never installs anything by itself: apo-volume always shows a confirmation
+Clicking a link never installs anything by itself: AorinEQ always shows a confirmation
 dialog naming the skin and the host first, with **Install & Use** / **Install only** /
 **Cancel**. Malformed links produce only a tray balloon. The scheme is registered per-user at
 startup and can be turned off with Settings → **Enable aorineq:// links**. EQ presets have
-their own actions — see [`aorineq://` EQ links](#apo-volume-eq-links).
+their own actions — see [`aorineq://` EQ links](#aorineq-eq-links).
+
+`apo-volume://` — the scheme this app used before v3.0.0 — stays registered as an alias and
+resolves identically, so links written against the old name keep working. Write new links with
+`aorineq://`.
 
 Example (HTML):
 
@@ -232,8 +236,8 @@ Skins are not limited to bars. Examples:
 
 ### Fallback behavior
 
-If a custom skin folder is invalid or missing required images, apo-volume falls back to the
-Dark pill style and displays a warning in the system tray. Check `%APPDATA%\apo-volume\` for
+If a custom skin folder is invalid or missing required images, AorinEQ falls back to the
+Dark pill style and displays a warning in the system tray. Check `%APPDATA%\AorinEQ\` for
 a log file if skins fail to load.
 
 ## Equalizer
@@ -256,7 +260,7 @@ say — Simple mode adjusts on top of them and says so; it never discards or reo
 installs start in Simple; if you already have bands configured, you keep Advanced.
 
 Presets are plain Equalizer APO ParametricEQ `.txt` files in
-`%APPDATA%\apo-volume\presets`, so they interchange directly with AutoEq, Peace and anything
+`%APPDATA%\AorinEQ\presets`, so they interchange directly with AutoEq, Peace and anything
 else that speaks that format.
 
 ### `aorineq://` EQ links
@@ -265,7 +269,7 @@ A site, a forum post or a chat message can hand someone a tuning with one click.
 downloaded, applied or saved without a confirmation dialog that shows the source, which scope it
 will land in, the band count, the preamp, and the **response curve itself**. For a hosted preset
 the file is only fetched when you press **Preview** (which just draws it) or one of the two
-accept buttons — a link on its own never makes apo-volume touch the network.
+accept buttons — a link on its own never makes AorinEQ touch the network.
 
 **A preset inside the link** (no hosting needed) — this is what the editor's **Copy share link**
 button produces:
@@ -341,21 +345,21 @@ Keys step 2% per press. Never exceeds 0 dB, so no digital clipping.
 
 ## Auto-update
 
-apo-volume keeps itself up to date from this repo's GitHub Releases (checked at startup and
+AorinEQ keeps itself up to date from this repo's GitHub Releases (checked at startup and
 every 24 hours). Updates are verified — the release's `AorinEQ.exe.sha256` must match the
 downloaded exe — and applied in place: the running exe is renamed to `AorinEQ.exe.old`, the
 new build takes its path, and the app restarts itself (when running as administrator it
 finishes on the next start instead, to avoid a surprise UAC prompt). If the exe's folder isn't
 writable, a tray balloon links to the release page instead. Opt out at first run or via
-Settings → **Keep apo-volume up to date automatically**; **Check now** checks on demand.
+Settings → **Keep AorinEQ up to date automatically**; **Check now** checks on demand.
 
 ## Notes
 
 - Exclusive-mode audio (ASIO / WASAPI exclusive) bypasses Equalizer APO and is unaffected.
 - Keys are intercepted system-wide while the app runs; quitting restores normal handling.
-- Peace's own pre-amp slider stacks additively with apo-volume's preamp (both `Preamp:` lines
+- Peace's own pre-amp slider stacks additively with AorinEQ's preamp (both `Preamp:` lines
   apply) — keep Peace's pre-amp at 0 dB.
-- If Peace rewrites `config.txt`, apo-volume automatically restores its include line.
+- If Peace rewrites `config.txt`, AorinEQ automatically restores its include line.
 - If `aorineq.txt` becomes unwritable (e.g. after an Equalizer APO reinstall), a tray
   balloon warns you instead of failing silently.
 
