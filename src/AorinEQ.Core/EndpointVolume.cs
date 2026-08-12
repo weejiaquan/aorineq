@@ -34,7 +34,10 @@ public sealed class EndpointVolume : IDisposable
 
     private readonly object _lock = new();
     private readonly Guid _eventContext = Guid.NewGuid();
-    private readonly VolumeCallback _volumeCallback;
+    /// <summary>Created fresh for each activation and holding the endpoint id it was registered
+    /// against, so a notification identifies its OWN device instead of reading whichever device is
+    /// current by the time it is handled — during a switch those are not the same device.</summary>
+    private VolumeCallback? _volumeCallback;
     private readonly NotificationClient _notificationClient;
     /// <summary>Everything the COM callbacks would otherwise have done inline, run in arrival
     /// order on one thread that is ours, not MMDevAPI's.</summary>
@@ -68,7 +71,6 @@ public sealed class EndpointVolume : IDisposable
 
     public EndpointVolume()
     {
-        _volumeCallback = new VolumeCallback(this);
         _notificationClient = new NotificationClient(this);
         // Best-effort eager start so device-change tracking works even before the first
         // set/read; on failure every public method retries via GetVolume().
@@ -173,10 +175,14 @@ public sealed class EndpointVolume : IDisposable
         _disposed = true;
         _notifications.Dispose();
 
-        // Bounded: the only way the lock is still held here is an action wedged inside a COM call
-        // that cannot be cancelled, and shutdown must not hang behind it. Skipping the teardown
-        // then leaks a registration into a process that is exiting anyway — the trade this
-        // release exists to avoid is the opposite one, a Dispose that never returns.
+        // Bounded: with the queue stopped, the only way the lock is still held here is an action
+        // wedged inside a COM call that cannot be cancelled, and shutdown must not hang behind it.
+        // Skipping the teardown then leaks a registration and two RCWs — into a process that is on
+        // its way out, since this type is disposed at exit. Handing the teardown to a background
+        // thread instead would not recover them either: that thread would wait on the same lock the
+        // same wedged call is holding, and park forever. A Dispose that always returns is worth
+        // more than a teardown that sometimes cannot happen; a Dispose that never returns is the
+        // bug this release exists to fix.
         if (!Monitor.TryEnter(_lock, DisposeLockTimeout)) return;
         try
         {
@@ -246,13 +252,18 @@ public sealed class EndpointVolume : IDisposable
                     var iid = typeof(IAudioEndpointVolume).GUID;
                     if (device.Activate(ref iid, ClsCtxAll, IntPtr.Zero, out ptr) < 0 || ptr == IntPtr.Zero)
                         return null;
+                    // Read the id BEFORE registering: the callback must be able to name its own
+                    // endpoint from the moment it can fire.
+                    string? deviceId = ReadDeviceId(device);
                     var volume = (IAudioEndpointVolume)Marshal.GetObjectForIUnknown(ptr);
-                    if (volume.RegisterControlChangeNotify(_volumeCallback) < 0)
+                    var callback = new VolumeCallback(this, deviceId);
+                    if (volume.RegisterControlChangeNotify(callback) < 0)
                     {
                         Marshal.ReleaseComObject(volume);
                         return null;
                     }
-                    _volumeDeviceId = ReadDeviceId(device);
+                    _volumeCallback = callback;
+                    _volumeDeviceId = deviceId;
                     _volume = volume;
                     return _volume;
                 }
@@ -298,19 +309,26 @@ public sealed class EndpointVolume : IDisposable
         if (_volume is null) return;
         try
         {
-            _volume.UnregisterControlChangeNotify(_volumeCallback);
+            // The exact instance that was registered for THIS activation, not a shared one.
+            if (_volumeCallback is not null)
+                _volume.UnregisterControlChangeNotify(_volumeCallback);
         }
         catch (COMException) { }
         catch (InvalidComObjectException) { }
         Marshal.ReleaseComObject(_volume);
         _volume = null;
+        _volumeCallback = null;
     }
 
     /// <summary>COM CALLBACK THREAD — capture only. <paramref name="data"/> points at memory that
     /// is valid only for the duration of this call, so the struct is read here; the event is raised
     /// on the worker. Swallows the echo of this instance's own sets (matching event context);
     /// everything else is external. No MMDevAPI call may appear in this method.</summary>
-    private void OnVolumeNotification(IntPtr data)
+    /// <param name="deviceId">The endpoint this callback was registered against, captured at
+    /// activation. NOT re-read from the instance: a notification that was already travelling when
+    /// the default device changed would otherwise be stamped with the device that replaced it, and
+    /// the old device's volume would be written into the new one's state.</param>
+    private void OnVolumeNotification(IntPtr data, string? deviceId)
     {
         if (data == IntPtr.Zero || _disposed) return;
         AudioVolumeNotificationData notification;
@@ -323,16 +341,25 @@ public sealed class EndpointVolume : IDisposable
             return;
         }
         if (notification.EventContext == _eventContext) return;
-        // Stamped with the endpoint that was activated when the notification arrived, not with
-        // whatever is current by the time the worker gets to it.
-        string? deviceId = _volumeDeviceId;
         int percent = ScalarToPercent(notification.MasterVolume);
         bool muted = notification.Muted != 0;
-        _notifications.Post(() => Changed?.Invoke(deviceId, percent, muted));
+        _notifications.Post(() =>
+        {
+            if (_disposed) return;
+            Changed?.Invoke(deviceId, percent, muted);
+        });
     }
 
     /// <summary>COM CALLBACK THREAD — hand off and return. Every line of the actual work is in
-    /// <see cref="HandleDefaultRenderDeviceChanged"/>, because all of it calls MMDevAPI.</summary>
+    /// <see cref="HandleDefaultRenderDeviceChanged"/>, because all of it calls MMDevAPI.
+    ///
+    /// The endpoint id the callback carries is deliberately NOT forwarded, and the handler re-reads
+    /// the CURRENT default instead. This is convergence, not carelessness: if the device changes
+    /// A -> B -> C faster than the queue drains, activating the B the notification named would put
+    /// the app on a device the user has already left, and it would stay there. Re-reading means
+    /// every queued action moves toward the truth and the last one is always right — and because
+    /// the queue drops nothing, there is always a last one. What is lost is only the intermediate
+    /// hop, which nothing wants.</summary>
     private void OnDefaultRenderDeviceChanged()
     {
         if (_disposed) return;
@@ -348,20 +375,31 @@ public sealed class EndpointVolume : IDisposable
             if (_disposed) return;
             ReleaseVolumeLocked(); // the TryRead below activates the new endpoint
         }
+        // Re-checked before each hand-off outwards: Dispose only waits a bounded time for an
+        // action that has already started, so this one can still be running after it returned.
+        if (_disposed) return;
         DefaultDeviceChanged?.Invoke();
+        if (_disposed) return;
         // TryRead re-activates on the NEW endpoint first, so _volumeDeviceId names it.
         if (TryRead() is { } state)
             Changed?.Invoke(_volumeDeviceId, state.Percent, state.Muted);
     }
 
+    /// <summary>One per activation, carrying the endpoint id it was registered against.</summary>
     private sealed class VolumeCallback : IAudioEndpointVolumeCallback
     {
         private readonly EndpointVolume _owner;
-        public VolumeCallback(EndpointVolume owner) => _owner = owner;
+        private readonly string? _deviceId;
+
+        public VolumeCallback(EndpointVolume owner, string? deviceId)
+        {
+            _owner = owner;
+            _deviceId = deviceId;
+        }
 
         public int OnNotify(IntPtr notifyData)
         {
-            _owner.OnVolumeNotification(notifyData);
+            _owner.OnVolumeNotification(notifyData, _deviceId);
             return 0;
         }
     }
