@@ -156,10 +156,14 @@ public class ApoWriterTests : IDisposable
         using (new FileStream(w.VolumeFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             w.WriteConfig(VolumeModel(-42));
-            Thread.Sleep(250); // the write attempt happens and fails in here
+            // Flush is the synchronous barrier, so the attempt has provably HAPPENED (and failed)
+            // by the time it returns — no sleep to outrun, nothing for a slow machine to skip.
+            w.Flush();
             var locked = File.ReadAllText(w.VolumeFilePath);
-            _out.WriteLine("content while a reader holds the file:\n" + locked);
+            _out.WriteLine($"content after a flushed write attempt under a reader lock "
+                + $"({w.WriteCount} successful writes so far):\n{locked}");
             Assert.DoesNotContain("Preamp: -42.0 dB", locked); // premise: the replace really is blocked
+            Assert.Equal(1, w.WriteCount);                     // only the baseline ever succeeded
         }
 
         // Reader gone. NO further WriteConfig — the pending state must still converge on disk.
@@ -171,8 +175,10 @@ public class ApoWriterTests : IDisposable
             if (content.Contains("Preamp: -42.0 dB")) break;
             Thread.Sleep(20);
         }
-        _out.WriteLine($"content {sw.ElapsedMilliseconds} ms after the reader released:\n{content}");
+        _out.WriteLine($"content {sw.ElapsedMilliseconds} ms after the reader released "
+            + $"({w.WriteCount} successful writes):\n{content}");
         Assert.Contains("Preamp: -42.0 dB", content);
+        Assert.Equal(2, w.WriteCount); // baseline + exactly one recovery: no double-write
         Assert.Empty(Directory.GetFiles(_dir).Where(f =>
             Path.GetFileName(f) is not ("apo-volume.txt" or "config.txt")));
     }
@@ -196,10 +202,11 @@ public class ApoWriterTests : IDisposable
                 w.WriteConfig(VolumeModel(-p));
                 Thread.Sleep(15); // key-repeat cadence, faster than the 50 ms coalescer window
             }
-            Thread.Sleep(250); // the burst's trailing write attempt happens (and fails) in here
+            w.Flush(); // barrier: the burst's trailing attempt has provably happened, and failed
             var locked = File.ReadAllText(w.VolumeFilePath);
             _out.WriteLine("content at the end of the blocked burst:\n" + locked);
             Assert.Contains("Preamp: -1.0 dB", locked); // nothing from the burst got through
+            Assert.Equal(1, w.WriteCount);
         }
 
         // No further WriteConfig: -20 (the last request) must arrive by itself.
@@ -215,11 +222,52 @@ public class ApoWriterTests : IDisposable
             + $"({w.WriteCount} successful writes of 20 requests):\n{content}");
         Assert.Contains("Preamp: -20.0 dB", content);
 
-        // And it must settle there — no queued straggler may roll the value back.
+        // And it must settle there — no queued straggler may roll the value back or rewrite it.
         Thread.Sleep(1000);
         var settled = File.ReadAllText(w.VolumeFilePath);
-        _out.WriteLine("content after settling:\n" + settled);
+        _out.WriteLine($"content after settling ({w.WriteCount} successful writes):\n{settled}");
         Assert.Contains("Preamp: -20.0 dB", settled);
+        Assert.Equal(2, w.WriteCount); // baseline + one recovery: the other 19 requests are gone
+                                       // for good, and the spent retries wrote nothing extra
+    }
+
+    /// <summary>Shutdown is the one moment with no later render to fall back on, and the async
+    /// ladder dies with the process — so Dispose has to run the retries itself. Dispose is
+    /// called while the reader still holds the file (which also stops the async ladder, so only
+    /// the shutdown drain can produce a pass here), and the reader lets go mid-ladder.</summary>
+    [Fact]
+    public void Dispose_lands_the_last_state_when_the_file_is_locked_at_exit()
+    {
+        var w = new ApoWriter(_dir);
+        w.WriteConfig(VolumeModel(-10));
+        w.Flush();
+        Thread.Sleep(120);
+
+        var reader = new FileStream(w.VolumeFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var release = new Thread(() => { Thread.Sleep(150); reader.Dispose(); }) { IsBackground = true };
+        try
+        {
+            w.WriteConfig(VolumeModel(-77));
+            w.Flush(); // provably attempted, provably failed
+            Assert.DoesNotContain("Preamp: -77.0 dB", File.ReadAllText(w.VolumeFilePath));
+            release.Start();
+        }
+        catch
+        {
+            reader.Dispose();
+            throw;
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        w.Dispose();
+        sw.Stop();
+        Assert.True(release.Join(TimeSpan.FromSeconds(5)), "reader release thread did not finish");
+
+        var content = File.ReadAllText(w.VolumeFilePath);
+        _out.WriteLine($"content after Dispose ({sw.ElapsedMilliseconds} ms):\n{content}");
+        Assert.Contains("Preamp: -77.0 dB", content);
+        Assert.True(sw.ElapsedMilliseconds < 2000,
+            $"shutdown must stay bounded, took {sw.ElapsedMilliseconds} ms");
     }
 
     [Fact]
