@@ -30,11 +30,47 @@ public static class FileNames
     /// unselectable and undeletable.</summary>
     public static bool IsPathSafe(string name) => ValidatePathSafety(name, "Name") is null;
 
+    /// <summary>Characters Windows allows in a file name but which let a name lie about itself.
+    /// The bidi overrides, embeddings and isolates reverse how the rest of a string renders, so
+    /// a preset named with one can display as something else entirely — in a confirm dialog, in
+    /// the editor, in Explorer. C1 controls are refused for the same reason C0 already is
+    /// (<see cref="Path.GetInvalidFileNameChars"/> covers 0–31 but not 128–159). Zero-width
+    /// joiners and the like are NOT in here: they are how emoji names are spelled.</summary>
+    private static bool IsDeceptive(char c) =>
+        char.IsControl(c)
+        || c is (char)0x200E or (char)0x200F         // LRM, RLM
+        || c is >= (char)0x202A and <= (char)0x202E  // LRE, RLE, PDF, LRO, RLO
+        || c is >= (char)0x2066 and <= (char)0x2069; // LRI, RLI, FSI, PDI
+
+    /// <summary>Shortens an untrusted name for display without cutting a character in half —
+    /// truncation counts text elements (graphemes), not UTF-16 code units, so a combining
+    /// sequence or an astral character can't be sliced into a different glyph.</summary>
+    public static string ForDisplay(string name, int maxLength)
+    {
+        if (maxLength <= 0)
+            return "";
+        if (name.Length <= maxLength) // code units are an upper bound on text elements
+            return name;
+        var elements = System.Globalization.StringInfo.GetTextElementEnumerator(name);
+        var kept = new System.Text.StringBuilder();
+        int count = 0;
+        while (elements.MoveNext())
+        {
+            if (count == maxLength - 1)
+                return kept.Append('…').ToString(); // more to come: leave room for the ellipsis
+            kept.Append(elements.GetTextElement());
+            count++;
+        }
+        return kept.ToString(); // fewer text elements than the cap after all
+    }
+
     private static string? ValidatePathSafety(string name, string what)
     {
         var trimmed = name.Trim();
         if (trimmed.Length == 0)
             return $"{what} cannot be empty.";
+        if (trimmed.Any(IsDeceptive))
+            return $"{what} contains characters that can disguise how it is displayed.";
         if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             return $"{what} contains characters not allowed in file names.";
         if (trimmed.EndsWith('.'))
