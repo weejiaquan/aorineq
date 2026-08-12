@@ -1,135 +1,209 @@
-<Window x:Class="AorinEQ.UI.SettingsWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="AorinEQ settings" Icon="/AorinEQ.ico" Width="860" SizeToContent="Height"
-        MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
-        ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
-        ShowInTaskbar="True">
-    <!-- Two-column layout so the window height stays inside the work area (the single-column
-         stack outgrew short screens); the ScrollViewer is only a safety net for tiny displays. -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <Grid Margin="20">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="28" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+<ui:FluentWindow x:Class="AorinEQ.UI.SettingsWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="AorinEQ settings" Icon="/AorinEQ.ico"
+                 Width="900" Height="640"
+                 MinWidth="720" MinHeight="440"
+                 MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica"
+                 WindowCornerPreference="Round"
+                 ShowInTaskbar="True">
+    <!-- MaxHeight stays bound to the work area: the v1.8.0 fix for a Settings window that grew
+         past a short screen must not regress, and a NavigationView does not shrink content on its
+         own. Each section scrolls inside itself, so the window never needs to grow to fit one. -->
+    <Window.Resources>
+        <!-- The card idiom for a settings row: icon + title + subtitle on the left, control on the
+             right. Applied to every CardControl so the six sections stay visually identical. -->
+        <Thickness x:Key="RowMargin">0,0,0,8</Thickness>
+        <Style x:Key="SectionHeading" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="BodyStrong" />
+            <Setter Property="Margin" Value="2,16,0,8" />
+        </Style>
+        <!-- The 3x3 anchor picker. WPF-UI's implicit ToggleButton style is a pill whose checked
+             state is a subtle fill — readable on a toolbar, but here nine of them sit side by side
+             and the user has to see AT A GLANCE which corner is chosen, so the checked cell takes
+             the system accent outright. -->
+        <Style x:Key="AnchorCell" TargetType="ToggleButton"
+               BasedOn="{StaticResource {x:Type ToggleButton}}">
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Style.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="RowSubtitle" TargetType="ui:TextBlock">
+            <Setter Property="FontTypography" Value="Caption" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+    </Window.Resources>
 
-            <!-- Left column: how volume is controlled + app behavior + EAPO + about. -->
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="Volume control" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <RadioButton x:Name="SystemModeRadio" GroupName="VolumeMode" Margin="0,4,0,8"
-                             Checked="OnVolumeModeChanged">
-                    <StackPanel>
-                        <TextBlock Text="Replace Windows volume" FontWeight="SemiBold" />
-                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray"
-                                   Text="Volume keys change the normal Windows volume and show your skinned OSD instead of the Windows one. Using Equalizer APO for EQ/PEQ? Your EQ is never touched — set it once, control loudness natively." />
-                    </StackPanel>
-                </RadioButton>
-                <RadioButton x:Name="EapoModeRadio" GroupName="VolumeMode" Margin="0,0,0,4"
-                             Checked="OnVolumeModeChanged">
-                    <StackPanel>
-                        <TextBlock Text="Equalizer APO preamp slider" FontWeight="SemiBold" />
-                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray"
-                                   Text="Volume keys write Equalizer APO's preamp; Windows volume stays parked. Attenuation happens inside the APO chain before your EQ — for setups where the Windows volume path is broken or you want pre-DAC level control. Requires Equalizer APO." />
-                    </StackPanel>
-                </RadioButton>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-                <Separator Margin="0,12,0,16" />
+        <ui:TitleBar Grid.Row="0" Title="AorinEQ settings" Icon="{ui:ImageIcon '/AorinEQ.ico'}" />
 
-                <TextBlock Text="General" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-                <CheckBox x:Name="AutostartBox" Content="Start with Windows" Margin="0,4"
-                          Checked="OnAutostartChanged" Unchecked="OnAutostartChanged" />
-                <CheckBox x:Name="RunAsAdminBox" Margin="0,10,0,2"
-                          Checked="OnRunAsAdminChanged" Unchecked="OnRunAsAdminChanged">
-                    <TextBlock TextWrapping="Wrap"
-                               Text="Run as administrator (required for volume keys to work while elevated games are focused)" />
-                </CheckBox>
-                <TextBlock x:Name="ElevationStateText" Margin="24,0,0,0" FontSize="11" Foreground="Gray" />
-                <CheckBox x:Name="ProtocolLinksBox" Margin="0,10,0,2"
-                          Checked="OnProtocolLinksChanged" Unchecked="OnProtocolLinksChanged">
-                    <TextBlock TextWrapping="Wrap"
-                               Text="Enable aorineq:// links (install shared skins straight from websites — always asks first)" />
-                </CheckBox>
+        <ui:NavigationView x:Name="Nav" Grid.Row="1"
+                           PaneDisplayMode="Left" OpenPaneLength="220"
+                           IsBackButtonVisible="Collapsed" IsPaneToggleVisible="True"
+                           FrameMargin="0" TransitionDuration="120"
+                           SelectionChanged="OnSectionSelected">
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem x:Name="NavVolume" Content="Volume" TargetPageTag="volume"
+                                       Icon="{ui:SymbolIcon Speaker224}" />
+                <ui:NavigationViewItem x:Name="NavOsd" Content="On-screen display" TargetPageTag="osd"
+                                       Icon="{ui:SymbolIcon Desktop24}" />
+                <ui:NavigationViewItem x:Name="NavSkins" Content="Skins" TargetPageTag="skins"
+                                       Icon="{ui:SymbolIcon Color24}" />
+                <ui:NavigationViewItem x:Name="NavEqualizer" Content="Equalizer" TargetPageTag="equalizer"
+                                       Icon="{ui:SymbolIcon Options24}" />
+            </ui:NavigationView.MenuItems>
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem x:Name="NavUpdates" Content="Updates" TargetPageTag="updates"
+                                       Icon="{ui:SymbolIcon ArrowDownload24}" />
+                <ui:NavigationViewItem x:Name="NavAbout" Content="About" TargetPageTag="about"
+                                       Icon="{ui:SymbolIcon Info24}" />
+            </ui:NavigationView.FooterMenuItems>
+        </ui:NavigationView>
 
-                <Separator Margin="0,16" />
+        <!-- The six section bodies. They are declared here, inside the window's namescope, so every
+             control below keeps the generated field the code-behind already uses — a NavigationView
+             page per section would have moved thirty named controls into six new namescopes and
+             rewritten every handler for a release that changes no behaviour. At construction they
+             are detached from this holder and handed to the NavigationView's frame one at a time
+             (see SettingsWindow.Navigate), so exactly one is ever parented. The holder itself is
+             collapsed and never renders. -->
+        <Grid x:Name="SectionHolder" Grid.Row="1" Visibility="Collapsed">
 
-                <TextBlock Text="Equalizer APO" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <TextBlock x:Name="EapoStatusText" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <Button x:Name="OpenConfiguratorButton" Content="Open Configurator"
-                            Click="OnOpenConfigurator" Padding="8,2" Margin="0,0,8,0" />
-                    <Button x:Name="SetupGuideButton" Content="Setup guide…"
-                            Click="OnOpenSetupGuide" Padding="8,2" />
+            <!-- ============================ VOLUME ============================ -->
+            <ScrollViewer x:Name="SectionVolume" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+                <StackPanel>
+                    <ui:TextBlock FontTypography="Title" Text="Volume" Margin="2,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                                  Text="How the volume keys change your loudness, and how far each press moves it." />
+
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Volume control" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Replace Windows volume" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Volume keys change the normal Windows volume and show your skinned OSD instead of the Windows one. Using Equalizer APO for EQ/PEQ? Your EQ is never touched — set it once, control loudness natively." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <RadioButton x:Name="SystemModeRadio" GroupName="VolumeMode"
+                                     Checked="OnVolumeModeChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Equalizer APO preamp slider" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Volume keys write Equalizer APO's preamp; Windows volume stays parked. Attenuation happens inside the APO chain before your EQ — for setups where the Windows volume path is broken or you want pre-DAC level control. Requires Equalizer APO." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <RadioButton x:Name="EapoModeRadio" GroupName="VolumeMode"
+                                     Checked="OnVolumeModeChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Volume key step size" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="How many percent one press of a volume key moves." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="StepCombo" MinWidth="110" SelectionChanged="OnStepChanged">
+                            <ComboBoxItem Content="1%" Tag="1" />
+                            <ComboBoxItem Content="2%" Tag="2" />
+                            <ComboBoxItem Content="5%" Tag="5" />
+                        </ComboBox>
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Per-device volume" />
+                                <ui:TextBlock x:Name="DeviceVolumeText" Style="{StaticResource RowSubtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                    </ui:CardControl>
+
+                    <!-- Startup lives here rather than in a section of its own: the elevation
+                         setting exists only so the volume KEYS keep working while an elevated game
+                         has focus, which makes it a volume concern more than a general one. -->
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Startup" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Start with Windows" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Launch AorinEQ automatically when you sign in." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AutostartBox"
+                                         Checked="OnAutostartChanged" Unchecked="OnAutostartChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Run as administrator" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Required for the volume keys to work while elevated games are focused." />
+                                <ui:TextBlock x:Name="ElevationStateText" Style="{StaticResource RowSubtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="RunAsAdminBox"
+                                         Checked="OnRunAsAdminChanged" Unchecked="OnRunAsAdminChanged" />
+                    </ui:CardControl>
                 </StackPanel>
+            </ScrollViewer>
 
-                <Separator Margin="0,16" />
+            <!-- ============================== OSD ============================== -->
+            <ScrollViewer x:Name="SectionOsd" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+                <StackPanel>
+                    <ui:TextBlock FontTypography="Title" Text="On-screen display" Margin="2,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                                  Text="The overlay that appears when you press a volume key." />
 
-                <TextBlock Text="Equalizer" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,6"
-                           Text="Per-device parametric EQ with presets, AutoEq profiles and live meters." />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <Button x:Name="OpenEqualizerButton" Content="Open equalizer…"
-                            Click="OnOpenEqualizer" Padding="8,2" />
-                </StackPanel>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Style" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Pick a built-in look, or your own skin." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="StyleCombo" MinWidth="160" SelectionChanged="OnStyleChanged">
+                            <ComboBoxItem Content="Dark pill" Tag="dark-pill" />
+                            <ComboBoxItem Content="Windows 11" Tag="fluent" />
+                            <ComboBoxItem Content="Minimal bar" Tag="minimal-bar" />
+                            <ComboBoxItem Content="Custom skin" Tag="skin" />
+                        </ComboBox>
+                    </ui:CardControl>
 
-                <Separator Margin="0,16" />
-
-                <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <CheckBox x:Name="AutoUpdateBox" Content="Keep AorinEQ up to date automatically"
-                          Margin="0,4,0,6" Checked="OnAutoUpdateChanged" Unchecked="OnAutoUpdateChanged" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <Button x:Name="CheckUpdatesButton" Content="Check now"
-                            Click="OnCheckUpdates" Padding="8,2" />
-                </StackPanel>
-                <TextBlock x:Name="UpdateStatusText" FontSize="11" Foreground="Gray"
-                           TextWrapping="Wrap" Margin="0,0,0,2" />
-
-                <Separator Margin="0,16" />
-
-                <TextBlock Text="About" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <TextBlock x:Name="VersionText" FontSize="12" Foreground="Gray" />
-                <TextBlock FontSize="12" Margin="0,2,0,0">
-                    <Hyperlink NavigateUri="https://github.com/weejiaquan/aorineq"
-                               RequestNavigate="OnNavigate">github.com/weejiaquan/aorineq</Hyperlink>
-                </TextBlock>
-            </StackPanel>
-
-            <!-- Right column: everything about the OSD itself. -->
-            <StackPanel Grid.Column="2">
-                <TextBlock Text="OSD" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-
-                <TextBlock Text="Style" Margin="0,0,0,2" />
-                <ComboBox x:Name="StyleCombo" SelectionChanged="OnStyleChanged" Margin="0,0,0,10">
-                    <ComboBoxItem Content="Dark pill" Tag="dark-pill" />
-                    <ComboBoxItem Content="Windows 11" Tag="fluent" />
-                    <ComboBoxItem Content="Minimal bar" Tag="minimal-bar" />
-                    <ComboBoxItem Content="Custom skin" Tag="skin" />
-                </ComboBox>
-
-                <TextBlock Text="Skin" Margin="0,0,0,2" />
-                <ComboBox x:Name="SkinCombo" SelectionChanged="OnSkinChanged" Margin="0,0,0,6" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button x:Name="OpenSkinsFolderButton" Content="Open skins folder"
-                            Click="OnOpenSkinsFolder" Padding="8,2" Margin="0,0,8,0" />
-                    <Button x:Name="RescanSkinsButton" Content="Rescan" Click="OnRescanSkins" Padding="8,2" />
-                    <Button x:Name="SkinDesignerButton" Content="Skin designer…"
-                            Click="OnOpenSkinDesigner" Padding="8,2" Margin="8,0,0,0" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button x:Name="ImportSkinButton" Content="Import skin…" Click="OnImportSkin" Padding="8,2"
-                            ToolTip="Install a skin shared as a zip file" />
-                </StackPanel>
-
-                <Grid Margin="0,0,0,10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="16" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Position" Margin="0,0,0,4" />
-                        <Grid Width="120" Height="120" HorizontalAlignment="Left">
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Position" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Which screen edge or corner the OSD is anchored to." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <Grid Width="132" Height="132">
                             <Grid.RowDefinitions>
                                 <RowDefinition />
                                 <RowDefinition />
@@ -140,48 +214,213 @@
                                 <ColumnDefinition />
                                 <ColumnDefinition />
                             </Grid.ColumnDefinitions>
-                            <ToggleButton x:Name="AnchorTopLeft" Grid.Row="0" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Margin="2" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopLeft" Grid.Row="0" Grid.Column="0" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
                             <!-- Center cell: present but disabled/empty — the OSD can't be anchored to the screen
                                  center, only its 8 edges/corners, so this exists just to complete the 3x3 grid. -->
-                            <ToggleButton Grid.Row="1" Grid.Column="1" Margin="2" IsEnabled="False" IsHitTestVisible="False" />
-                            <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Margin="2" Click="OnAnchorClicked" />
-                            <ToggleButton x:Name="AnchorBottomRight" Grid.Row="2" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton Grid.Row="1" Grid.Column="1" Style="{StaticResource AnchorCell}" IsEnabled="False" IsHitTestVisible="False" />
+                            <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomRight" Grid.Row="2" Grid.Column="2" Style="{StaticResource AnchorCell}" Click="OnAnchorClicked" />
                         </Grid>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
-                        <TextBlock Text="X offset" />
-                        <TextBox x:Name="OffsetXBox" LostFocus="OnOffsetChanged" KeyDown="OnOffsetKeyDown" Margin="0,0,0,6" />
-                        <TextBlock Text="Y offset" />
-                        <TextBox x:Name="OffsetYBox" LostFocus="OnOffsetChanged" KeyDown="OnOffsetKeyDown" />
-                    </StackPanel>
-                </Grid>
+                    </ui:CardControl>
 
-                <TextBlock Margin="0,0,0,2">
-                    <Run Text="Hide delay: " /><Run x:Name="HideDelayLabel" Text="1.5s" />
-                </TextBlock>
-                <Slider x:Name="HideDelaySlider" Minimum="0.5" Maximum="5" TickFrequency="0.1"
-                        IsSnapToTickEnabled="True" ValueChanged="OnHideDelayChanged" Margin="0,0,0,10" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Offset" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Nudge the OSD away from its anchor, in pixels." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBlock VerticalAlignment="Center" Text="X" Margin="0,0,8,0" />
+                            <ui:TextBox x:Name="OffsetXBox" Width="76" LostFocus="OnOffsetChanged" KeyDown="OnOffsetKeyDown" />
+                            <ui:TextBlock VerticalAlignment="Center" Text="Y" Margin="12,0,8,0" />
+                            <ui:TextBox x:Name="OffsetYBox" Width="76" LostFocus="OnOffsetChanged" KeyDown="OnOffsetKeyDown" />
+                        </StackPanel>
+                    </ui:CardControl>
 
-                <CheckBox x:Name="AnimationCheckBox" Content="Animate fade-out" Margin="0,0,0,6"
-                          Checked="OnAnimationChanged" Unchecked="OnAnimationChanged" />
-                <TextBlock Margin="0,0,0,2">
-                    <Run Text="Animation duration: " /><Run x:Name="AnimationDurationLabel" Text="150ms" />
-                </TextBlock>
-                <Slider x:Name="AnimationDurationSlider" Minimum="50" Maximum="500"
-                        ValueChanged="OnAnimationDurationChanged" Margin="0,0,0,10" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Hide delay" />
+                                <ui:TextBlock x:Name="HideDelayLabel" Style="{StaticResource RowSubtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <Slider x:Name="HideDelaySlider" Width="200" Minimum="0.5" Maximum="5" TickFrequency="0.1"
+                                IsSnapToTickEnabled="True" ValueChanged="OnHideDelayChanged" />
+                    </ui:CardControl>
 
-                <TextBlock Text="Volume key step size" Margin="0,0,0,2" />
-                <ComboBox x:Name="StepCombo" SelectionChanged="OnStepChanged" Margin="0,0,0,10">
-                    <ComboBoxItem Content="1%" Tag="1" />
-                    <ComboBoxItem Content="2%" Tag="2" />
-                    <ComboBoxItem Content="5%" Tag="5" />
-                </ComboBox>
-            </StackPanel>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Animate fade-out" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Fade the OSD away instead of hiding it instantly." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AnimationCheckBox"
+                                         Checked="OnAnimationChanged" Unchecked="OnAnimationChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Animation duration" />
+                                <ui:TextBlock x:Name="AnimationDurationLabel" Style="{StaticResource RowSubtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <Slider x:Name="AnimationDurationSlider" Width="200" Minimum="50" Maximum="500"
+                                ValueChanged="OnAnimationDurationChanged" />
+                    </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ============================= SKINS ============================= -->
+            <ScrollViewer x:Name="SectionSkins" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+                <StackPanel>
+                    <ui:TextBlock FontTypography="Title" Text="Skins" Margin="2,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                                  Text="Custom OSD artwork. Skins are folders of images — design your own, or install one someone shared." />
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Active skin" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Used when the OSD style is set to Custom skin." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="SkinCombo" MinWidth="200" SelectionChanged="OnSkinChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Manage skins" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Design a new skin, install one shared as a zip, or open the folder they live in." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button x:Name="SkinDesignerButton" Appearance="Primary" Content="Skin designer"
+                                       Icon="{ui:SymbolIcon PaintBrush24}" Click="OnOpenSkinDesigner" />
+                            <ui:Button x:Name="ImportSkinButton" Content="Import…" Margin="8,0,0,0"
+                                       Icon="{ui:SymbolIcon ArrowDownload24}" Click="OnImportSkin"
+                                       ToolTip="Install a skin shared as a zip file" />
+                            <ui:Button x:Name="OpenSkinsFolderButton" Content="Folder" Margin="8,0,0,0"
+                                       Icon="{ui:SymbolIcon FolderOpen24}" Click="OnOpenSkinsFolder" />
+                            <ui:Button x:Name="RescanSkinsButton" Content="Rescan" Margin="8,0,0,0"
+                                       Icon="{ui:SymbolIcon ArrowSync24}" Click="OnRescanSkins" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Enable aorineq:// links" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Install shared skins and EQ presets straight from websites — always asks first." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="ProtocolLinksBox"
+                                         Checked="OnProtocolLinksChanged" Unchecked="OnProtocolLinksChanged" />
+                    </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- =========================== EQUALIZER =========================== -->
+            <ScrollViewer x:Name="SectionEqualizer" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+                <StackPanel>
+                    <ui:TextBlock FontTypography="Title" Text="Equalizer" Margin="2,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                                  Text="Per-device parametric EQ with presets, AutoEq profiles and live meters." />
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Equalizer editor" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Draggable curve, band strip, presets, AutoEq import and post-EQ meters." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:Button x:Name="OpenEqualizerButton" Appearance="Primary" Content="Open equalizer"
+                                   Icon="{ui:SymbolIcon Options24}" Click="OnOpenEqualizer" />
+                    </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ============================ UPDATES ============================ -->
+            <ScrollViewer x:Name="SectionUpdates" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+                <StackPanel>
+                    <ui:TextBlock FontTypography="Title" Text="Updates" Margin="2,0,0,4" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="2,0,0,8"
+                                  Text="AorinEQ updates itself in place from its GitHub releases." />
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Keep AorinEQ up to date" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Check for a new version at startup and once a day, and install it automatically." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AutoUpdateBox"
+                                         Checked="OnAutoUpdateChanged" Unchecked="OnAutoUpdateChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Check for updates" />
+                                <ui:TextBlock x:Name="UpdateStatusText" Style="{StaticResource RowSubtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:Button x:Name="CheckUpdatesButton" Content="Check now"
+                                   Icon="{ui:SymbolIcon ArrowSync24}" Click="OnCheckUpdates" />
+                    </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ============================= ABOUT ============================= -->
+            <ScrollViewer x:Name="SectionAbout" VerticalScrollBarVisibility="Auto" Padding="24,0,24,24">
+                <StackPanel>
+                    <ui:TextBlock FontTypography="Title" Text="About" Margin="2,0,0,4" />
+
+                    <ui:CardControl Margin="0,8,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock x:Name="VersionText" FontTypography="Body" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="A skinnable volume OSD and parametric equalizer for Windows." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:HyperlinkButton Content="View on GitHub"
+                                            NavigateUri="https://github.com/weejiaquan/aorineq"
+                                            Icon="{ui:SymbolIcon Open24}" />
+                    </ui:CardControl>
+
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Equalizer APO" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock FontTypography="Body" Text="Status" />
+                                <ui:TextBlock x:Name="EapoStatusText" Style="{StaticResource RowSubtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button x:Name="SetupGuideButton" Content="Setup guide"
+                                       Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
+                            <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="8,0,0,0"
+                                       Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
+                        </StackPanel>
+                    </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
         </Grid>
-    </ScrollViewer>
-</Window>
+    </Grid>
+</ui:FluentWindow>

@@ -688,12 +688,13 @@ public partial class App : System.Windows.Application
     /// <summary>Lazily creates (or re-syncs and shows) the single SettingsWindow instance.
     /// Queries autostart state off the dispatcher thread since ScheduledTaskAutostart.IsEnabled()
     /// shells out to schtasks (~100ms); the await resumes back here on the UI thread.</summary>
-    private async void OpenSettings() => await OpenSettingsAsync(focusSkins: false);
+    private async void OpenSettings() => await OpenSettingsAsync(SettingsSections.All[0]);
 
-    /// <summary><paramref name="focusSkins"/> scrolls to and focuses the skin picker — where an
-    /// <c>aorineq://open?page=skins</c> link lands. It must happen after the await, because
-    /// the window may not exist until then.</summary>
-    private async Task OpenSettingsAsync(bool focusSkins)
+    /// <summary><paramref name="section"/> is the sidebar section to land on — where an
+    /// <c>aorineq://open?page=</c> link points, via
+    /// <see cref="SettingsSections.ForProtocolPage"/>. Navigating happens after the await,
+    /// because the window may not exist until then.</summary>
+    private async Task OpenSettingsAsync(string section)
     {
         int version = ++_stateSyncVersion;
         bool autostartEnabled = await IsAutostartEnabledAsync();
@@ -721,8 +722,7 @@ public partial class App : System.Windows.Application
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
-        if (focusSkins)
-            _settingsWindow.FocusSkins();
+        _settingsWindow.Navigate(section);
     }
 
     /// <summary>Opens the setup wizard in informational mode (Settings "Setup guide…" and the
@@ -1150,11 +1150,10 @@ public partial class App : System.Windows.Application
             case ProtocolPages.Designer:
                 OpenSkinDesigner();
                 break;
-            case ProtocolPages.Skins:
-                await OpenSettingsAsync(focusSkins: true);
-                break;
             default:
-                await OpenSettingsAsync(focusSkins: false);
+                // Every remaining page — including the bare "settings" page and anything this
+                // build does not know — opens Settings on the section the routing resolves.
+                await OpenSettingsAsync(SettingsSections.ForProtocolPage(page));
                 break;
         }
     }
