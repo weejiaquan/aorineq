@@ -1,0 +1,26 @@
+<Project>
+
+  <!-- THE ONE PLACE THE PRODUCT VERSION IS WRITTEN.
+
+       The MSBuild SDK imports this file into every project under the repository root before the
+       project's own body, so src/AorinEQ, src/AorinEQ.Core, tests/AorinEQ.Tests and tools/AppIconGen
+       all build with the same <Version> without any of them naming it.
+
+       It lives here because it used not to: the app was released as 3.3.0 while Core still declared
+       3.2.0 in its own csproj, because a release bumped one file and forgot the other. Nothing
+       failed - the Core assembly simply carried a version that named a build nobody shipped. A
+       version that has to be typed twice will eventually be typed once.
+
+       Do NOT re-declare <Version> in a project file. It would win (the project body is imported
+       after this one) and silently restore the drift; VersionSingleSourceTests fails the build if
+       anyone does, and pins this value against the version actually stamped on the built assembly.
+
+       The installer does NOT read this file - installer/AorinEQ.iss asks ISPP for the version
+       components of the exe it packages, so it can only ever name the binary it actually carries,
+       and publish.ps1 refuses to publish if the two disagree. That property is deliberate and this
+       change does not touch it: the chain is csproj version -> built exe -> installer. -->
+  <PropertyGroup>
+    <Version>3.3.0</Version>
+  </PropertyGroup>
+
+</Project>
