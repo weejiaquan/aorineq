@@ -1,0 +1,187 @@
+<Window x:Class="AorinEQ.UI.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AorinEQ settings" Icon="/AorinEQ.ico" Width="860" SizeToContent="Height"
+        MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="True">
+    <!-- Two-column layout so the window height stays inside the work area (the single-column
+         stack outgrew short screens); the ScrollViewer is only a safety net for tiny displays. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="28" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left column: how volume is controlled + app behavior + EAPO + about. -->
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Volume control" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <RadioButton x:Name="SystemModeRadio" GroupName="VolumeMode" Margin="0,4,0,8"
+                             Checked="OnVolumeModeChanged">
+                    <StackPanel>
+                        <TextBlock Text="Replace Windows volume" FontWeight="SemiBold" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray"
+                                   Text="Volume keys change the normal Windows volume and show your skinned OSD instead of the Windows one. Using Equalizer APO for EQ/PEQ? Your EQ is never touched — set it once, control loudness natively." />
+                    </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="EapoModeRadio" GroupName="VolumeMode" Margin="0,0,0,4"
+                             Checked="OnVolumeModeChanged">
+                    <StackPanel>
+                        <TextBlock Text="Equalizer APO preamp slider" FontWeight="SemiBold" />
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="Gray"
+                                   Text="Volume keys write Equalizer APO's preamp; Windows volume stays parked. Attenuation happens inside the APO chain before your EQ — for setups where the Windows volume path is broken or you want pre-DAC level control. Requires Equalizer APO." />
+                    </StackPanel>
+                </RadioButton>
+
+                <Separator Margin="0,12,0,16" />
+
+                <TextBlock Text="General" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+                <CheckBox x:Name="AutostartBox" Content="Start with Windows" Margin="0,4"
+                          Checked="OnAutostartChanged" Unchecked="OnAutostartChanged" />
+                <CheckBox x:Name="RunAsAdminBox" Margin="0,10,0,2"
+                          Checked="OnRunAsAdminChanged" Unchecked="OnRunAsAdminChanged">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Run as administrator (required for volume keys to work while elevated games are focused)" />
+                </CheckBox>
+                <TextBlock x:Name="ElevationStateText" Margin="24,0,0,0" FontSize="11" Foreground="Gray" />
+                <CheckBox x:Name="ProtocolLinksBox" Margin="0,10,0,2"
+                          Checked="OnProtocolLinksChanged" Unchecked="OnProtocolLinksChanged">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Enable aorineq:// links (install shared skins straight from websites — always asks first)" />
+                </CheckBox>
+
+                <Separator Margin="0,16" />
+
+                <TextBlock Text="Equalizer APO" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock x:Name="EapoStatusText" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button x:Name="OpenConfiguratorButton" Content="Open Configurator"
+                            Click="OnOpenConfigurator" Padding="8,2" Margin="0,0,8,0" />
+                    <Button x:Name="SetupGuideButton" Content="Setup guide…"
+                            Click="OnOpenSetupGuide" Padding="8,2" />
+                </StackPanel>
+
+                <Separator Margin="0,16" />
+
+                <TextBlock Text="Equalizer" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,6"
+                           Text="Per-device parametric EQ with presets, AutoEq profiles and live meters." />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button x:Name="OpenEqualizerButton" Content="Open equalizer…"
+                            Click="OnOpenEqualizer" Padding="8,2" />
+                </StackPanel>
+
+                <Separator Margin="0,16" />
+
+                <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <CheckBox x:Name="AutoUpdateBox" Content="Keep AorinEQ up to date automatically"
+                          Margin="0,4,0,6" Checked="OnAutoUpdateChanged" Unchecked="OnAutoUpdateChanged" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button x:Name="CheckUpdatesButton" Content="Check now"
+                            Click="OnCheckUpdates" Padding="8,2" />
+                </StackPanel>
+                <TextBlock x:Name="UpdateStatusText" FontSize="11" Foreground="Gray"
+                           TextWrapping="Wrap" Margin="0,0,0,2" />
+
+                <Separator Margin="0,16" />
+
+                <TextBlock Text="About" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TextBlock x:Name="VersionText" FontSize="12" Foreground="Gray" />
+                <TextBlock FontSize="12" Margin="0,2,0,0">
+                    <Hyperlink NavigateUri="https://github.com/weejiaquan/aorineq"
+                               RequestNavigate="OnNavigate">github.com/weejiaquan/aorineq</Hyperlink>
+                </TextBlock>
+            </StackPanel>
+
+            <!-- Right column: everything about the OSD itself. -->
+            <StackPanel Grid.Column="2">
+                <TextBlock Text="OSD" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+                <TextBlock Text="Style" Margin="0,0,0,2" />
+                <ComboBox x:Name="StyleCombo" SelectionChanged="OnStyleChanged" Margin="0,0,0,10">
+                    <ComboBoxItem Content="Dark pill" Tag="dark-pill" />
+                    <ComboBoxItem Content="Windows 11" Tag="fluent" />
+                    <ComboBoxItem Content="Minimal bar" Tag="minimal-bar" />
+                    <ComboBoxItem Content="Custom skin" Tag="skin" />
+                </ComboBox>
+
+                <TextBlock Text="Skin" Margin="0,0,0,2" />
+                <ComboBox x:Name="SkinCombo" SelectionChanged="OnSkinChanged" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="OpenSkinsFolderButton" Content="Open skins folder"
+                            Click="OnOpenSkinsFolder" Padding="8,2" Margin="0,0,8,0" />
+                    <Button x:Name="RescanSkinsButton" Content="Rescan" Click="OnRescanSkins" Padding="8,2" />
+                    <Button x:Name="SkinDesignerButton" Content="Skin designer…"
+                            Click="OnOpenSkinDesigner" Padding="8,2" Margin="8,0,0,0" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="ImportSkinButton" Content="Import skin…" Click="OnImportSkin" Padding="8,2"
+                            ToolTip="Install a skin shared as a zip file" />
+                </StackPanel>
+
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Position" Margin="0,0,0,4" />
+                        <Grid Width="120" Height="120" HorizontalAlignment="Left">
+                            <Grid.RowDefinitions>
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition />
+                                <ColumnDefinition />
+                            </Grid.ColumnDefinitions>
+                            <ToggleButton x:Name="AnchorTopLeft" Grid.Row="0" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
+                            <!-- Center cell: present but disabled/empty — the OSD can't be anchored to the screen
+                                 center, only its 8 edges/corners, so this exists just to complete the 3x3 grid. -->
+                            <ToggleButton Grid.Row="1" Grid.Column="1" Margin="2" IsEnabled="False" IsHitTestVisible="False" />
+                            <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Margin="2" Click="OnAnchorClicked" />
+                            <ToggleButton x:Name="AnchorBottomRight" Grid.Row="2" Grid.Column="2" Margin="2" Click="OnAnchorClicked" />
+                        </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                        <TextBlock Text="X offset" />
+                        <TextBox x:Name="OffsetXBox" LostFocus="OnOffsetChanged" KeyDown="OnOffsetKeyDown" Margin="0,0,0,6" />
+                        <TextBlock Text="Y offset" />
+                        <TextBox x:Name="OffsetYBox" LostFocus="OnOffsetChanged" KeyDown="OnOffsetKeyDown" />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Margin="0,0,0,2">
+                    <Run Text="Hide delay: " /><Run x:Name="HideDelayLabel" Text="1.5s" />
+                </TextBlock>
+                <Slider x:Name="HideDelaySlider" Minimum="0.5" Maximum="5" TickFrequency="0.1"
+                        IsSnapToTickEnabled="True" ValueChanged="OnHideDelayChanged" Margin="0,0,0,10" />
+
+                <CheckBox x:Name="AnimationCheckBox" Content="Animate fade-out" Margin="0,0,0,6"
+                          Checked="OnAnimationChanged" Unchecked="OnAnimationChanged" />
+                <TextBlock Margin="0,0,0,2">
+                    <Run Text="Animation duration: " /><Run x:Name="AnimationDurationLabel" Text="150ms" />
+                </TextBlock>
+                <Slider x:Name="AnimationDurationSlider" Minimum="50" Maximum="500"
+                        ValueChanged="OnAnimationDurationChanged" Margin="0,0,0,10" />
+
+                <TextBlock Text="Volume key step size" Margin="0,0,0,2" />
+                <ComboBox x:Name="StepCombo" SelectionChanged="OnStepChanged" Margin="0,0,0,10">
+                    <ComboBoxItem Content="1%" Tag="1" />
+                    <ComboBoxItem Content="2%" Tag="2" />
+                    <ComboBoxItem Content="5%" Tag="5" />
+                </ComboBox>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Window>

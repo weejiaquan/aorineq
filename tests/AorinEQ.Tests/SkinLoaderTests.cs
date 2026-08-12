@@ -1,0 +1,600 @@
+using AorinEQ.Core;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace AorinEQ.Tests;
+
+public class SkinLoaderTests : IDisposable
+{
+    private readonly string _dir;
+    private readonly ITestOutputHelper _out;
+
+    public SkinLoaderTests(ITestOutputHelper output)
+    {
+        _out = output;
+        _dir = Path.Combine(Path.GetTempPath(), "aorineq-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_dir);
+    }
+
+    public void Dispose() => Directory.Delete(_dir, recursive: true);
+
+    // Writes a minimal but REAL PNG (signature + IHDR + zero-data IDAT + IEND) with the
+    // given dimensions. Enough for header parsing; not a renderable image (tests that
+    // need pixels use synthetic alpha arrays instead, never decode).
+    private static void WritePng(string path, int width, int height)
+    {
+        using var fs = File.Create(path);
+        void W(byte[] b) => fs.Write(b, 0, b.Length);
+        void BE(int v) => W(new[] { (byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v });
+        uint Crc(byte[] data)
+        {
+            uint[] table = new uint[256];
+            for (uint n = 0; n < 256; n++)
+            {
+                uint c = n;
+                for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
+                table[n] = c;
+            }
+            uint crc = 0xFFFFFFFF;
+            foreach (var b in data) crc = table[(crc ^ b) & 0xFF] ^ (crc >> 8);
+            return crc ^ 0xFFFFFFFF;
+        }
+        void Chunk(string type, byte[] data)
+        {
+            BE(data.Length);
+            var typeAndData = System.Text.Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
+            W(typeAndData);
+            BE((int)Crc(typeAndData));
+        }
+        W(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var ihdr = new byte[13];
+        ihdr[0] = (byte)(width >> 24); ihdr[1] = (byte)(width >> 16); ihdr[2] = (byte)(width >> 8); ihdr[3] = (byte)width;
+        ihdr[4] = (byte)(height >> 24); ihdr[5] = (byte)(height >> 16); ihdr[6] = (byte)(height >> 8); ihdr[7] = (byte)height;
+        ihdr[8] = 8; ihdr[9] = 6; // 8-bit RGBA
+        Chunk("IHDR", ihdr);
+        Chunk("IDAT", new byte[] { 0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 });
+        Chunk("IEND", Array.Empty<byte>());
+    }
+
+    private string NewSkinFolder(string name)
+    {
+        var folder = Path.Combine(_dir, name);
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    [Fact]
+    public void Load_valid_skin_returns_populated_info()
+    {
+        var folder = NewSkinFolder("dark-pill");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"loaded: Name={info.Name} Width={info.Width} Height={info.Height} Scale={info.Scale} Text={info.Text} Error={info.Error ?? "<none>"}");
+
+        Assert.True(info.IsValid);
+        Assert.Null(info.Error);
+        Assert.Equal("dark-pill", info.Name);
+        Assert.Equal(300, info.Width);
+        Assert.Equal(100, info.Height);
+        Assert.Equal(1.0, info.Scale);
+        Assert.Null(info.Text);
+        Assert.Equal(folder, info.Folder);
+        Assert.Equal(Path.Combine(folder, "empty.png"), info.EmptyPath);
+        Assert.Equal(Path.Combine(folder, "full.png"), info.FullPath);
+    }
+
+    [Fact]
+    public void Load_missing_full_png_sets_error()
+    {
+        var folder = NewSkinFolder("no-full");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"missing full.png error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.NotNull(info.Error);
+        Assert.Contains("full.png", info.Error);
+    }
+
+    [Fact]
+    public void Load_missing_empty_png_sets_error()
+    {
+        var folder = NewSkinFolder("no-empty");
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"missing empty.png error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.NotNull(info.Error);
+        Assert.Contains("empty.png", info.Error);
+    }
+
+    [Fact]
+    public void Load_dimension_mismatch_names_both_sizes()
+    {
+        var folder = NewSkinFolder("mismatch");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 120);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"dimension mismatch error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.NotNull(info.Error);
+        // must name both sizes
+        Assert.Contains("300", info.Error);
+        Assert.Contains("100", info.Error);
+        Assert.Contains("120", info.Error);
+    }
+
+    [Fact]
+    public void Load_corrupt_skin_json_sets_error()
+    {
+        var folder = NewSkinFolder("corrupt-json");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ not valid json !!!");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"corrupt skin.json error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.NotNull(info.Error);
+    }
+
+    [Theory]
+    [InlineData(0.1, 0.25)]   // below min, clamps up
+    [InlineData(0.25, 0.25)]  // exact min
+    [InlineData(2.0, 2.0)]    // within range
+    [InlineData(4.0, 4.0)]    // exact max
+    [InlineData(10.0, 4.0)]   // above max, clamps down
+    public void Load_scale_is_clamped_0_25_to_4(double rawScale, double expectedScale)
+    {
+        var folder = NewSkinFolder("scale-" + rawScale.ToString(System.Globalization.CultureInfo.InvariantCulture).Replace('.', '_'));
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            $"{{ \"scale\": {rawScale.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"rawScale={rawScale} -> Scale={info.Scale} (expected {expectedScale}), Error={info.Error ?? "<none>"}");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(expectedScale, info.Scale);
+    }
+
+    [Fact]
+    public void Load_missing_skin_json_defaults_scale_to_1_and_null_text()
+    {
+        var folder = NewSkinFolder("no-json");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"no skin.json: Scale={info.Scale} Text={info.Text}");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(1.0, info.Scale);
+        Assert.Null(info.Text);
+    }
+
+    [Fact]
+    public void Load_parses_percentText_case_insensitively()
+    {
+        var folder = NewSkinFolder("percent-text");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        // Mixed-case keys to exercise case-insensitive parsing.
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"PercentText\": { \"Show\": true, \"X\": 10, \"Y\": 20 }, \"Scale\": 1.5 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"parsed text: {info.Text}, scale: {info.Scale}");
+
+        Assert.True(info.IsValid);
+        Assert.NotNull(info.Text);
+        Assert.True(info.Text!.Show);
+        Assert.Equal(10, info.Text.X);
+        Assert.Equal(20, info.Text.Y);
+        Assert.Equal(1.5, info.Scale);
+    }
+
+    [Fact]
+    public void Load_gif_layers_resolve_when_png_absent()
+    {
+        var folder = NewSkinFolder("gif-skin");
+        TestPngs.WriteGif(Path.Combine(folder, "empty.gif"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "full.gif"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"gif skin: valid={info.IsValid} {info.Width}x{info.Height} emptyGif={info.EmptyIsGif} fullGif={info.FullIsGif} err={info.Error}");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(300, info.Width);
+        Assert.Equal(100, info.Height);
+        Assert.True(info.EmptyIsGif);
+        Assert.True(info.FullIsGif);
+        Assert.EndsWith("empty.gif", info.EmptyPath);
+        Assert.EndsWith("full.gif", info.FullPath);
+    }
+
+    [Fact]
+    public void Load_png_takes_precedence_over_gif()
+    {
+        var folder = NewSkinFolder("both-formats");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "empty.gif"), 999, 999); // must be ignored
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"precedence: {info.EmptyPath} valid={info.IsValid}");
+
+        Assert.True(info.IsValid);
+        Assert.EndsWith("empty.png", info.EmptyPath);
+        Assert.False(info.EmptyIsGif);
+    }
+
+    [Fact]
+    public void Load_sprite_sheet_uses_logical_frame_size()
+    {
+        var folder = NewSkinFolder("sheet");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);      // static, 1 frame
+        WritePng(Path.Combine(folder, "full.png"), 300, 800);       // 8 frames of 100
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fullFrames\": 8, \"fps\": 12 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"sheet: valid={info.IsValid} logical={info.Width}x{info.Height} fullFrames={info.FullFrames} fps={info.Fps} err={info.Error}");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(300, info.Width);
+        Assert.Equal(100, info.Height);   // logical, not the 800px sheet height
+        Assert.Equal(8, info.FullFrames);
+        Assert.Equal(1, info.EmptyFrames);
+        Assert.Equal(12.0, info.Fps);
+    }
+
+    [Fact]
+    public void Load_sheet_height_not_divisible_by_frames_sets_error()
+    {
+        var folder = NewSkinFolder("bad-sheet");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 790); // not divisible by 8
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fullFrames\": 8 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"bad sheet error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.Contains("divisible", info.Error);
+    }
+
+    [Fact]
+    public void Load_logical_size_mismatch_between_static_and_gif_sets_error()
+    {
+        var folder = NewSkinFolder("logical-mismatch");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "full.gif"), 300, 120);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"logical mismatch error: {info.Error}");
+
+        Assert.False(info.IsValid);
+        Assert.Contains("120", info.Error);
+        Assert.Contains("100", info.Error);
+    }
+
+    [Theory]
+    [InlineData(0.5, 1.0)]    // below min, clamps up
+    [InlineData(24.0, 24.0)]  // within range
+    [InlineData(240.0, 60.0)] // above max, clamps down
+    public void Load_fps_is_clamped_1_to_60(double rawFps, double expected)
+    {
+        var folder = NewSkinFolder("fps-" + rawFps.ToString(System.Globalization.CultureInfo.InvariantCulture).Replace('.', '_'));
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            $"{{ \"fps\": {rawFps.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"rawFps={rawFps} -> Fps={info.Fps} (expected {expected})");
+
+        Assert.True(info.IsValid);
+        Assert.Equal(expected, info.Fps);
+    }
+
+    [Fact]
+    public void Load_defaults_fps_10_and_single_frames()
+    {
+        var folder = NewSkinFolder("defaults");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"defaults: fps={info.Fps} ef={info.EmptyFrames} ff={info.FullFrames}");
+
+        Assert.Equal(10.0, info.Fps);
+        Assert.Equal(1, info.EmptyFrames);
+        Assert.Equal(1, info.FullFrames);
+    }
+
+    [Fact]
+    public void Load_fill_range_parses_and_defaults_to_full_width()
+    {
+        var folder = NewSkinFolder("fill-range");
+        WritePng(Path.Combine(folder, "empty.png"), 800, 100);
+        WritePng(Path.Combine(folder, "full.png"), 800, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fillStartX\": 120, \"fillEndX\": 680 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"range: {info.FillStartX}..{info.FillEndX} err={info.Error}");
+        Assert.True(info.IsValid);
+        Assert.Equal(120, info.FillStartX);
+        Assert.Equal(680, info.FillEndX);
+
+        var plain = NewSkinFolder("no-range");
+        WritePng(Path.Combine(plain, "empty.png"), 300, 100);
+        WritePng(Path.Combine(plain, "full.png"), 300, 100);
+        var plainInfo = SkinLoader.Load(plain);
+        Assert.Equal(0, plainInfo.FillStartX);
+        Assert.Equal(300, plainInfo.FillEndX);
+    }
+
+    [Fact]
+    public void Load_fill_range_clamps_into_image_and_rejects_inverted()
+    {
+        var folder = NewSkinFolder("range-clamp");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fillStartX\": -50, \"fillEndX\": 9999 }");
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"clamped: {info.FillStartX}..{info.FillEndX}");
+        Assert.True(info.IsValid);
+        Assert.Equal(0, info.FillStartX);
+        Assert.Equal(300, info.FillEndX);
+
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"fillStartX\": 200, \"fillEndX\": 100 }");
+        var inverted = SkinLoader.Load(folder);
+        _out.WriteLine($"inverted error: {inverted.Error}");
+        Assert.False(inverted.IsValid);
+        Assert.Contains("fillStartX", inverted.Error);
+    }
+
+    [Fact]
+    public void Load_percent_text_styling_parses_and_clamps()
+    {
+        var folder = NewSkinFolder("styled-text");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"percentText\": { \"show\": true, \"x\": 10, \"y\": 5, \"color\": \"#FF00FF00\", " +
+            "\"fontFamily\": \"Consolas\", \"fontSize\": 999, \"bold\": false, " +
+            "\"outlineColor\": \"#FF000000\", \"outlineWidth\": 99, " +
+            "\"shadowColor\": \"#80000000\", \"shadowBlur\": 99, \"shadowDepth\": -5 } }");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"styled: {t}");
+        Assert.NotNull(t);
+        Assert.Equal("#FF00FF00", t!.Color);
+        Assert.Equal("Consolas", t.FontFamily);
+        Assert.Equal(200, t.FontSize);      // clamped from 999
+        Assert.False(t.Bold);
+        Assert.Equal("#FF000000", t.OutlineColor);
+        Assert.Equal(20, t.OutlineWidth);   // clamped from 99
+        Assert.Equal("#80000000", t.ShadowColor);
+        Assert.Equal(50, t.ShadowBlur);     // clamped from 99
+        Assert.Equal(0, t.ShadowDepth);     // clamped from -5
+    }
+
+    [Fact]
+    public void Load_plain_percent_text_uses_style_defaults()
+    {
+        var folder = NewSkinFolder("plain-text");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"percentText\": { \"show\": true, \"x\": 10, \"y\": 5 } }");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"defaults: {t}");
+        Assert.NotNull(t);
+        Assert.Equal("#FFFFFFFF", t!.Color);
+        Assert.Equal("Segoe UI", t.FontFamily);
+        Assert.Equal(14, t.FontSize);
+        Assert.False(t.Bold);          // default is the SemiBold baseline (Bold=false), not heavy Bold
+        Assert.Null(t.OutlineColor);   // no outline
+        Assert.Null(t.ShadowColor);    // no shadow
+    }
+
+    [Theory]
+    [InlineData("\"left\"", "left")]
+    [InlineData("\"Center\"", "center")]   // case-insensitive
+    [InlineData("\"RIGHT\"", "right")]
+    [InlineData("\"banana\"", "left")]     // invalid -> left
+    public void Load_percent_text_align_parses_case_insensitively(string rawAlign, string expected)
+    {
+        var folder = NewSkinFolder("align-" + expected + rawAlign.Length);
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            $"{{ \"percentText\": {{ \"show\": true, \"x\": 10, \"y\": 5, \"align\": {rawAlign} }} }}");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"raw={rawAlign} -> align={t?.Align} (expected {expected})");
+        Assert.NotNull(t);
+        Assert.Equal(expected, t!.Align);
+    }
+
+    [Fact]
+    public void Load_percent_text_align_defaults_left_when_absent()
+    {
+        var folder = NewSkinFolder("align-default");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"),
+            "{ \"percentText\": { \"show\": true, \"x\": 10, \"y\": 5 } }");
+
+        var t = SkinLoader.Load(folder).Text;
+        _out.WriteLine($"align={t?.Align}");
+        Assert.Equal("left", t!.Align);
+    }
+
+    [Theory]
+    [InlineData(null, 0.6)]   // absent -> current hardcoded default
+    [InlineData(-0.5, 0.0)]   // clamps up
+    [InlineData(0.3, 0.3)]
+    [InlineData(7.0, 1.0)]    // clamps down
+    public void Load_mutedDim_clamps_into_0_1_and_defaults_to_0_6(double? raw, double expected)
+    {
+        var folder = NewSkinFolder("muteddim-" + (raw?.ToString(System.Globalization.CultureInfo.InvariantCulture).Replace('.', '_').Replace("-", "m") ?? "none"));
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        if (raw is not null)
+            File.WriteAllText(Path.Combine(folder, "skin.json"),
+                $"{{ \"mutedDim\": {raw.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"raw={raw} -> MutedDim={info.MutedDim} (expected {expected})");
+        Assert.True(info.IsValid);
+        Assert.Equal(expected, info.MutedDim);
+    }
+
+    [Fact]
+    public void Load_muted_png_resolves_optional_layer()
+    {
+        var folder = NewSkinFolder("muted-png");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        WritePng(Path.Combine(folder, "muted.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted: has={info.HasMuted} path={info.MutedPath} gif={info.MutedIsGif} frames={info.MutedFrames}");
+        Assert.True(info.IsValid);
+        Assert.True(info.HasMuted);
+        Assert.Equal(Path.Combine(folder, "muted.png"), info.MutedPath);
+        Assert.False(info.MutedIsGif);
+        Assert.Equal(1, info.MutedFrames);
+    }
+
+    [Fact]
+    public void Load_muted_gif_resolves_when_png_absent()
+    {
+        var folder = NewSkinFolder("muted-gif");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        TestPngs.WriteGif(Path.Combine(folder, "muted.gif"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted gif: has={info.HasMuted} path={info.MutedPath} gif={info.MutedIsGif}");
+        Assert.True(info.IsValid);
+        Assert.True(info.HasMuted);
+        Assert.True(info.MutedIsGif);
+        Assert.EndsWith("muted.gif", info.MutedPath);
+    }
+
+    [Fact]
+    public void Load_without_muted_layer_has_none()
+    {
+        var folder = NewSkinFolder("muted-absent");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"no muted layer: has={info.HasMuted} path={info.MutedPath ?? "<null>"}");
+        Assert.True(info.IsValid);
+        Assert.False(info.HasMuted);
+        Assert.Null(info.MutedPath);
+    }
+
+    [Fact]
+    public void Load_muted_sheet_uses_mutedFrames_and_rejects_indivisible()
+    {
+        var folder = NewSkinFolder("muted-sheet");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        WritePng(Path.Combine(folder, "muted.png"), 300, 400); // 4 frames of 100
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"mutedFrames\": 4 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted sheet: valid={info.IsValid} frames={info.MutedFrames} err={info.Error}");
+        Assert.True(info.IsValid);
+        Assert.Equal(4, info.MutedFrames);
+
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"mutedFrames\": 3 }"); // 400 % 3 != 0
+        var bad = SkinLoader.Load(folder);
+        _out.WriteLine($"indivisible: valid={bad.IsValid} err={bad.Error}");
+        Assert.False(bad.IsValid);
+        Assert.Contains("divisible", bad.Error);
+    }
+
+    [Fact]
+    public void Load_muted_size_mismatch_sets_error_like_empty_full_mismatch()
+    {
+        var folder = NewSkinFolder("muted-mismatch");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        WritePng(Path.Combine(folder, "muted.png"), 300, 140);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"muted mismatch error: {info.Error}");
+        Assert.False(info.IsValid);
+        Assert.Contains("muted", info.Error);
+        Assert.Contains("140", info.Error);
+        Assert.Contains("100", info.Error);
+    }
+
+    [Fact]
+    public void Load_missing_folder_sets_error_and_never_throws()
+    {
+        var folder = Path.Combine(_dir, "does-not-exist");
+
+        var ex = Record.Exception(() => SkinLoader.Load(folder));
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"missing folder: exception={(ex?.ToString() ?? "<none>")}, error={info.Error}");
+
+        Assert.Null(ex);
+        Assert.False(info.IsValid);
+        Assert.NotNull(info.Error);
+    }
+
+    [Fact]
+    public void Scan_skips_nothing_but_lists_invalid_skins_with_their_errors()
+    {
+        var root = NewSkinFolder("skins-root");
+        var good = Path.Combine(root, "good");
+        Directory.CreateDirectory(good);
+        WritePng(Path.Combine(good, "empty.png"), 300, 100);
+        WritePng(Path.Combine(good, "full.png"), 300, 100);
+
+        var bad = Path.Combine(root, "bad");
+        Directory.CreateDirectory(bad);
+        WritePng(Path.Combine(bad, "empty.png"), 300, 100);
+        // full.png intentionally missing
+
+        var results = SkinLoader.Scan(root);
+        _out.WriteLine("scan results:");
+        foreach (var r in results)
+            _out.WriteLine($"  {r.Name}: valid={r.IsValid} error={r.Error ?? "<none>"}");
+
+        Assert.Equal(2, results.Count);
+        var goodInfo = Assert.Single(results, r => r.Name == "good");
+        var badInfo = Assert.Single(results, r => r.Name == "bad");
+        Assert.True(goodInfo.IsValid);
+        Assert.False(badInfo.IsValid);
+        Assert.NotNull(badInfo.Error);
+    }
+
+    [Fact]
+    public void Scan_returns_empty_list_when_root_missing()
+    {
+        var root = Path.Combine(_dir, "no-such-root");
+
+        var results = SkinLoader.Scan(root);
+        _out.WriteLine($"scan of missing root '{root}' returned {results.Count} results");
+
+        Assert.Empty(results);
+    }
+}

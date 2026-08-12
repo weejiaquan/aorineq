@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AorinEQ.Core/AorinEQ.Core.csproj" />
+    <Project Path="src/AorinEQ/AorinEQ.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AorinEQ.Tests/AorinEQ.Tests.csproj" />
+  </Folder>
+</Solution>
