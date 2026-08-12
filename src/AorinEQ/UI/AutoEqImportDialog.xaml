@@ -22,7 +22,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,8"
+            <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"
                        Text="Search the AutoEq project's measurement database and import a headphone's ParametricEQ profile as a preset." />
 
             <DockPanel Grid.Row="1" Margin="0,0,0,8">
@@ -38,7 +38,7 @@
                 <Button DockPanel.Dock="Right" Content="Cancel" Padding="12,4" IsCancel="True" />
                 <Button x:Name="ImportButton" DockPanel.Dock="Right" Content="Import" Padding="12,4"
                         Margin="0,0,8,0" IsDefault="True" IsEnabled="False" Click="OnImport" />
-                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="Gray"
+                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                            TextTrimming="CharacterEllipsis" />
             </DockPanel>
         </Grid>

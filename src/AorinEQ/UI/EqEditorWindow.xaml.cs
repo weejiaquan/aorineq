@@ -695,18 +695,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     /// resources, which every DynamicResource in its XAML then picks up.</summary>
     private void ApplyPalette()
     {
-        _palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
-        Resources["EqPlotBrush"] = Brush(_palette.PlotBackground);
-        Resources["EqPanelBrush"] = Brush(_palette.PanelBackground);
-        Resources["EqTextBrush"] = Brush(_palette.Text);
-        Resources["EqTextDimBrush"] = Brush(_palette.TextDim);
-        Resources["EqCurveBrush"] = Brush(_palette.Curve);
-        Resources["EqNodeSelectedBrush"] = Brush(_palette.NodeSelected);
-        Resources["EqMeterTrackBrush"] = Brush(_palette.MeterTrack);
-        Resources["EqMeterRmsBrush"] = Brush(_palette.MeterRms);
-        Resources["EqMeterPeakBrush"] = Brush(_palette.MeterPeak);
-        Resources["EqClipIdleBrush"] = Brush(_palette.ClipIdle);
-        Resources["EqClipIdleTextBrush"] = Brush(_palette.ClipIdleText);
+        _palette = EqPaletteBrushes.Apply(Resources);
         _spectrumPolygon.Fill = Brush(_palette.Spectrum);
     }
 
@@ -727,14 +716,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         RefreshBandStripValues();
     }
 
-    /// <summary>A frozen WPF brush from a Core palette colour. Frozen because these are handed to
-    /// elements redrawn at 30 fps and are never changed in place.</summary>
-    private static SolidColorBrush Brush(System.Drawing.Color c)
-    {
-        var brush = new SolidColorBrush(Color.FromArgb(c.A, c.R, c.G, c.B));
-        brush.Freeze();
-        return brush;
-    }
+    private static SolidColorBrush Brush(System.Drawing.Color c) => EqPaletteBrushes.Brush(c);
 
     private TextBlock StripLabel(string text) => new()
     {

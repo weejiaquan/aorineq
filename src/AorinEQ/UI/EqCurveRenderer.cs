@@ -121,11 +121,5 @@ public static class EqCurveRenderer
         canvas.Children.Add(label);
     }
 
-    /// <summary>A frozen WPF brush from a Core palette colour.</summary>
-    private static SolidColorBrush Brush(System.Drawing.Color c)
-    {
-        var brush = new SolidColorBrush(Color.FromArgb(c.A, c.R, c.G, c.B));
-        brush.Freeze();
-        return brush;
-    }
+    private static SolidColorBrush Brush(System.Drawing.Color c) => EqPaletteBrushes.Brush(c);
 }
