@@ -366,6 +366,171 @@ public class EapoRepairTests
         Assert.NotNull(EapoRepair.WhyNotAvailable("not-a-guid"));
     }
 
+    // ------------------------------------------------- codex round 1: recovery-record protection
+
+    /// <summary>A device id that names no endpoint. The guard has to refuse BEFORE anything is
+    /// read or written, and using this machine's real default device would short-circuit on
+    /// "already working" — or, if the guard ever regressed, aim a write at the user's own
+    /// hardware. This one can only ever be refused.</summary>
+    private const string NoSuchDevice = "{deadbeef-0000-0000-0000-000000000000}";
+
+    [Fact]
+    public void An_unfinished_repair_is_never_overwritten_by_a_new_one()
+    {
+        // There is ONE backup slot. A repair that never reached its verification left the only
+        // description of a device nothing has checked since; starting another repair over it would
+        // destroy that record. The user has to undo first.
+        var path = EapoRepair.BackupPath;
+        Assert.False(File.Exists(path), "this machine must start with no repair backup");
+        var guid = NoSuchDevice;
+        try
+        {
+            new EapoRepairBackup(guid, EapoRepairBackup.Applying, DateTimeOffset.UtcNow,
+                [RegValue.Absent("x")], null).Save(path);
+
+            var result = EapoRepair.Repair(guid,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"));
+
+            _out.WriteLine(result.Message);
+            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
+            Assert.Contains("didn't finish", result.Message);
+            // …and the record it protects is still exactly where it was.
+            Assert.True(EapoRepairBackup.Load(path)!.IsInterrupted);
+            Assert.Equal("x", EapoRepairBackup.Load(path)!.FxValues[0].Name);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void An_undo_held_for_another_device_is_never_thrown_away()
+    {
+        var path = EapoRepair.BackupPath;
+        Assert.False(File.Exists(path), "this machine must start with no repair backup");
+        var guid = NoSuchDevice;
+        try
+        {
+            new EapoRepairBackup("{99999999-8888-7777-6666-555555555555}", EapoRepairBackup.Applied,
+                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
+
+            var result = EapoRepair.Repair(guid,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"));
+
+            _out.WriteLine(result.Message);
+            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
+            Assert.Contains("different playback device", result.Message);
+            Assert.Equal("{99999999-8888-7777-6666-555555555555}", EapoRepairBackup.Load(path)!.EndpointGuid);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void A_record_that_could_not_be_written_back_stops_the_repair_too()
+    {
+        // Equalizer APO's own record is held to the same rule as the endpoint's values: a kind
+        // this build cannot write would make the REVERT throw, at the one moment it must not.
+        Assert.Null(EapoEndpoint.WhyNotRestorable([RegValue.Str("PreMixChild", "")]));
+        var reason = EapoEndpoint.WhyNotRestorable(
+            [new RegValue("Version", "Unsupported:DWord", null)]);
+        _out.WriteLine(reason);
+        Assert.NotNull(reason);
+        Assert.Contains("put back", reason);
+    }
+
+    // ------------------------------------------------- codex round 1: the verdict belongs to a run
+
+    [Fact]
+    public void A_verdict_from_an_earlier_run_is_never_shown_as_this_ones()
+    {
+        // The result file is written by an elevated process into a machine-wide folder, so the
+        // unelevated app may not be able to delete it. Matching on the run token is what makes a
+        // leftover harmless without needing to.
+        var mine = EapoRepair.NewToken();
+        var theirs = EapoRepair.NewToken();
+        Assert.NotEqual(mine, theirs);
+        Assert.True(EapoRepair.IsValidToken(mine));
+
+        var path = EapoRepair.ResultPath;
+        bool existed = File.Exists(path);
+        Assert.False(existed, "this machine must start with no repair result");
+        try
+        {
+            EapoRepair.SaveResult(new EapoRepairResult(
+                EapoRepairOutcome.Repaired, "stale success from an earlier run", theirs));
+            Assert.Null(EapoRepair.ReadResult(mine));
+            Assert.Equal("stale success from an earlier run", EapoRepair.ReadResult(theirs)!.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("short")]
+    [InlineData("../../../windows/system32/config")]
+    [InlineData("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")]
+    public void A_token_that_is_not_a_token_is_refused(string? token)
+    {
+        // The only value the elevated helper takes from its command line. It is never a path, a
+        // device id or a command — but it is still checked, because "only echoed back" is a
+        // property of today's code and this is the boundary.
+        Assert.False(EapoRepair.IsValidToken(token));
+    }
+
+    [Fact]
+    public void PowerShell_is_named_by_full_path_never_by_search_path()
+    {
+        // One of the two callers is already elevated, and a bare "powershell.exe" resolves through
+        // the search path.
+        var exe = AudioServices.BuildStartInfo(elevate: false).FileName;
+        _out.WriteLine(exe);
+        Assert.True(Path.IsPathRooted(exe));
+        Assert.True(File.Exists(exe));
+        Assert.StartsWith(
+            Environment.GetFolderPath(Environment.SpecialFolder.System), exe, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_revert_that_cannot_bring_audio_back_keeps_its_record_and_says_so()
+    {
+        // Restoring the registry while the audio stack stays down is not a completed undo, and
+        // deleting the backup there would throw away the only record of what to put back.
+        var path = EapoRepair.BackupPath;
+        Assert.False(File.Exists(path), "this machine must start with no repair backup");
+        try
+        {
+            // A backup describing an endpoint that does not exist: the restore is a no-op that
+            // cannot throw, so the audio restart's result is the only thing deciding the outcome.
+            var backup = new EapoRepairBackup("{deadbeef-0000-0000-0000-000000000000}",
+                EapoRepairBackup.Applied, DateTimeOffset.UtcNow, [], null);
+            backup.Save(path);
+
+            var failed = EapoRepair.Undo(backup, restartAudio: () => false);
+            _out.WriteLine(failed.Message);
+            Assert.Equal(EapoRepairOutcome.RevertedButAudioNotRestarted, failed.Outcome);
+            Assert.Contains("restart your PC", failed.Message);
+            Assert.True(File.Exists(path), "the record must survive a failed restart");
+
+            var ok = EapoRepair.Undo(backup, restartAudio: () => true);
+            Assert.Equal(EapoRepairOutcome.Undone, ok.Outcome);
+            Assert.False(File.Exists(path), "a completed undo consumes its record");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     [Fact]
     public void The_confirmation_says_what_it_will_actually_do()
     {

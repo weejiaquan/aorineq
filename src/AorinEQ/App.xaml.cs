@@ -96,7 +96,8 @@ public partial class App : System.Windows.Application
         // instance of the app, and it must not fight the running one for the mutex.
         if (e.Args.Contains("--repair-eapo") || e.Args.Contains("--undo-eapo-repair"))
         {
-            Shutdown(RunElevatedEapoRepair(undo: e.Args.Contains("--undo-eapo-repair")));
+            Shutdown(RunElevatedEapoRepair(
+                undo: e.Args.Contains("--undo-eapo-repair"), token: RepairTokenFrom(e.Args)));
             return;
         }
 
@@ -1373,7 +1374,19 @@ public partial class App : System.Windows.Application
     /// it is about to modify from its own arguments. The consequence is that changing the default
     /// device between clicking and answering the prompt repairs the device you are listening
     /// through now, which is also the device the whole feature is about.</summary>
-    private static int RunElevatedEapoRepair(bool undo)
+    /// <summary>The run identifier the launching process passed, or "" when there is none or it is
+    /// not one. The ONLY thing taken from the command line, and it is never used as a path, a
+    /// device id or a command — only echoed back so the launcher can tell this run's verdict from
+    /// a leftover one.</summary>
+    private static string RepairTokenFrom(string[] args)
+    {
+        int index = Array.IndexOf(args, "--repair-token");
+        if (index < 0 || index + 1 >= args.Length) return "";
+        var token = args[index + 1];
+        return EapoRepair.IsValidToken(token) ? token : "";
+    }
+
+    private static int RunElevatedEapoRepair(bool undo, string token)
     {
         try
         {
@@ -1397,7 +1410,7 @@ public partial class App : System.Windows.Application
                     : EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid));
             }
 
-            EapoRepair.SaveResult(result);
+            EapoRepair.SaveResult(result with { Token = token });
             return result.Outcome is EapoRepairOutcome.Repaired or EapoRepairOutcome.AlreadyActive
                 or EapoRepairOutcome.Undone ? 0 : 1;
         }
@@ -1407,7 +1420,7 @@ public partial class App : System.Windows.Application
             // launcher could only report as "it failed". Recorded instead, so the user gets a
             // reason — and the backup file is still on disk, which is what makes it recoverable.
             EapoRepair.SaveResult(new EapoRepairResult(EapoRepairOutcome.FailedAndNotReverted,
-                "The repair helper failed unexpectedly: " + ex.Message));
+                "The repair helper failed unexpectedly: " + ex.Message, token));
             return 2;
         }
     }
@@ -1464,9 +1477,10 @@ public partial class App : System.Windows.Application
     private async Task RunEapoRepairHelperAsync(string flag, string busyText)
     {
         _settingsWindow?.SetEapoRepairStatus(busyText, busy: true);
+        var token = EapoRepair.NewToken();
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo(ExePath, flag)
+            var psi = new System.Diagnostics.ProcessStartInfo(ExePath, $"{flag} --repair-token {token}")
             {
                 UseShellExecute = true,
                 Verb = "runas",
@@ -1490,7 +1504,9 @@ public partial class App : System.Windows.Application
             }
             await proc.WaitForExitAsync();
 
-            var result = EapoRepair.TakeResult();
+            // Matched on this run's token, so a verdict left behind by an earlier run can never be
+            // shown as this one's outcome.
+            var result = EapoRepair.ReadResult(token);
             _settingsWindow?.SetEapoRepairStatus(
                 result?.Message ?? "The repair helper didn't report a result. Nothing may have changed.",
                 busy: false);
