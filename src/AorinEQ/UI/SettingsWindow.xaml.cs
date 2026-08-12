@@ -30,6 +30,11 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// on Loaded. Null once it has been.</summary>
     private string? _pendingSection;
 
+    /// <summary>The section currently in the frame. Also the re-entry guard: setting
+    /// <c>Nav.SelectedItem</c> raises SelectionChanged, which navigates, which would set it
+    /// again.</summary>
+    private string? _currentSection;
+
     /// <summary>Whether <see cref="_pendingSection"/> should also take keyboard focus.</summary>
     private bool _pendingFocus;
 
@@ -119,6 +124,19 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         };
         SectionHolder.Children.Clear();
         foreach (var (section, body) in bodies) _sections[section] = body;
+
+        // The sidebar is driven from each item's OWN Click, not from NavigationView.SelectionChanged.
+        // WPF-UI's NavigationView navigates to page TYPES: an item carrying only a TargetPageTag
+        // (which is what this window uses — its sections are elements in this namescope, not Page
+        // classes) resolves no page on click, bails out before updating SelectedItem, and never
+        // raises SelectionChanged. The sidebar looks alive and does nothing. NavigationViewItem is a
+        // ButtonBase, so Click is raised for a mouse click AND for Enter/Space on a focused item,
+        // which is also what makes keyboard navigation work.
+        foreach (var item in NavItems())
+        {
+            var tag = item.TargetPageTag;
+            item.Click += (_, _) => Navigate(tag);
+        }
     }
 
     /// <summary>Shows a section and selects its sidebar item. Public because deep links land here:
@@ -137,6 +155,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     public void Navigate(string section, bool focusPrimary = false)
     {
         if (!_sections.ContainsKey(section)) return;
+        if (section == _currentSection && !focusPrimary && _pendingSection is null) return;
         _pendingSection = section;
         _pendingFocus = focusPrimary;
         if (IsLoaded) ApplyPendingSection();
@@ -149,9 +168,13 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         bool focusPrimary = _pendingFocus;
         _pendingFocus = false;
 
-        // ReplaceContent does not raise SelectionChanged, so the sidebar is set separately; doing
-        // it in this order means the handler below is a no-op when the user drives the sidebar.
+        _currentSection = section;
         Nav.ReplaceContent(body);
+
+        // IsActive is the ONE source of truth for which item looks selected. NavigationView's own
+        // SelectedItem is read-only from outside, and it is only ever set by the page-type
+        // navigation this window deliberately does not use — so leaving it alone (rather than
+        // having two disagreeing notions of "selected") is the honest shape here.
         var item = NavItemFor(section);
         foreach (var other in NavItems()) other.IsActive = ReferenceEquals(other, item);
 
@@ -184,14 +207,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
     private Wpf.Ui.Controls.NavigationViewItem? NavItemFor(string section) =>
         NavItems().FirstOrDefault(i => i.TargetPageTag == section);
-
-    /// <summary>The sidebar was clicked. The items carry no target page type, so nothing navigates
-    /// on its own — the tag names the section body to show.</summary>
-    private void OnSectionSelected(Wpf.Ui.Controls.NavigationView sender, RoutedEventArgs e)
-    {
-        if (sender.SelectedItem is Wpf.Ui.Controls.NavigationViewItem { TargetPageTag: { } tag })
-            Navigate(tag);
-    }
 
     /// <summary>Read-only summary of the per-device volumes the app is tracking. Purely
     /// informational — the volume itself is changed with the keys or the OSD, never here.</summary>

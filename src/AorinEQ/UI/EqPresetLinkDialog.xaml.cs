@@ -46,6 +46,10 @@ public partial class EqPresetLinkDialog : Wpf.Ui.Controls.FluentWindow
         bool overwrites, EqPreset? preset, Func<Task<EqPreset>>? fetch)
     {
         InitializeComponent();
+        // The curve preview is the same instrument panel the editor draws, so this dialog needs the
+        // same brushes seeded — an unresolved DynamicResource would silently fall back to the
+        // control default and put the plot's surface at whatever the theme's is.
+        EqPaletteBrushes.Apply(Resources);
         _fetch = fetch;
 
         // Grapheme-aware: a name is never cut into a different glyph. Characters that could

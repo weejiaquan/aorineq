@@ -22,28 +22,28 @@
             <TextBlock x:Name="HeadingText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
                        Margin="0,0,0,4" />
             <TextBlock x:Name="SourceText" FontSize="13" TextWrapping="Wrap" Margin="0,0,0,8" />
-            <TextBlock x:Name="DetailText" TextWrapping="Wrap" FontSize="12" Foreground="Gray"
+            <TextBlock x:Name="DetailText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                        Margin="0,0,0,4" />
-            <TextBlock x:Name="ScopeText" TextWrapping="Wrap" FontSize="12" Foreground="Gray"
+            <TextBlock x:Name="ScopeText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                        Margin="0,0,0,8" />
 
             <!-- The response curve of the preset that is about to be applied: the point of the
                  dialog is that the user can SEE the tuning before accepting it. For a hosted preset
                  it fills in once the file has been fetched — which only happens on a click. -->
-            <Border Background="#FF15151A" CornerRadius="6" Height="130">
+            <Border Background="{DynamicResource EqPlotBrush}" CornerRadius="6" Height="130">
                 <Grid>
                     <Canvas x:Name="CurveCanvas" ClipToBounds="True" SizeChanged="OnCurveCanvasSizeChanged" />
-                    <TextBlock x:Name="CurvePlaceholder" Foreground="#8A8A96" FontSize="12"
+                    <TextBlock x:Name="CurvePlaceholder" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12"
                                TextWrapping="Wrap" TextAlignment="Center" MaxWidth="320"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                Text="Nothing has been downloaded yet. Preview fetches the preset from this site and draws it here." />
                 </Grid>
             </Border>
 
-            <TextBlock x:Name="OverwriteText" TextWrapping="Wrap" FontSize="12" Foreground="#D32F2F"
+            <TextBlock x:Name="OverwriteText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                        Margin="0,8,0,0" Visibility="Collapsed"
                        Text="A preset with this name already exists and will be overwritten." />
-            <TextBlock x:Name="StatusText" TextWrapping="Wrap" FontSize="12" Foreground="#D08A50"
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource SystemFillColorCautionBrush}"
                        Margin="0,8,0,0" Text="" />
             <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                 <Button x:Name="PreviewButton" Content="Preview" Padding="12,5" Margin="0,0,8,0"

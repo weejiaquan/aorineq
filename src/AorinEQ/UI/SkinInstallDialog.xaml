@@ -18,9 +18,9 @@
         <StackPanel Grid.Row="1" Margin="20">
             <TextBlock x:Name="HeadingText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
                        Margin="0,0,0,8" />
-            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="Gray" Margin="0,0,0,4"
+            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"
                        Text="The skin only downloads and installs if you continue. It changes how the volume OSD looks — nothing else." />
-            <TextBlock x:Name="OverwriteText" TextWrapping="Wrap" FontSize="12" Foreground="#D32F2F"
+            <TextBlock x:Name="OverwriteText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                        Margin="0,4,0,0" Visibility="Collapsed"
                        Text="A skin with this name already exists and will be overwritten." />
             <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
