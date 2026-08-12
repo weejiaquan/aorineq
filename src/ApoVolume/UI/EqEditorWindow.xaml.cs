@@ -200,6 +200,12 @@ public partial class EqEditorWindow : Window
 
     private void LoadScope(string? deviceId)
     {
+        // A scope can be reloaded from OUTSIDE the editor (a tray preset switch, a protocol
+        // link, the default device changing) while the user is mid-gesture. Both kinds of
+        // in-flight edit have to be dropped here, before _bands is replaced, or they would land
+        // on the incoming chain: a live plot drag, and any strip box holding uncommitted text.
+        EndDrag();
+        RetireStripBoxes();
         _scopeDeviceId = deviceId;
         var settings = _getSettings();
         var scope = deviceId is null
@@ -596,6 +602,7 @@ public partial class EqEditorWindow : Window
     /// value-only changes go through <see cref="RefreshBandStripValues"/>.</summary>
     private void RebuildBandStrip()
     {
+        RetireStripBoxes();
         BandStrip.Children.Clear();
         _columns.Clear();
         for (int i = 0; i < _bands.Count; i++)
@@ -679,6 +686,17 @@ public partial class EqEditorWindow : Window
         };
         box.LostFocus += (_, _) => CommitStripBox(box);
         return box;
+    }
+
+    /// <summary>Disowns the current strip's text boxes so a late commit from one of them cannot
+    /// land on a chain it was never editing. A box that is being replaced still raises LostFocus
+    /// AFTER the rebuild — focus moves out of a detached element — and
+    /// <see cref="CommitStripBox"/> would then write that stale text into the new band list at
+    /// the old index. Clearing the Tag is what makes the commit a no-op.</summary>
+    private void RetireStripBoxes()
+    {
+        foreach (var column in _columns)
+            column.Fc.Tag = column.Gain.Tag = column.Q.Tag = null;
     }
 
     private void CommitStripBox(TextBox box)

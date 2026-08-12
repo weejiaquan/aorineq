@@ -48,7 +48,10 @@ public partial class EqPresetLinkDialog : Window
         InitializeComponent();
         _fetch = fetch;
 
-        HeadingText.Text = $"Apply EQ preset '{Truncate(name)}'?";
+        // Grapheme-aware: a name is never cut into a different glyph. Characters that could
+        // disguise the rest of the string (bidi overrides) never get this far — FileNames
+        // refuses them, so a link carrying one is malformed.
+        HeadingText.Text = $"Apply EQ preset '{FileNames.ForDisplay(name, MaxShownNameLength)}'?";
         SourceText.Text = $"From {source}";
         ScopeText.Text = $"Apply & Save applies it to {scopeDescription} and saves it as a preset. "
             + "Save only just adds it to your presets.";
@@ -79,9 +82,6 @@ public partial class EqPresetLinkDialog : Window
         dialog.ShowDialog();
         return new EqPresetLinkResult(dialog._choice, dialog._preset);
     }
-
-    private static string Truncate(string name) =>
-        name.Length <= MaxShownNameLength ? name : name[..(MaxShownNameLength - 1)] + "…";
 
     private void ShowPreset(EqPreset preset)
     {
