@@ -232,13 +232,15 @@ public class ApoWriterTests : IDisposable
     }
 
     /// <summary>Shutdown is the one moment with no later render to fall back on, and the async
-    /// ladder dies with the process — so Dispose has to run the retries itself. Dispose is
-    /// called while the reader still holds the file (which also stops the async ladder, so only
-    /// the shutdown drain can produce a pass here), and the reader lets go mid-ladder.</summary>
+    /// ladder dies with the process — so Dispose has to run the retries itself. The async ladder
+    /// is deliberately burnt out against the still-locked file first, so nothing but the
+    /// shutdown drain can produce a pass here no matter how the threads are scheduled.</summary>
     [Fact]
     public void Dispose_lands_the_last_state_when_the_file_is_locked_at_exit()
     {
         var w = new ApoWriter(_dir);
+        using var ladderSpent = new ManualResetEventSlim(false);
+        w.WriteFailing += ladderSpent.Set;
         w.WriteConfig(VolumeModel(-10));
         w.Flush();
         Thread.Sleep(120);
@@ -250,6 +252,13 @@ public class ApoWriterTests : IDisposable
             w.WriteConfig(VolumeModel(-77));
             w.Flush(); // provably attempted, provably failed
             Assert.DoesNotContain("Preamp: -77.0 dB", File.ReadAllText(w.VolumeFilePath));
+
+            // Burn the async ladder out while the file is still locked: WriteFailing marks the
+            // fifth failure, and the last rung is armed 400 ms behind it. After this the retry
+            // budget is spent and nothing is armed, so the drain is the ONLY path left.
+            Assert.True(ladderSpent.Wait(TimeSpan.FromSeconds(5)), "the async retry ladder never ran");
+            Thread.Sleep(900);
+            Assert.Equal(1, w.WriteCount); // still only the baseline: the ladder landed nothing
             release.Start();
         }
         catch
@@ -268,6 +277,31 @@ public class ApoWriterTests : IDisposable
         Assert.Contains("Preamp: -77.0 dB", content);
         Assert.True(sw.ElapsedMilliseconds < 2000,
             $"shutdown must stay bounded, took {sw.ElapsedMilliseconds} ms");
+    }
+
+    /// <summary>Teardown runs exactly once: a second Dispose must not re-enter the shutdown
+    /// drain (a duplicate writer racing on the same temp path) or dispose the retry timer under
+    /// the first caller's feet. A write posted after shutdown is refused, not half-applied.</summary>
+    [Fact]
+    public void Dispose_is_single_entry_and_refuses_writes_afterwards()
+    {
+        var w = new ApoWriter(_dir);
+        w.WriteConfig(VolumeModel(-33));
+        w.Dispose();
+        var content = File.ReadAllText(w.VolumeFilePath);
+        Assert.Contains("Preamp: -33.0 dB", content);
+        var writesAtShutdown = w.WriteCount;
+
+        Assert.Null(Record.Exception(() => w.Dispose()));
+        Assert.Null(Record.Exception(() => w.WriteConfig(VolumeModel(-99))));
+        Assert.Null(Record.Exception(w.Flush));
+        Thread.Sleep(200); // nothing may fire late and rewrite the file after shutdown
+
+        _out.WriteLine($"content after double dispose + post-shutdown write "
+            + $"({w.WriteCount} writes, {writesAtShutdown} at shutdown):\n"
+            + File.ReadAllText(w.VolumeFilePath));
+        Assert.Equal(content, File.ReadAllText(w.VolumeFilePath));
+        Assert.Equal(writesAtShutdown, w.WriteCount);
     }
 
     [Fact]
