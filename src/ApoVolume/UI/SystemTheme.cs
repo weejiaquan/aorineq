@@ -31,6 +31,26 @@ public static class SystemTheme
         }
     }
 
+    /// <summary>True when the Windows shell — taskbar, notification area, Start — uses the light
+    /// theme. Reads the same Personalize key's <c>SystemUsesLightTheme</c> DWORD (1 = light, 0 =
+    /// dark). Windows lets the shell and the apps themes differ, and the tray glyph is drawn onto
+    /// the taskbar, so this is the one that decides whether it is white or near-black. Falls back
+    /// to <see cref="AppsUseLightTheme"/> when the value is missing or unreadable — the two match
+    /// on every default Windows configuration, which beats guessing a fixed side.</summary>
+    public static bool SystemUsesLightTheme()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath);
+            if (key?.GetValue("SystemUsesLightTheme") is int value) return value != 0;
+        }
+        catch (Exception)
+        {
+            // fall through to the apps theme
+        }
+        return AppsUseLightTheme();
+    }
+
     /// <summary>The current Windows accent color. Reads HKCU\Software\Microsoft\Windows\DWM's
     /// <c>AccentColor</c> DWORD, stored in ABGR byte order (highest byte alpha, then blue, green,
     /// red); defaults to <c>#FF0067C0</c> if the key/value is missing, isn't an int, or the
