@@ -29,7 +29,8 @@ public static class ApoPaths
     /// <summary>The per-user state root, %APPDATA%\AorinEQ — settings.json, skins, presets, the
     /// AutoEq index cache and the protocol spool all live under it. Every one of those paths
     /// resolves through here rather than re-spelling the folder name, so the folder is named in
-    /// exactly one place. Created if missing.</summary>
+    /// exactly one place (see <see cref="AppDataMigration"/>, which renamed it in v3.0.0).
+    /// Created if missing.</summary>
     public static string GetStateRoot()
     {
         var root = Path.Combine(
