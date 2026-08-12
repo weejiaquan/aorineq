@@ -28,6 +28,7 @@ public partial class App : System.Windows.Application
     private string? _loadedSkinStamp;
     private SettingsWindow? _settingsWindow;
     private SkinDesignerWindow? _skinDesigner;
+    private EqEditorWindow? _eqEditor;
     private OnboardingWindow? _onboarding;
     private OnboardingWindow? _startupWizard; // blocking first-run wizard, while it's up
     private DeviceVolumeStates _deviceStates = new(Settings.Default);
@@ -262,6 +263,9 @@ public partial class App : System.Windows.Application
             _tray.OpenRequested += () => ShowOsd(interactive: true);
             _tray.MuteToggleRequested += () => { ActiveState.ToggleMute(); Render(interactive: false); };
             _tray.SettingsRequested += OpenSettings;
+            _tray.EqualizerRequested += OpenEqEditor;
+            _tray.MenuOpening += RefreshTrayEqPresets;
+            _tray.EqPresetSelected += OnTrayEqPresetSelected;
             _tray.ExitRequested += BeginShutdown;
 
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
@@ -689,6 +693,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
             _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
             _settingsWindow.SetupGuideRequested += OpenOnboarding;
+            _settingsWindow.EqualizerRequested += OpenEqEditor;
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
@@ -740,6 +745,78 @@ public partial class App : System.Windows.Application
             RenderEqConfig();
             HandMuteBackToPreamp();
         }
+    }
+
+    /// <summary>Lazily creates (or re-shows) the single EQ editor window. The editor is
+    /// closed for real when dismissed (its loopback capture must fully tear down), so a
+    /// fresh instance is built per open.</summary>
+    private void OpenEqEditor()
+    {
+        if (_eqEditor is null)
+        {
+            _eqEditor = new EqEditorWindow(
+                () => _settings,
+                () => _deviceStates.ActiveId,
+                () => SystemModeActive ? null : ActiveState.CurrentDb);
+            _eqEditor.ScopeChanged += OnEqScopeChanged;
+            _eqEditor.Closed += (_, _) => _eqEditor = null;
+            if (_writer is null)
+                _tray?.ShowWarning("Equalizer APO isn't set up (or its config folder isn't "
+                    + "writable) — EQ changes won't reach your audio until it is. See Settings → Setup guide.");
+            _eqEditor.Show();
+        }
+        _eqEditor.Activate();
+    }
+
+    /// <summary>An EQ editor edit landed: merge the scope into settings (Global or the
+    /// device's entry), re-render the config file, and persist. The dictionaries are copied —
+    /// Settings instances are treated as immutable snapshots everywhere else.</summary>
+    private void OnEqScopeChanged(string? deviceId, EqScopeSetting scope)
+    {
+        if (deviceId is null)
+        {
+            _settings = _settings with { GlobalEq = scope };
+        }
+        else
+        {
+            var map = _settings.DeviceEq is null
+                ? new Dictionary<string, EqScopeSetting>()
+                : new Dictionary<string, EqScopeSetting>(_settings.DeviceEq);
+            map[deviceId] = scope;
+            _settings = _settings with { DeviceEq = map };
+        }
+        RenderEqConfig();
+        SaveSettings();
+    }
+
+    /// <summary>The EQ scope the tray submenu targets: the active device when one is known,
+    /// otherwise the global scope.</summary>
+    private EqScopeSetting? ActiveTrayEqScope() =>
+        _deviceStates.ActiveId is { } id
+            ? _settings.DeviceEq is not null && _settings.DeviceEq.TryGetValue(id, out var scope) ? scope : null
+            : _settings.GlobalEq;
+
+    /// <summary>Right before the tray menu opens: list the preset files and check the active
+    /// device's current one.</summary>
+    private void RefreshTrayEqPresets() =>
+        _tray?.SetEqPresets(PresetStore.List(ApoPaths.GetPresetsRoot()),
+            ActiveTrayEqScope()?.PresetName ?? "");
+
+    /// <summary>Tray "EQ preset" pick: load the preset and apply it to the active device's
+    /// scope (global scope when no device is known) — on-the-fly switching without opening
+    /// the editor. Keeps the scope's on/off state.</summary>
+    private void OnTrayEqPresetSelected(string name)
+    {
+        if (PresetStore.Load(ApoPaths.GetPresetsRoot(), name) is not { } preset)
+        {
+            _tray?.ShowWarning($"Preset '{name}' couldn't be loaded.");
+            return;
+        }
+        var current = ActiveTrayEqScope();
+        var scope = new EqScopeSetting(preset.Name, preset.PreampDb,
+            current?.Enabled ?? true, preset.Bands.ToArray());
+        OnEqScopeChanged(_deviceStates.ActiveId, scope);
+        _eqEditor?.RefreshFromApp();
     }
 
     /// <summary>Lazily creates (or re-shows) the single skin designer window.</summary>
@@ -1147,6 +1224,7 @@ public partial class App : System.Windows.Application
         RenderEqConfig();
         _tray?.Update(ActiveState.Percent, ActiveState.Muted);
         SaveSettings();
+        _eqEditor?.OnActiveDeviceChanged(); // retab + loopback re-attach, if the editor is open
     }
 
     /// <summary>External endpoint change (another app, the Windows mixer, a device switch):

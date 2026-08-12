@@ -1,0 +1,34 @@
+<Window x:Class="ApoVolume.UI.AutoEqImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AutoEq import — apo-volume" Width="560" Height="480"
+        MinWidth="460" MinHeight="360" WindowStartupLocation="CenterOwner">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,8"
+                   Text="Search the AutoEq project's measurement database and import a headphone's ParametricEQ profile as a preset." />
+
+        <DockPanel Grid.Row="1" Margin="0,0,0,8">
+            <Button DockPanel.Dock="Right" Content="Refresh index" Padding="10,3" Margin="6,0,0,0"
+                    Click="OnRefreshIndex" />
+            <TextBox x:Name="SearchBox" TextChanged="OnSearchChanged" VerticalContentAlignment="Center" />
+        </DockPanel>
+
+        <ListBox x:Name="ResultsList" Grid.Row="2" MouseDoubleClick="OnImport"
+                 SelectionChanged="OnSelectionChanged" />
+
+        <DockPanel Grid.Row="3" Margin="0,10,0,0" LastChildFill="True">
+            <Button DockPanel.Dock="Right" Content="Cancel" Padding="12,4" IsCancel="True" />
+            <Button x:Name="ImportButton" DockPanel.Dock="Right" Content="Import" Padding="12,4"
+                    Margin="0,0,8,0" IsDefault="True" IsEnabled="False" Click="OnImport" />
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="Gray"
+                       TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+    </Grid>
+</Window>
