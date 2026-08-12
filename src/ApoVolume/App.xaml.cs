@@ -777,14 +777,21 @@ public partial class App : System.Windows.Application
             _startupWizard.Activate();
             return;
         }
+        // The OSD pipeline isn't built yet — this signal raced early startup (the waiter thread
+        // starts before the wizard is shown and before _osd/_tray exist). Discard any spooled
+        // link rather than process it half-initialized; the same stale-intent policy applies.
+        if (_osd is null)
+        {
+            _protocolSpool.TakeAll();
+            return;
+        }
         var links = _protocolSpool.TakeAll();
         if (links.Count > 0)
         {
             EnqueueProtocolLinks(links);
             return;
         }
-        if (_osd is not null)
-            ShowOsd(interactive: true);
+        ShowOsd(interactive: true);
     }
 
     /// <summary>Queues protocol links and drains the queue one link at a time — each link shows
@@ -801,6 +808,13 @@ public partial class App : System.Windows.Application
         {
             while (_pendingProtocolLinks.Count > 0)
             {
+                // Re-checked every iteration: the await in HandleProtocolLinkAsync (download +
+                // dialog) gives the user time to disable links mid-drain — honor that at once.
+                if (!_settings.ProtocolLinksEnabled)
+                {
+                    _pendingProtocolLinks.Clear();
+                    break;
+                }
                 try
                 {
                     await HandleProtocolLinkAsync(_pendingProtocolLinks.Dequeue());
@@ -939,6 +953,8 @@ public partial class App : System.Windows.Application
         if (on == _settings.ProtocolLinksEnabled) return;
         _settings = _settings with { ProtocolLinksEnabled = on };
         SaveSettings();
+        if (!on)
+            _pendingProtocolLinks.Clear(); // drop anything queued but not yet installed
         try
         {
             var registration = new ProtocolRegistration();
