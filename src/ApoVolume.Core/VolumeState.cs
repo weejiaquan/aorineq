@@ -48,6 +48,10 @@ public sealed class VolumeState
     /// outside the app) without the unmute-on-positive coupling of <see cref="SetPercent"/>.</summary>
     public void SetMuted(bool muted) => Muted = muted;
 
-    public double CurrentDb =>
-        Muted || Percent == 0 ? MuteDb : MinDb * (100 - Percent) / 99.0;
+    public double CurrentDb => ToDb(Percent, Muted);
+
+    /// <summary>The percent→preamp mapping as a pure function, for callers that hold
+    /// (percent, muted) pairs without a live state (the per-device config renderer).</summary>
+    public static double ToDb(int percent, bool muted) =>
+        muted || percent == 0 ? MuteDb : MinDb * (100 - percent) / 99.0;
 }

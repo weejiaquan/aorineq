@@ -28,6 +28,11 @@ public sealed class EndpointVolume : IDisposable
     /// Raised on a COM callback thread, never for this instance's own sets.</summary>
     public event Action<int, bool>? Changed;
 
+    /// <summary>The default render endpoint changed (raised BEFORE the accompanying
+    /// <see cref="Changed"/>, on a COM callback thread). Both volume modes use this to swap
+    /// the active per-device state; the EQ window uses it to re-attach its loopback capture.</summary>
+    public event Action? DefaultDeviceChanged;
+
     public EndpointVolume()
     {
         _volumeCallback = new VolumeCallback(this);
@@ -269,6 +274,7 @@ public sealed class EndpointVolume : IDisposable
             if (_disposed) return;
             ReleaseVolumeLocked(); // the next GetVolume() activates the new endpoint
         }
+        DefaultDeviceChanged?.Invoke();
         if (TryRead() is { } state)
             Changed?.Invoke(state.Percent, state.Muted);
     }

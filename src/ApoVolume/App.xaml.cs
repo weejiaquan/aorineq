@@ -30,7 +30,7 @@ public partial class App : System.Windows.Application
     private SkinDesignerWindow? _skinDesigner;
     private OnboardingWindow? _onboarding;
     private OnboardingWindow? _startupWizard; // blocking first-run wizard, while it's up
-    private VolumeState _state = new();
+    private DeviceVolumeStates _deviceStates = new(Settings.Default);
     private string _settingsPath = "";
     // Single source of truth for everything persisted to settings.json. Every field (volume
     // percent/mute, RunAsAdmin, all OSD fields) is updated here via `with { }` before SaveSettings
@@ -54,6 +54,10 @@ public partial class App : System.Windows.Application
     private readonly Coalescer _settingsSaver = new(TimeSpan.FromMilliseconds(50));
 
     private static string ExePath => Environment.ProcessPath!;
+
+    /// <summary>Volume state of the ACTIVE device — what keys/OSD/tray act on. Follows the
+    /// Windows default render device via <see cref="OnDefaultDeviceChanged"/>.</summary>
+    private VolumeState ActiveState => _deviceStates.Active;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -229,16 +233,20 @@ public partial class App : System.Windows.Application
         bool systemMode = _settings.VolumeMode == VolumeModes.System;
         try
         {
-            _state = new VolumeState(settings.Percent, settings.Muted);
-            _state.StepPercent = settings.StepPercent;
+            _deviceStates = new DeviceVolumeStates(settings);
+            _deviceStates.SwitchTo(AudioEndpoint.GetDefaultRenderEndpointId());
 
+            // Both modes need the endpoint backend now: system mode for the volume itself,
+            // eapo mode for default-device tracking (per-device state switching) and the
+            // mute-handover reads.
+            SetupEndpointVolume();
             if (systemMode)
             {
-                SetupEndpointVolume();
-                // Idempotent repark: system mode's contract is a transparent (0 dB) APO chain.
-                // This covers the first-run wizard's transition AND repairs a crash that landed
-                // settings.json as "system" before the transition's preamp write reached disk.
-                TryWriteTransparentPreamp();
+                // Quiet best-effort pipeline: system mode still renders per-device EQ through
+                // the config file (volume components parked at 0 — the idempotent repark that
+                // also repairs a crash mid mode-transition), but must never pop a UAC setup
+                // prompt just for EQ; a missing/unwritable EAPO simply means no EQ rendering.
+                TryBuildEapoPipelineQuiet();
             }
             else
             {
@@ -252,7 +260,7 @@ public partial class App : System.Windows.Application
             // Opening the slider changes no state, so it only shows the OSD — a full Render here
             // would pointlessly rewrite apo-volume.txt and re-persist settings on every tray click.
             _tray.OpenRequested += () => ShowOsd(interactive: true);
-            _tray.MuteToggleRequested += () => { _state.ToggleMute(); Render(interactive: false); };
+            _tray.MuteToggleRequested += () => { ActiveState.ToggleMute(); Render(interactive: false); };
             _tray.SettingsRequested += OpenSettings;
             _tray.ExitRequested += BeginShutdown;
 
@@ -308,9 +316,9 @@ public partial class App : System.Windows.Application
             // Hook construction can fail (e.g. another process/policy blocks WH_KEYBOARD_LL);
             // kept inside this try so that failure hits the same friendly fail-fast dialog below.
             _hook = new KeyboardHook();
-            _hook.VolumeUp += () => { _state.Up(); Render(interactive: false); };
-            _hook.VolumeDown += () => { _state.Down(); Render(interactive: false); };
-            _hook.MuteToggle += () => { _state.ToggleMute(); Render(interactive: false); };
+            _hook.VolumeUp += () => { ActiveState.Up(); Render(interactive: false); };
+            _hook.VolumeDown += () => { ActiveState.Down(); Render(interactive: false); };
+            _hook.MuteToggle += () => { ActiveState.ToggleMute(); Render(interactive: false); };
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException
             or System.ComponentModel.Win32Exception)
@@ -321,15 +329,13 @@ public partial class App : System.Windows.Application
         }
 
         // Apply persisted volume immediately at startup. System mode instead ADOPTS the device's
-        // current state (no startup volume jump); if the device is unreadable the saved percent
-        // stays and the first keypress pushes it via Render. Null-forgiving: same construction-
-        // order guarantee as Render() — the try block either assigns the mode's backend or
-        // returns before reaching here.
+        // current state (no startup volume jump) and still renders the config file (EQ blocks +
+        // parked-0 volume). If the device is unreadable the saved percent stays and the first
+        // keypress pushes it via Render.
         if (systemMode)
             AdoptEndpointState();
-        else
-            WriteVolumePreamp(_state.CurrentDb);
-        _tray!.Update(_state.Percent, _state.Muted);
+        RenderEqConfig();
+        _tray!.Update(ActiveState.Percent, ActiveState.Muted);
 
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
         try
@@ -731,7 +737,7 @@ public partial class App : System.Windows.Application
     {
         if (_settings.VolumeMode == VolumeModes.Eapo && _writer is null && TryBuildEapoPipeline())
         {
-            WriteVolumePreamp(_state.CurrentDb);
+            RenderEqConfig();
             HandMuteBackToPreamp();
         }
     }
@@ -1106,17 +1112,17 @@ public partial class App : System.Windows.Application
     {
         if (SystemModeActive)
         {
-            _endpointVolume!.SetPercent(_state.Percent);
-            _endpointVolume.SetMuted(_state.Muted);
+            _endpointVolume!.SetPercent(ActiveState.Percent);
+            _endpointVolume.SetMuted(ActiveState.Muted);
         }
         else
         {
-            // Null only when eapo mode was selected while EAPO is still missing — the
+            // No-op when eapo mode was selected while EAPO is still missing — the
             // onboarding-close hook builds the pipeline once EAPO exists.
-            WriteVolumePreamp(_state.CurrentDb);
+            RenderEqConfig();
         }
         ShowOsd(interactive);
-        _tray!.Update(_state.Percent, _state.Muted);
+        _tray!.Update(ActiveState.Percent, ActiveState.Muted);
         SaveSettings();
     }
 
@@ -1127,6 +1133,20 @@ public partial class App : System.Windows.Application
         if (_endpointVolume is not null) return;
         _endpointVolume = new EndpointVolume();
         _endpointVolume.Changed += (p, m) => Dispatcher.BeginInvoke(() => OnEndpointVolumeChanged(p, m));
+        _endpointVolume.DefaultDeviceChanged += () => Dispatcher.BeginInvoke(OnDefaultDeviceChanged);
+    }
+
+    /// <summary>The Windows default render device changed: swap the active per-device state
+    /// (both modes), re-render the config so a first-seen device gets its block, and refresh
+    /// the tray SILENTLY — no OSD, matching the native behavior on device switches. In system
+    /// mode the endpoint backend's follow-up Changed event then adopts the new device's
+    /// actual volume into the freshly-switched state.</summary>
+    private void OnDefaultDeviceChanged()
+    {
+        _deviceStates.SwitchTo(AudioEndpoint.GetDefaultRenderEndpointId());
+        RenderEqConfig();
+        _tray?.Update(ActiveState.Percent, ActiveState.Muted);
+        SaveSettings();
     }
 
     /// <summary>External endpoint change (another app, the Windows mixer, a device switch):
@@ -1135,9 +1155,9 @@ public partial class App : System.Windows.Application
     private void OnEndpointVolumeChanged(int percent, bool muted)
     {
         if (!SystemModeActive) return; // stale event raced a switch back to eapo mode
-        _state.SetPercent(percent);
-        _state.SetMuted(muted);
-        _tray?.Update(_state.Percent, _state.Muted);
+        ActiveState.SetPercent(percent);
+        ActiveState.SetMuted(muted);
+        _tray?.Update(ActiveState.Percent, ActiveState.Muted);
         SaveSettings();
     }
 
@@ -1148,22 +1168,62 @@ public partial class App : System.Windows.Application
     {
         if (_endpointVolume?.TryRead() is { } s)
         {
-            _state.SetPercent(s.Percent);
-            _state.SetMuted(s.Muted);
+            ActiveState.SetPercent(s.Percent);
+            ActiveState.SetMuted(s.Muted);
         }
     }
 
-    /// <summary>Endpoint GUID for the current default render device's config block, falling
-    /// back to EAPO's match-everything "all" pattern when the endpoint can't be read (no audio
-    /// device) — the preamp then applies everywhere, which is exactly the legacy behavior.</summary>
-    private static string ActiveDeviceGuid() =>
-        AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()) ?? "all";
+    /// <summary>Endpoint GUID for the active device's config block, falling back to EAPO's
+    /// match-everything "all" pattern when no endpoint is known (no audio device) — the preamp
+    /// then applies everywhere, which is exactly the legacy behavior.</summary>
+    private string ActiveDeviceGuid() =>
+        AudioEndpoint.EndpointGuid(_deviceStates.ActiveId) ?? "all";
 
-    /// <summary>Renders the config for a bare volume preamp on the active device (interim
-    /// single-device model until the per-device EQ state lands).</summary>
-    private void WriteVolumePreamp(double db) =>
-        _writer?.WriteConfig(new EqConfigModel(false, 0, Array.Empty<EqBand>(),
-            new[] { new DeviceEqSection(ActiveDeviceGuid(), db, false, 0, Array.Empty<EqBand>()) }));
+    /// <summary>Assembles the full render model: the global EQ scope plus one section per
+    /// known device (every device with volume state or an EQ assignment). Volume components
+    /// come from the per-device states in eapo mode and are parked at 0 in system mode
+    /// (loudness rides the Windows endpoint there; EQ renders in BOTH modes). The device-less
+    /// fallback state renders under EAPO's "all" pattern so volume keys keep working even when
+    /// no endpoint id is readable.</summary>
+    private EqConfigModel BuildEqModel()
+    {
+        bool system = SystemModeActive;
+        var global = _settings.GlobalEq;
+        var deviceEq = _settings.DeviceEq;
+
+        var volumes = new Dictionary<string, DeviceVolumeSetting>(_deviceStates.Snapshot());
+        var ids = new List<string>(volumes.Keys);
+        if (deviceEq is not null)
+            foreach (var id in deviceEq.Keys)
+                if (!volumes.ContainsKey(id))
+                    ids.Add(id);
+
+        var devices = new List<DeviceEqSection>();
+        foreach (var id in ids)
+        {
+            if (AudioEndpoint.EndpointGuid(id) is not { } guid)
+                continue;
+            double volumeDb = 0;
+            if (!system)
+                volumeDb = volumes.TryGetValue(id, out var v)
+                    ? VolumeState.ToDb(v.Percent, v.Muted)
+                    : 0; // EQ-only assignment, never volumed: neutral until first seen
+            var eq = deviceEq is not null && deviceEq.TryGetValue(id, out var scope) ? scope : null;
+            devices.Add(new DeviceEqSection(guid, volumeDb,
+                eq?.Enabled ?? true, eq?.PresetPreampDb ?? 0,
+                eq?.Bands ?? Array.Empty<EqBand>()));
+        }
+        if (_deviceStates.ActiveId is null && !system)
+            devices.Add(new DeviceEqSection("all", ActiveState.CurrentDb, true, 0, Array.Empty<EqBand>()));
+
+        return new EqConfigModel(
+            global?.Enabled ?? true, global?.PresetPreampDb ?? 0,
+            global?.Bands ?? Array.Empty<EqBand>(), devices);
+    }
+
+    /// <summary>One call for every "the config file must reflect current state" moment:
+    /// volume keys, EQ edits, device switches, mode transitions. No-op without a writer.</summary>
+    private void RenderEqConfig() => _writer?.WriteConfig(BuildEqModel());
 
     /// <summary>Creates the ApoWriter against the EAPO config dir, probes writability (elevating
     /// via --setup when needed), and starts the include guard. Throws the startup-dialog
@@ -1205,18 +1265,55 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>System-mode variant: builds the writer for EQ rendering ONLY when the config
+    /// dir is already writable — no UAC elevation, no dialogs. System mode works fine without
+    /// it (loudness is the endpoint's job); a missing pipeline just means EQ doesn't render
+    /// until eapo mode's guided setup grants access.</summary>
+    private bool TryBuildEapoPipelineQuiet()
+    {
+        try
+        {
+            var configDir = ApoPaths.GetConfigDir();
+            var writer = new ApoWriter(configDir);
+            try
+            {
+                File.AppendAllText(writer.VolumeFilePath, ""); // create-or-touch; throws if unwritable
+                writer.EnsureInclude();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                writer.Dispose();
+                return false;
+            }
+            writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
+                _tray?.ShowWarning("EQ changes are not reaching Equalizer APO (apo-volume.txt is not writable)."));
+            writer.StartIncludeGuard();
+            _writer = writer;
+            return true;
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException
+            or UnauthorizedAccessException)
+        {
+            return false; // EAPO missing entirely: nothing to render into
+        }
+    }
+
     /// <summary>Reverse mute handover (system → eapo): a muted endpoint would keep eapo mode
-    /// silent no matter what the preamp says, so it unmutes here — but only once the -120 dB
-    /// mute preamp is PROVEN on disk (Flush is just a run barrier, not a success proof). On a
-    /// missing writer or a failed write the endpoint stays muted: silence, never an audible
-    /// leak. Runs on the immediate switch AND on the deferred completion after the setup guide
-    /// installs EAPO (see <see cref="OnOnboardingClosed"/>).</summary>
+    /// silent no matter what the preamp says, so it unmutes here — but only once the mute
+    /// preamp is PROVEN on disk (Flush is just a run barrier, not a success proof). The proof
+    /// compares the active device's rendered Preamp line (volume + preset preamps summed)
+    /// against a fresh render of the same model. On a missing writer or a failed write the
+    /// endpoint stays muted: silence, never an audible leak. Runs on the immediate switch AND
+    /// on the deferred completion after the setup guide installs EAPO
+    /// (see <see cref="OnOnboardingClosed"/>).</summary>
     private void HandMuteBackToPreamp()
     {
-        if (_state.Muted && _writer is not null && _endpointVolume?.TryRead() is { Muted: true })
+        if (ActiveState.Muted && _writer is not null && _endpointVolume?.TryRead() is { Muted: true })
         {
             _writer.Flush();
-            if (PreampFileReads(_state.CurrentDb))
+            var expected = ApoWriter.ReadDevicePreamp(
+                ApoWriter.RenderConfig(BuildEqModel()), ActiveDeviceGuid());
+            if (expected is { } db && PreampFileReads(db))
                 _endpointVolume.SetMuted(false);
         }
     }
@@ -1238,23 +1335,6 @@ public partial class App : System.Windows.Application
         }
     }
 
-    /// <summary>Mode-transition write (eapo → system) when no writer exists yet: parks the APO
-    /// chain's preamp at 0 dB once so it is acoustically transparent — EQ/PEQ stay set in stone
-    /// while loudness moves to the Windows volume. Guarded: a missing EAPO or unwritable file
-    /// must never fail the switch.</summary>
-    private static void TryWriteTransparentPreamp()
-    {
-        try
-        {
-            if (EapoDetection.GetInstallPath() is not { } install) return;
-            File.WriteAllText(Path.Combine(install, "config", ApoWriter.VolumeFileName),
-                ApoWriter.FormatPreamp(0) + Environment.NewLine);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-        }
-    }
-
     /// <summary>Applies a volume-mode switch live (Settings radio or the setup guide's mode
     /// page) with the transition semantics: eapo→system parks the preamp at 0 dB and ADOPTS the
     /// device state (no jump); system→eapo re-applies the saved percent to the preamp, building
@@ -1269,24 +1349,22 @@ public partial class App : System.Windows.Application
             // Mute duty hands over FIRST: parking the preamp at 0 dB would audibly unmute an
             // eapo-muted session (preamp -120 was the only thing keeping it silent), so the
             // endpoint takes the mute before the chain goes transparent.
-            if (_state.Muted) _endpointVolume!.SetMuted(true);
-            // Park the preamp at 0 dB — through the writer's coalescer when one exists so it
-            // serializes AFTER any in-flight volume write (latest-wins), then Flush as a
-            // barrier: the park must be on disk before the coalesced settings save can record
-            // "system" (a crash between the two is additionally repaired by the idempotent
-            // repark at every system-mode startup). Direct best-effort write when no writer.
-            // The EQ chain itself is never touched.
+            if (ActiveState.Muted) _endpointVolume!.SetMuted(true);
+            // Park the volume components at 0 dB (mode already flipped, so BuildEqModel
+            // renders them parked) — through the writer's coalescer so it serializes AFTER any
+            // in-flight volume write (latest-wins), then Flush as a barrier: the park must be
+            // on disk before the coalesced settings save can record "system" (a crash between
+            // the two is additionally repaired by the idempotent repark render at every
+            // system-mode startup). The EQ chain keeps rendering — EQ applies in both modes.
+            if (_writer is null)
+                TryBuildEapoPipelineQuiet(); // EQ-only pipeline; never a UAC prompt from here
             if (_writer is not null)
             {
-                _writer.WriteConfig(new EqConfigModel(false, 0, Array.Empty<EqBand>(), new[] { new DeviceEqSection(ActiveDeviceGuid(), 0, false, 0, Array.Empty<EqBand>()) }));
+                RenderEqConfig();
                 _writer.Flush();
             }
-            else
-            {
-                TryWriteTransparentPreamp();
-            }
             AdoptEndpointState();
-            _tray?.Update(_state.Percent, _state.Muted);
+            _tray?.Update(ActiveState.Percent, ActiveState.Muted);
         }
         else
         {
@@ -1297,7 +1375,7 @@ public partial class App : System.Windows.Application
                     + "loudness until the setup guide completes.");
                 OpenOnboarding();
             }
-            WriteVolumePreamp(_state.CurrentDb); // re-apply the saved percent to the preamp
+            RenderEqConfig(); // re-apply the saved per-device volumes to the preamps
             HandMuteBackToPreamp();
         }
         SaveSettings();
@@ -1309,9 +1387,9 @@ public partial class App : System.Windows.Application
     private void ShowOsd(bool interactive)
     {
         if (_useSkinOsd && _skinOsd is not null)
-            _skinOsd.ShowVolume(_state.Percent, _state.Muted, interactive);
+            _skinOsd.ShowVolume(ActiveState.Percent, ActiveState.Muted, interactive);
         else
-            _osd!.ShowVolume(_state.Percent, _state.Muted, interactive);
+            _osd!.ShowVolume(ActiveState.Percent, ActiveState.Muted, interactive);
     }
 
     /// <summary>Shared handler for both OsdWindow's and SkinOsdWindow's PercentChangedByUser —
@@ -1319,7 +1397,7 @@ public partial class App : System.Windows.Application
     /// by ShowVolume's own programmatic updates.</summary>
     private void OnOsdPercentChanged(int percent)
     {
-        _state.SetPercent(percent);
+        ActiveState.SetPercent(percent);
         Render(interactive: true);
     }
 
@@ -1344,7 +1422,7 @@ public partial class App : System.Windows.Application
             AnimationMs = o.AnimationMs,
             StepPercent = o.StepPercent,
         };
-        _state.StepPercent = _settings.StepPercent;
+        _deviceStates.StepPercent = _settings.StepPercent;
         ApplyOsdConfig(_settings);
         SaveSettings();
         ShowOsd(interactive: false);
@@ -1450,7 +1528,13 @@ public partial class App : System.Windows.Application
     /// settings change followed shortly by a volume change (or vice versa) never loses the other.</summary>
     private void SaveSettings()
     {
-        _settings = _settings with { Percent = _state.Percent, Muted = _state.Muted, StepPercent = _state.StepPercent };
+        _settings = _settings with
+        {
+            // Legacy mirror of the ACTIVE device (pre-v2 compatibility + first-seen seed)…
+            Percent = ActiveState.Percent, Muted = ActiveState.Muted, StepPercent = ActiveState.StepPercent,
+            // …plus the full per-device map.
+            DeviceVolumes = new Dictionary<string, DeviceVolumeSetting>(_deviceStates.Snapshot()),
+        };
         var s = _settings;
         _settingsSaver.Post(() =>
         {
