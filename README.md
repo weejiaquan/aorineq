@@ -174,8 +174,8 @@ apo-volume://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha25
 Clicking a link never installs anything by itself: apo-volume always shows a confirmation
 dialog naming the skin and the host first, with **Install & Use** / **Install only** /
 **Cancel**. Malformed links produce only a tray balloon. The scheme is registered per-user at
-startup and can be turned off with Settings → **Enable apo-volume:// links**. Actions other
-than `install-skin` are reserved for future versions.
+startup and can be turned off with Settings → **Enable apo-volume:// links**. EQ presets have
+their own actions — see [`apo-volume://` EQ links](#apo-volume-eq-links).
 
 Example (HTML):
 
@@ -235,6 +235,102 @@ Skins are not limited to bars. Examples:
 If a custom skin folder is invalid or missing required images, apo-volume falls back to the
 Dark pill style and displays a warning in the system tray. Check `%APPDATA%\apo-volume\` for
 a log file if skins fail to load.
+
+## Equalizer
+
+Tray → **Open equalizer…** (or Settings → Equalizer) opens a parametric EQ that writes real
+Equalizer APO filters. Each scope — **Global**, plus one tab per playback device — has its own
+chain, and the device chains apply on top of the global one.
+
+The editor has two faces, switched in its header and remembered:
+
+- **Simple** — Bass / Mid / Treble sliders (±12 dB), the preset picker, EQ on/off, Flatten,
+  auto-preamp and the level meters. The response curve is shown read-only.
+- **Advanced** — the full editor: a draggable curve, a per-band strip with type/frequency/gain/Q,
+  Edit-as-text, preset management, AutoEq import and a live post-EQ spectrum.
+
+Both edit the **same** bands. The Simple sliders own three reserved filters (low shelf 100 Hz,
+peak 1 kHz, high shelf 8 kHz, all Q 0.7) at the end of the scope's chain; switching to Advanced
+just reveals them as ordinary bands. If the scope already has other bands — an AutoEq import,
+say — Simple mode adjusts on top of them and says so; it never discards or reorders them. New
+installs start in Simple; if you already have bands configured, you keep Advanced.
+
+Presets are plain Equalizer APO ParametricEQ `.txt` files in
+`%APPDATA%\apo-volume\presets`, so they interchange directly with AutoEq, Peace and anything
+else that speaks that format.
+
+### `apo-volume://` EQ links
+
+A site, a forum post or a chat message can hand someone a tuning with one click. Nothing is ever
+applied or saved without a confirmation dialog that shows the source, the band count, the
+preamp, which scope it will land in, and the **response curve itself**.
+
+**A preset inside the link** (no hosting needed) — this is what the editor's **Copy share link**
+button produces:
+
+```
+apo-volume://apply-preset?type=eq&data=<base64url payload>&name=<preset name>&scope=device|global
+```
+
+**A hosted preset file:**
+
+```
+apo-volume://apply-preset?type=eq&url=<https URL to a ParametricEQ .txt>&name=<preset name>&scope=device|global&sha256=<hex>
+```
+
+- `type` — **required**, currently `eq`. Other values report "needs a newer version".
+- `data` / `url` — **exactly one.** `data` carries the preset itself (see the format below);
+  `url` must be `https`, without credentials, and at most 1 MB of text that parses fully as
+  Equalizer APO filter lines. A link carrying both is rejected.
+- `name` — optional. Preset (file) name to save as; defaults to the URL's filename stem, or
+  "Shared preset" for a `data` link. Same rules as preset names in the editor.
+- `scope` — optional, `device` (default, the device you are listening on) or `global`. If there
+  is no active playback device, a `device` link lands on the global chain and the dialog says so.
+- `sha256` — optional, hosted links only. Hex SHA-256 of the file; a mismatch is rejected.
+  Meaningless (and refused) on `data` links, which carry no separate file to verify.
+
+Whole links are capped at 4000 characters — comfortable for a 24-band chain, and the editor
+tells you if a chain is too big to share this way (host it and use `url` instead).
+
+#### The `data` payload format
+
+The payload is UTF-8 text, base64url-encoded (`-`/`_`, padding stripped):
+
+```
+v1|<preamp dB>|<TYPE>,<Fc Hz>,<gain dB>,<Q>;<TYPE>,<Fc Hz>,<gain dB>,<Q>;…
+```
+
+`TYPE` is an Equalizer APO filter token: `PK`, `LSC`, `HSC`, `NO`, `LPQ`, `HPQ`. Numbers are
+invariant (`.` decimal separator); gain is written for every band and ignored for the types that
+have none. Up to 64 bands. For example, `v1|-6.1|LSC,105,-1.4,0.7;PK,3200,2.6,1.8` encodes a
+preamp of −6.1 dB and two filters, and becomes
+`djF8LTYuMXxMU0MsMTA1LC0xLjQsMC43O1BLLDMyMDAsMi42LDEuOA`.
+
+Anything that doesn't decode cleanly — wrong alphabet, invalid UTF-8, an unknown version, a bad
+number, too many bands — is rejected as a malformed link; values that parse but are out of range
+are clamped to the editor's own limits.
+
+### Other deep links
+
+```
+apo-volume://autoeq?model=<headphone model>          opens AutoEq import, pre-searched
+apo-volume://open?page=eq|settings|designer|skins    opens that window
+```
+
+`autoeq` only fills in the search box — you still pick the profile and press Import. `open`
+changes nothing, so it asks nothing. An unknown `page` reports "needs a newer version".
+
+Example (HTML):
+
+```html
+<a href="apo-volume://apply-preset?type=eq&url=https%3A%2F%2Fexample.com%2Fpresets%2FHD650.txt&name=HD650&sha256=…">
+  Apply the HD 650 correction
+</a>
+<a href="apo-volume://autoeq?model=Sennheiser%20HD%20650">Find it on AutoEq</a>
+```
+
+Control links (`set-volume`, `mute`) are deliberately **not** implemented: any page could use
+them to nuisance-toggle your audio, and a confirmation dialog would make them pointless.
 
 ## Volume model
 
