@@ -18,15 +18,17 @@
 ;     yourself" when the directory is not writable. Installing into Program Files would demote
 ;     every user to that fallback, and nothing would say why.
 ;
-;  2. NO AUTOSTART ENTRY of any kind. The app owns that decision: Settings' "Start with Windows"
-;     picks between an HKCU Run value and a scheduled task depending on RunAsAdmin, and reconciles
-;     the two. An installer-written Run key would be a third writer fighting the other two.
+;  2. NO AUTOSTART ENTRY IS EVER WRITTEN. The app owns that decision: Settings' "Start with
+;     Windows" picks between an HKCU Run value and a scheduled task depending on RunAsAdmin, and
+;     reconciles the two. An installer-written Run key would be a third writer fighting them.
+;     Uninstall does REMOVE such a value, but only when it points into the directory being
+;     deleted - see RemoveStalePointersInto below.
 ;
-;  3. NOTHING IS DONE TO EQUALIZER APO OR TO THE aorineq:// SCHEME. The app creates aorineq.txt,
-;     adds the Include line to config.txt, and registers/re-points the URL scheme at runtime for
-;     whichever exe is running. Uninstall deliberately leaves the scheme alone as well: the user
-;     may be running a second, portable copy that currently owns the registration, and deleting it
-;     here would break that copy.
+;  3. NOTHING IS DONE TO EQUALIZER APO, AND THE aorineq:// SCHEME IS NEVER REGISTERED HERE. The app
+;     creates aorineq.txt, adds the Include line to config.txt, and registers/re-points the URL
+;     scheme at runtime for whichever exe is running. Uninstall removes the scheme only when it
+;     still points into the directory being deleted, so a second, portable copy that has since
+;     taken the registration keeps it.
 ;
 ;  4. AppMutex is the app's REAL single-instance mutex, kept in sync with AorinEQ.Core.AppIdentity
 ;     by InstallerScriptTests. It is how Setup and Uninstall notice AorinEQ is running before they
@@ -101,8 +103,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; ignoreversion, not the default version comparison: the in-app updater may already have put a
-; NEWER exe in this directory, and running an installer must still install the exe it carries.
+; ignoreversion, not the default version comparison. The in-app updater may already have put a
+; NEWER exe in this directory, and Inno's default would then SKIP the copy - leaving a 3.4.0 exe
+; behind a 3.3.0 Apps & Features entry, i.e. an installed version that lies about itself. The
+; alternative it is traded against is a real one: running an older Setup does downgrade a
+; newer installed exe. That case self-heals, because the app's own update check re-lands the newer
+; build, and it leaves the entry and the exe agreeing in the meantime.
 Source: "{#AppExePath}"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
@@ -128,6 +134,37 @@ FinishedLabel=Setup has finished installing [name] on your computer. The applica
 FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%n[name] does not add itself to Windows startup. To start it with Windows, open its tray menu, choose Settings, and turn on "Start with Windows" - [name] manages that itself so it keeps working whether or not you run it as administrator.
 
 [Code]
+{ The app points two per-user registry entries at whichever exe is running: the "Start with
+  Windows" Run value, and the aorineq:// handler. Neither is created here - but once this exe is
+  deleted, one that still names it is a broken autorun and a link scheme that opens nothing.
+
+  Both are removed ONLY when they point INSIDE the directory being uninstalled, matched with a
+  trailing backslash so a sibling like ...\Programs\AorinEQ2 cannot match. That guard is the whole
+  point: the user may be running a portable copy that has since taken over both entries, and it
+  must keep them.
+
+  DELIBERATELY NOT HANDLED: a "Start with Windows" SCHEDULED TASK, which the app uses instead of
+  the Run value when Run-as-administrator is on. Its run level is HIGHEST, and by Windows' rules
+  creating or deleting such a task requires elevation - which this uninstaller never asks for, by
+  design. A task left naming a deleted exe is inert (Task Scheduler logs a failed start and stops
+  there); turning "Start with Windows" off before uninstalling removes it properly. }
+procedure RemoveStalePointersInto(AppDir: String);
+var
+  RunKey, SchemeKey, Value: String;
+begin
+  AppDir := Lowercase(AddBackslash(AppDir));
+  RunKey := 'Software\Microsoft\Windows\CurrentVersion\Run';
+  SchemeKey := 'Software\Classes\aorineq';
+
+  if RegQueryStringValue(HKEY_CURRENT_USER, RunKey, '{#AppName}', Value) then
+    if Pos(AppDir, Lowercase(Value)) > 0 then
+      RegDeleteValue(HKEY_CURRENT_USER, RunKey, '{#AppName}');
+
+  if RegQueryStringValue(HKEY_CURRENT_USER, SchemeKey + '\shell\open\command', '', Value) then
+    if Pos(AppDir, Lowercase(Value)) > 0 then
+      RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, SchemeKey);
+end;
+
 { %APPDATA%\AorinEQ holds settings.json, EQ presets and - the reason this asks rather than just
   deleting - the user's SKINS, which are artwork they may have spent hours on and which no
   reinstall can bring back. Keeping is the default, including for a silent uninstall:
@@ -138,6 +175,8 @@ var
 begin
   if CurUninstallStep = usPostUninstall then
   begin
+    RemoveStalePointersInto(ExpandConstant('{app}'));
+
     DataDir := ExpandConstant('{userappdata}\{#AppName}');
     if DirExists(DataDir) then
       if SuppressibleMsgBox(
