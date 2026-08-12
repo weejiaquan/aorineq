@@ -109,7 +109,10 @@ public class InstallerScriptTests
     {
         Assert.DoesNotContain("[Registry]", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("RegWrite", Directives, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("schtasks", Directives, StringComparison.OrdinalIgnoreCase);
+        // The scheduled-task form can only be reached by shelling out to schtasks. The installer
+        // never runs anything at all, which covers that and every other external command.
+        Assert.DoesNotContain("Exec(", Directives, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShellExec", Directives, StringComparison.Ordinal);
         Assert.DoesNotContain("{userstartup}", Directives, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("{commonstartup}", Directives, StringComparison.OrdinalIgnoreCase);
 
@@ -129,21 +132,25 @@ public class InstallerScriptTests
 
     /// <summary>Uninstall's only registry work is deleting the two per-user entries the app points
     /// at the exe being removed - a Run value and the aorineq:// handler - and each deletion is
-    /// gated on the entry still naming the directory being uninstalled. Without that gate, a
-    /// portable copy that has since taken over both entries would lose them; without the trailing
-    /// backslash, a sibling directory like ...\Programs\AorinEQ2 would match the prefix.</summary>
+    /// gated on the entry being OWNED by the directory being uninstalled. The gate has to be a
+    /// PREFIX test, because both writers put the exe path first and quoted: a substring test would
+    /// also match a portable copy's command that merely names this directory in an argument. The
+    /// trailing backslash is what stops a sibling like ...\Programs\AorinEQ2 matching.</summary>
     [Fact]
-    public void UninstallOnlyRemovesRegistryEntriesPointingIntoItsOwnDirectory()
+    public void UninstallOnlyRemovesRegistryEntriesOwnedByItsOwnDirectory()
     {
-        Assert.Contains("AppDir := Lowercase(AddBackslash(AppDir));", Script);
         Assert.Contains("RemoveStalePointersInto(ExpandConstant('{app}'));", Script);
+
+        // The guard: quote + directory + trailing backslash, anchored at position 1.
+        Assert.Contains(
+            "Result := Pos(Lowercase('\"' + AddBackslash(AppDir)), Lowercase(Value)) = 1;", Script);
 
         var deletions = Regex.Matches(Script, @"^\s*(RegDeleteValue|RegDeleteKeyIncludingSubkeys)\(",
             RegexOptions.Multiline);
-        _out.WriteLine($"{deletions.Count} registry deletions, {Regex.Matches(Script, @"Pos\(AppDir, Lowercase\(Value\)\) > 0 then").Count} guards");
+        var guards = Regex.Matches(Script, @"if PointsInto\(Value, AppDir\) then\s*\n\s*RegDelete");
+        _out.WriteLine($"{deletions.Count} registry deletions, {guards.Count} guarded");
         Assert.Equal(2, deletions.Count);
-        // One guard immediately above each deletion, and nothing else deletes anything.
-        Assert.Equal(2, Regex.Matches(Script, @"Pos\(AppDir, Lowercase\(Value\)\) > 0 then\s*\n\s*RegDelete").Count);
+        Assert.Equal(deletions.Count, guards.Count); // every deletion sits under the guard
     }
 
     /// <summary>The user's skins are artwork no reinstall can bring back, so uninstall ASKS - and
