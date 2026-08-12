@@ -152,7 +152,10 @@ public class SettingsTests : IDisposable
         Assert.False(s.GlobalEq!.Enabled);
         Assert.Equal(EqBandType.Peak, Assert.Single(s.GlobalEq.Bands!).Type);
         // Band types persist as readable names, not bare numbers.
-        Assert.Contains("LowShelf", File.ReadAllText(_path));
+        var json = File.ReadAllText(_path);
+        Assert.Contains("LowShelf", json);
+        // Derived properties must NOT be persisted (a stored copy could drift from its type).
+        Assert.DoesNotContain("HasGain", json);
     }
 
     [Fact]

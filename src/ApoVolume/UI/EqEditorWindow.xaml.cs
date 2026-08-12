@@ -49,6 +49,10 @@ public partial class EqEditorWindow : Window
 
     // Working copy of the current scope (pushed on every mutation, reloaded on tab switch).
     private string? _scopeDeviceId;
+    /// <summary>Whether the user has picked a scope yet. Needed because null is a REAL scope
+    /// (Global): without this the "restore the current tab" lookup would always match Global
+    /// on first open and the editor could never start on the active device.</summary>
+    private bool _scopeChosen;
     private List<EqBand> _bands = new();
     private string _presetName = "";
     private double _presetPreampDb;
@@ -142,10 +146,11 @@ public partial class EqEditorWindow : Window
             var marker = endpoint.Id == activeId ? "● " : "";
             tabs.Add(new ScopeTab(endpoint.Id, marker + endpoint.FriendlyName));
         }
-        var current = _scopeDeviceId;
         _syncing = true;
         ScopeTabs.ItemsSource = tabs;
-        var select = tabs.FirstOrDefault(t => t.DeviceId == current)
+        // Keep the user's chosen tab across refreshes; on first open start on the ACTIVE
+        // device (what they hear right now), falling back to Global when it isn't listed.
+        var select = (_scopeChosen ? tabs.FirstOrDefault(t => t.DeviceId == _scopeDeviceId) : null)
             ?? tabs.FirstOrDefault(t => t.DeviceId == activeId)
             ?? tabs[0];
         ScopeTabs.SelectedItem = select;
@@ -157,6 +162,7 @@ public partial class EqEditorWindow : Window
     {
         if (_syncing || ScopeTabs.SelectedItem is not ScopeTab tab)
             return;
+        _scopeChosen = true; // an explicit pick survives later tab refreshes
         LoadScope(tab.DeviceId);
     }
 

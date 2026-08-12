@@ -25,6 +25,9 @@ public enum EqBandType
 /// input), not here.</summary>
 public sealed record EqBand(EqBandType Type, double Fc, double GainDb, double Q)
 {
+    /// <summary>Derived from <see cref="Type"/>, never persisted — a stored copy could drift
+    /// from the type it describes (settings.json is rewritten by every version).</summary>
+    [JsonIgnore]
     public bool HasGain => Type is EqBandType.Peak or EqBandType.LowShelf or EqBandType.HighShelf;
 }
 
