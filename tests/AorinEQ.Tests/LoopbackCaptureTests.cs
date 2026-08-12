@@ -14,6 +14,7 @@ public class LoopbackCaptureTests
     public LoopbackCaptureTests(ITestOutputHelper output) => _out = output;
 
     [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void Start_attaches_to_the_default_endpoint_and_stop_tears_down()
     {
         using var capture = new LoopbackCapture();
@@ -26,6 +27,7 @@ public class LoopbackCaptureTests
     }
 
     [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void Restart_cycles_cleanly_for_device_reattach()
     {
         using var capture = new LoopbackCapture();
@@ -85,6 +87,7 @@ public class LoopbackCaptureTests
     }
 
     [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void Stop_and_dispose_are_idempotent_and_start_after_stop_works()
     {
         var capture = new LoopbackCapture();

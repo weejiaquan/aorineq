@@ -10,7 +10,7 @@
 # installer is additive - it never replaces or renames the portable pair.
 #
 # Every sidecar is regenerated here, every time, and then VERIFIED AS SHIPPED - see
-# tools/Sha256Sidecar.ps1, which owns that guard and is shared with the release workflow.
+# tools/ReleaseChecks.ps1, which owns that guard and is shared with the release workflow.
 #
 # This script stays the single source of truth for HOW a release is built. .github/workflows/
 # release.yml runs this exact file on a clean windows-latest runner rather than repeating its
@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path $PSScriptRoot 'tools\Sha256Sidecar.ps1')
+. (Join-Path $PSScriptRoot 'tools\ReleaseChecks.ps1')
 
 $out = 'publish'
 $exeName = 'AorinEQ.exe'
@@ -51,15 +51,10 @@ if (-not (Test-Path $setup)) { throw "ISCC produced no $setup" }
 
 $setupHash = Publish-Sha256Sidecar -Path $setup
 
-# The installer's version comes from the exe's FileVersion; the exe's comes from the csproj. If
-# those two ever disagree, Apps & Features would be naming a build that is not the one installed.
-# Compared on Major.Minor.Build alone: the SDK stamps the exe "3.3.0.0" and Inno stamps the setup
-# "3.3.0", which are the same version written two ways.
-function Get-ShortVersion {
-    param([Parameter(Mandatory)][string] $Path)
-    $v = [Version](Get-Item $Path).VersionInfo.FileVersion
-    return "$($v.Major).$($v.Minor).$([Math]::Max($v.Build, 0))"
-}
+# The installer's version comes from the exe's FileVersion; the exe's comes from Directory.Build.props
+# via the csproj. If those two ever disagree, Apps & Features would be naming a build that is not the
+# one installed. (Get-ShortVersion lives in tools/ReleaseChecks.ps1 - the release workflow compares
+# the same three parts against the tag.)
 $exeVersion = Get-ShortVersion -Path $exe
 $setupVersion = Get-ShortVersion -Path $setup
 if ($setupVersion -ne $exeVersion) {

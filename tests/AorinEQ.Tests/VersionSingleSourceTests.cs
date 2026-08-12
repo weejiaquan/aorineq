@@ -9,42 +9,65 @@ namespace AorinEQ.Tests;
 /// inherits it. This pins that.
 ///
 /// It used not to be. src/AorinEQ said 3.3.0 and src/AorinEQ.Core said 3.2.0, because a release
-/// bumped one csproj and forgot the other - and nothing failed, because a wrong assembly version
-/// is not a build error. It is only visible in a file properties dialog, in a crash report, or in
-/// a support thread where the user's Core version names a build that was never released.
+/// bumped one csproj and forgot the other - and nothing failed, because a wrong assembly version is
+/// not a build error. It is only visible in a file properties dialog, in a crash report, or in a
+/// support thread where the user's Core version names a build that was never released.
 ///
-/// Sharing the property makes the two projects unable to disagree. This test guards the way back:
-/// a project body is imported AFTER Directory.Build.props, so a <c>&lt;Version&gt;</c> typed into
-/// any csproj would silently win and restore the drift. So every project file in the repository is
-/// read here (the csproj links them into the test output, exactly as InstallerScriptTests reads the
-/// real .iss), and the value is checked against the version actually stamped on two built
-/// assemblies - proving the property does not merely exist but reaches the binaries.</summary>
+/// Sharing the property makes the two projects unable to disagree. This test guards the way back.
+/// A project body is imported AFTER Directory.Build.props, so any version-bearing property typed
+/// into a csproj would silently win: not just &lt;Version&gt;, but VersionPrefix, AssemblyVersion,
+/// FileVersion and InformationalVersion, each of which overrides a different part of what the
+/// version actually IS on the shipped binary. All of them are banned, in every project.
+///
+/// Unlike InstallerScriptTests and AppIconTests, which read shipped files linked into the test
+/// output, this one walks the REPOSITORY. A list of project files fixed at build time cannot
+/// express "no project, including one added next year, redeclares this" - and the fifth csproj
+/// nobody remembers to add to the list is exactly the shape of the bug being guarded against.
+/// (A hand-written AssemblyInfo.cs is not a hole: GenerateAssemblyInfo is on, so a duplicate
+/// attribute is a compile error.)</summary>
 public class VersionSingleSourceTests
 {
     private const string PropsFileName = "Directory.Build.props";
 
-    /// <summary>Every project file in the repository, by the name it is linked into the test
-    /// output under. If a project is added to the repo it belongs here too.</summary>
-    private static readonly string[] ProjectFileNames =
+    /// <summary>Every MSBuild property that changes a version the build stamps on an assembly.
+    /// Version alone is not enough: FileVersion overrides what Explorer and publish.ps1 read, and
+    /// InformationalVersion overrides ProductVersion, which is what identifies a shipped exe.</summary>
+    private static readonly string[] BannedProperties =
     [
-        "AorinEQ.csproj",
-        "AorinEQ.Core.csproj",
-        "AorinEQ.Tests.csproj",
-        "AppIconGen.csproj",
+        "Version", "VersionPrefix", "VersionSuffix",
+        "AssemblyVersion", "FileVersion", "InformationalVersion", "PackageVersion",
     ];
 
-    private static string Read(string fileName) =>
-        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, fileName));
+    private static readonly string RepoRoot = FindRepoRoot();
+
+    private static string FindRepoRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "AorinEQ.slnx"))) return dir.FullName;
+        }
+        throw new InvalidOperationException(
+            $"could not find the repository root (a directory containing AorinEQ.slnx) above {AppContext.BaseDirectory}");
+    }
+
+    /// <summary>Every project file in the repository, found rather than listed.</summary>
+    private static IEnumerable<string> ProjectFiles() =>
+        Directory.EnumerateFiles(RepoRoot, "*.csproj", SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                     && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"));
+
+    private static List<XElement> PropertyElements(string path, string name) =>
+        XDocument.Load(path).Descendants()
+            .Where(e => e.Name.LocalName == name && e.Parent?.Name.LocalName == "PropertyGroup")
+            .ToList();
 
     private readonly Xunit.Abstractions.ITestOutputHelper _out;
 
     public VersionSingleSourceTests(Xunit.Abstractions.ITestOutputHelper output) => _out = output;
 
-    /// <summary>The declared version, read out of the props file the build actually imports.</summary>
     private static string DeclaredVersion()
     {
-        var elements = XDocument.Parse(Read(PropsFileName))
-            .Descendants().Where(e => e.Name.LocalName == "Version").ToList();
+        var elements = PropertyElements(Path.Combine(RepoRoot, PropsFileName), "Version");
         Assert.Single(elements);
         return elements[0].Value.Trim();
     }
@@ -53,43 +76,62 @@ public class VersionSingleSourceTests
     public void DirectoryBuildPropsDeclaresExactlyOneVersion()
     {
         var version = DeclaredVersion();
-        _out.WriteLine($"{PropsFileName} declares <Version>{version}</Version>");
+        _out.WriteLine($"{RepoRoot}\\{PropsFileName} declares <Version>{version}</Version>");
         Assert.Matches(@"^\d+\.\d+\.\d+$", version);
     }
 
-    /// <summary>The guard. A csproj-level &lt;Version&gt; overrides the shared one, so there must
-    /// not be any - in a project file or in a nested Directory.Build.props that would shadow the
-    /// root one for part of the tree.</summary>
-    [Theory]
-    [InlineData("AorinEQ.csproj")]
-    [InlineData("AorinEQ.Core.csproj")]
-    [InlineData("AorinEQ.Tests.csproj")]
-    [InlineData("AppIconGen.csproj")]
-    public void NoProjectRedeclaresTheVersion(string projectFileName)
+    /// <summary>The guard, over every project in the repository and every property that could
+    /// override the shared one.</summary>
+    [Fact]
+    public void NoProjectRedeclaresAnyVersionProperty()
     {
-        var declarations = XDocument.Parse(Read(projectFileName))
-            .Descendants().Where(e => e.Name.LocalName == "Version").ToList();
+        var offences = new List<string>();
+        var checkedProjects = 0;
 
-        _out.WriteLine($"{projectFileName}: {declarations.Count} <Version> element(s)");
-        Assert.Empty(declarations);
+        foreach (var project in ProjectFiles())
+        {
+            checkedProjects++;
+            var relative = Path.GetRelativePath(RepoRoot, project);
+            foreach (var property in BannedProperties)
+            {
+                foreach (var element in PropertyElements(project, property))
+                {
+                    offences.Add($"{relative} declares <{property}>{element.Value}</{property}>");
+                }
+            }
+            _out.WriteLine($"checked {relative}");
+        }
+
+        Assert.True(checkedProjects >= 4, $"only found {checkedProjects} project files under {RepoRoot}");
+        Assert.Empty(offences);
     }
 
+    /// <summary>One props file, at the root. A nested Directory.Build.props shadows the root one
+    /// for its whole subtree - MSBuild stops at the FIRST it finds walking up - so a second file
+    /// would silently un-share the version for everything beneath it.</summary>
     [Fact]
-    public void EveryProjectFileInTheRepositoryIsCovered()
+    public void OnlyTheRootDirectoryBuildFileExists()
     {
-        // The linked copies exist only because the test csproj lists them; a project added to the
-        // repo without being linked here would go unguarded, so the count is pinned too.
-        foreach (var name in ProjectFileNames)
-        {
-            Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, name)), $"{name} was not linked into the test output");
-        }
-        _out.WriteLine($"guarding {ProjectFileNames.Length} project files: {string.Join(", ", ProjectFileNames)}");
+        var buildFiles = new[] { "Directory.Build.props", "Directory.Build.targets" }
+            .SelectMany(name => Directory.EnumerateFiles(RepoRoot, name, SearchOption.AllDirectories))
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                     && !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
+            .Select(p => Path.GetRelativePath(RepoRoot, p))
+            .ToList();
+
+        _out.WriteLine($"build files: {string.Join(", ", buildFiles)}");
+        Assert.Equal([PropsFileName], buildFiles);
     }
 
     /// <summary>The property is not just written - it is what the compiler stamped. Two assemblies
-    /// built from two different csproj files, both carrying the one declared version.</summary>
+    /// built from two different csproj files, both carrying the one declared version.
+    ///
+    /// The third, src/AorinEQ, cannot be loaded here (the test project references Core and nothing
+    /// else, deliberately). It is covered structurally by the property ban above, and at release
+    /// time by the workflow, which refuses to publish unless the tag names the version stamped on
+    /// the exe that was actually built.</summary>
     [Theory]
-    [InlineData(typeof(AppIdentity))]          // src/AorinEQ.Core - the one that drifted
+    [InlineData(typeof(AppIdentity))]              // src/AorinEQ.Core - the one that drifted
     [InlineData(typeof(VersionSingleSourceTests))] // tests/AorinEQ.Tests - a second, independent project
     public void BuiltAssembliesCarryTheDeclaredVersion(Type typeFromAssembly)
     {

@@ -1,8 +1,8 @@
-# The gate. Builds and runs the whole test suite on a clean windows-latest runner.
+# The gate. Builds and runs the test suite on a clean windows-latest runner.
 #
-# It publishes nothing. Every release before v3.3.0 was built and gated on one developer's machine,
-# which is how a stale AorinEQ.exe.sha256 once got as far as a shipped release: the desk is where
-# leftovers live. A clean runner has no leftovers.
+# It publishes nothing. Every release before this workflow existed was built and gated on one
+# developer's machine, which is how a stale AorinEQ.exe.sha256 once got as far as a shipped release:
+# the desk is where leftovers live. A clean runner has no leftovers.
 #
 # release.yml calls this workflow (workflow_call) instead of repeating the steps, so the gate a
 # release passes is exactly the gate a pull request passes.
@@ -28,11 +28,11 @@ jobs:
   build-and-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Both SDKs, matching the development machine: the projects target net8.0-windows, while the
       # .slnx solution file needs a CLI new enough to read it. The newest installed CLI is used.
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -46,5 +46,30 @@ jobs:
       - name: Build
         run: dotnet build AorinEQ.slnx -c Release --no-restore -warnaserror
 
+      # The hardware tests are EXCLUDED here, not weakened - see tests/AorinEQ.Tests/Requires.cs.
+      # This suite does not mock: the audio tests drive real endpoints through real COM and the
+      # Equalizer APO tests read the real install. A GitHub-hosted Windows runner has neither, so
+      # those tests fail there for want of something to talk to, not because anything is broken.
+      # They still run unfiltered at the desk and before every release. Nothing skips itself at
+      # runtime: a test that quietly stands down when the hardware goes missing stops being a test
+      # on the machine that has the hardware too.
       - name: Test
-        run: dotnet test AorinEQ.slnx -c Release --no-build --logger "console;verbosity=normal"
+        shell: pwsh
+        run: |
+          $log = 'test-output.txt'
+          dotnet test AorinEQ.slnx -c Release --no-build `
+            --filter "Requires!=AudioEndpoint&Requires!=EqualizerApo" | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "dotnet test failed with exit code $LASTEXITCODE" }
+
+          # A filter that matches nothing is not a passing test run, and it is the failure mode a
+          # trait-based exclusion invites: rename a trait, and a gate that runs no tests goes green.
+          # The floor is deliberately far below the real count (~880 outside the hardware traits) -
+          # it is here to catch a filter that stopped matching, not to be kept in step with the
+          # suite.
+          $match = [regex]::Match((Get-Content $log -Raw), 'Passed:\s+(\d+)')
+          if (-not $match.Success) { throw "could not read a test count out of the run" }
+          $passed = [int]$match.Groups[1].Value
+          "tests passed: $passed"
+          if ($passed -lt 800) {
+              throw "only $passed tests ran - the --filter is excluding far more than the hardware traits."
+          }

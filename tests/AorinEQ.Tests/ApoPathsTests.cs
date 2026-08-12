@@ -10,6 +10,7 @@ public class ApoPathsTests
     public ApoPathsTests(ITestOutputHelper output) => _out = output;
 
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
     public void GetConfigDir_finds_real_equalizer_apo_install()
     {
         var dir = ApoPaths.GetConfigDir();
