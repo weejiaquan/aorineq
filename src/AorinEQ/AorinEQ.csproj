@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>AorinEQ</AssemblyName>
+    <ApplicationIcon>AorinEQ.ico</ApplicationIcon>
+    <Version>3.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AorinEQ.Core\AorinEQ.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- ApplicationIcon only stamps the Win32 icon on the exe (taskbar/alt-tab/Explorer). The
+         same file is embedded as a WPF resource so every window's Icon="/AorinEQ.ico" resolves.
+         The .NET SDK does NOT auto-include .ico as a WPF Resource: without this explicit item
+         the XAML still compiles and the icons silently fail to resolve at runtime. The tray does
+         NOT use this file — it draws its glyph at runtime (TrayGlyph). -->
+    <Resource Include="AorinEQ.ico" />
+  </ItemGroup>
+</Project>

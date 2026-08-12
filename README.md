@@ -20,7 +20,7 @@ same symptom — per-app volume works, master volume does nothing — should ben
 
 ## Download
 
-Grab `ApoVolume.exe` from the [latest release](../../releases/latest). Self-contained
+Grab `AorinEQ.exe` from the [latest release](../../releases/latest). Self-contained
 single file — no .NET install required.
 
 Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in `publish\`).
@@ -34,8 +34,8 @@ Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in
 
 ## Install
 
-1. Run `ApoVolume.exe`. On first run it creates `apo-volume.txt` in the APO config folder
-   and adds `Include: apo-volume.txt` to `config.txt` (elevating once only if needed).
+1. Run `AorinEQ.exe`. On first run it creates `aorineq.txt` in the APO config folder
+   and adds `Include: aorineq.txt` to `config.txt` (elevating once only if needed).
 2. Set your DAC's physical volume to your maximum comfortable loudness — once. From now on
    the keyboard controls loudness digitally below that ceiling.
 3. Tray menu → Settings… → "Start with Windows" to run at boot.
@@ -156,12 +156,12 @@ Skins travel as plain zip files: **Export…** in the skin designer produces one
 **Import skin…** (Settings) or **Import…** (designer) installs one — the skin's name is taken
 from the zip filename. Only the known skin files are ever extracted from a zip.
 
-#### `apo-volume://` install links (for websites and forums)
+#### `aorineq://` install links (for websites and forums)
 
 Sites sharing skins can offer a one-click install link. The URL contract:
 
 ```
-apo-volume://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha256=<hex>
+aorineq://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha256=<hex>
 ```
 
 - `url` — **required.** Direct `https` link to the skin zip (percent-encode it when embedding
@@ -174,13 +174,13 @@ apo-volume://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha25
 Clicking a link never installs anything by itself: apo-volume always shows a confirmation
 dialog naming the skin and the host first, with **Install & Use** / **Install only** /
 **Cancel**. Malformed links produce only a tray balloon. The scheme is registered per-user at
-startup and can be turned off with Settings → **Enable apo-volume:// links**. EQ presets have
-their own actions — see [`apo-volume://` EQ links](#apo-volume-eq-links).
+startup and can be turned off with Settings → **Enable aorineq:// links**. EQ presets have
+their own actions — see [`aorineq://` EQ links](#apo-volume-eq-links).
 
 Example (HTML):
 
 ```html
-<a href="apo-volume://install-skin?url=https%3A%2F%2Fexample.com%2Fskins%2Fneon-bar.zip&sha256=…">
+<a href="aorineq://install-skin?url=https%3A%2F%2Fexample.com%2Fskins%2Fneon-bar.zip&sha256=…">
   Install the neon-bar skin
 </a>
 ```
@@ -259,7 +259,7 @@ Presets are plain Equalizer APO ParametricEQ `.txt` files in
 `%APPDATA%\apo-volume\presets`, so they interchange directly with AutoEq, Peace and anything
 else that speaks that format.
 
-### `apo-volume://` EQ links
+### `aorineq://` EQ links
 
 A site, a forum post or a chat message can hand someone a tuning with one click. Nothing is ever
 downloaded, applied or saved without a confirmation dialog that shows the source, which scope it
@@ -271,13 +271,13 @@ accept buttons — a link on its own never makes apo-volume touch the network.
 button produces:
 
 ```
-apo-volume://apply-preset?type=eq&data=<base64url payload>&name=<preset name>&scope=device|global
+aorineq://apply-preset?type=eq&data=<base64url payload>&name=<preset name>&scope=device|global
 ```
 
 **A hosted preset file:**
 
 ```
-apo-volume://apply-preset?type=eq&url=<https URL to a ParametricEQ .txt>&name=<preset name>&scope=device|global&sha256=<hex>
+aorineq://apply-preset?type=eq&url=<https URL to a ParametricEQ .txt>&name=<preset name>&scope=device|global&sha256=<hex>
 ```
 
 - `type` — **required**, currently `eq`. Other values report "needs a newer version".
@@ -315,8 +315,8 @@ are clamped to the editor's own limits.
 ### Other deep links
 
 ```
-apo-volume://autoeq?model=<headphone model>          opens AutoEq import, pre-searched
-apo-volume://open?page=eq|settings|designer|skins    opens that window
+aorineq://autoeq?model=<headphone model>          opens AutoEq import, pre-searched
+aorineq://open?page=eq|settings|designer|skins    opens that window
 ```
 
 `autoeq` only fills in the search box — you still pick the profile and press Import. `open`
@@ -325,10 +325,10 @@ changes nothing, so it asks nothing. An unknown `page` reports "needs a newer ve
 Example (HTML):
 
 ```html
-<a href="apo-volume://apply-preset?type=eq&url=https%3A%2F%2Fexample.com%2Fpresets%2FHD650.txt&name=HD650&sha256=…">
+<a href="aorineq://apply-preset?type=eq&url=https%3A%2F%2Fexample.com%2Fpresets%2FHD650.txt&name=HD650&sha256=…">
   Apply the HD 650 correction
 </a>
-<a href="apo-volume://autoeq?model=Sennheiser%20HD%20650">Find it on AutoEq</a>
+<a href="aorineq://autoeq?model=Sennheiser%20HD%20650">Find it on AutoEq</a>
 ```
 
 Control links (`set-volume`, `mute`) are deliberately **not** implemented: any page could use
@@ -342,8 +342,8 @@ Keys step 2% per press. Never exceeds 0 dB, so no digital clipping.
 ## Auto-update
 
 apo-volume keeps itself up to date from this repo's GitHub Releases (checked at startup and
-every 24 hours). Updates are verified — the release's `ApoVolume.exe.sha256` must match the
-downloaded exe — and applied in place: the running exe is renamed to `ApoVolume.exe.old`, the
+every 24 hours). Updates are verified — the release's `AorinEQ.exe.sha256` must match the
+downloaded exe — and applied in place: the running exe is renamed to `AorinEQ.exe.old`, the
 new build takes its path, and the app restarts itself (when running as administrator it
 finishes on the next start instead, to avoid a surprise UAC prompt). If the exe's folder isn't
 writable, a tray balloon links to the release page instead. Opt out at first run or via
@@ -356,7 +356,7 @@ Settings → **Keep apo-volume up to date automatically**; **Check now** checks 
 - Peace's own pre-amp slider stacks additively with apo-volume's preamp (both `Preamp:` lines
   apply) — keep Peace's pre-amp at 0 dB.
 - If Peace rewrites `config.txt`, apo-volume automatically restores its include line.
-- If `apo-volume.txt` becomes unwritable (e.g. after an Equalizer APO reinstall), a tray
+- If `aorineq.txt` becomes unwritable (e.g. after an Equalizer APO reinstall), a tray
   balloon warns you instead of failing silently.
 
 ## License

@@ -1,0 +1,35 @@
+<Window x:Class="AorinEQ.UI.EqTextDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Edit as text — AorinEQ" Icon="/AorinEQ.ico" Width="620" Height="520"
+        MinWidth="460" MinHeight="360" WindowStartupLocation="CenterOwner">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="Gray" Margin="0,0,0,8"
+                   Text="Equalizer APO ParametricEQ format — one Preamp line plus Filter lines. Paste a whole set at once (e.g. from AutoEq or a forum post); OK replaces this scope's bands." />
+
+        <TextBox x:Name="TextArea" Grid.Row="1" AcceptsReturn="True" AcceptsTab="False"
+                 FontFamily="Consolas" FontSize="12.5"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                 TextWrapping="NoWrap" TextChanged="OnTextChanged" />
+
+        <TextBlock x:Name="ErrorText" Grid.Row="2" Margin="0,8,0,0" TextWrapping="Wrap"
+                   Foreground="#D32F2F" />
+
+        <DockPanel Grid.Row="3" Margin="0,10,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Left" Content="Copy to clipboard" Padding="10,4"
+                    Click="OnCopy" />
+            <TextBlock x:Name="CopiedText" DockPanel.Dock="Left" VerticalAlignment="Center"
+                       Margin="8,0,0,0" Foreground="Gray" Text="" />
+            <Button DockPanel.Dock="Right" Content="Cancel" Padding="14,4" IsCancel="True" />
+            <Button x:Name="OkButton" DockPanel.Dock="Right" Content="OK" Padding="14,4"
+                    Margin="0,0,8,0" IsDefault="True" Click="OnOk" />
+        </DockPanel>
+    </Grid>
+</Window>

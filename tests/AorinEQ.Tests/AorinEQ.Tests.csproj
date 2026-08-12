@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- AppIconTests loads the shipped .ico through the two frameworks that do so at runtime:
+         WIC/WPF for the windows' Icon, System.Drawing for the tray's HICON. Referencing the
+         assemblies directly rather than via UseWPF/UseWindowsForms keeps this project's
+         implicit usings (and so every other test file) untouched. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AorinEQ.Core\AorinEQ.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The very file the app ships as its ApplicationIcon and WPF resource, so AppIconTests
+         checks the shipped asset rather than a copy that could drift. -->
+    <None Include="..\..\src\AorinEQ\AorinEQ.ico" Link="AorinEQ.ico"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

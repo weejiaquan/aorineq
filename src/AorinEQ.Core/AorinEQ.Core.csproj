@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>3.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- System.Drawing, for the runtime-drawn tray glyph (TrayGlyph/TrayIconRenderer). Taken from
+         the desktop framework rather than the System.Drawing.Common package because the app
+         already ships WindowsForms, and the test project resolves it the same way. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+</Project>
