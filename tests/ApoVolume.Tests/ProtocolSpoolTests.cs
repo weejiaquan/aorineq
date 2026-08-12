@@ -65,6 +65,41 @@ public class ProtocolSpoolTests : IDisposable
     }
 
     [Fact]
+    public void Post_fails_closed_when_the_spool_lock_is_held_by_another_holder()
+    {
+        // Hold the named mutex on a SEPARATE thread (Mutex is reentrant for the owning thread)
+        // for the whole test: Post must fail (not run unsynchronized) rather than risk a corrupt
+        // append racing a sibling's read-delete.
+        var mutexName = "ApoVolumeSpoolTest-held-" + Guid.NewGuid().ToString("N");
+        var spool = new ProtocolSpool(_path, mutexName);
+        using var acquired = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var holder = new Thread(() =>
+        {
+            using var m = new Mutex(initiallyOwned: false, mutexName);
+            m.WaitOne();
+            acquired.Set();
+            release.Wait();
+            m.ReleaseMutex();
+        }) { IsBackground = true };
+        holder.Start();
+        acquired.Wait();
+        try
+        {
+            var ex = Assert.Throws<IOException>(() => spool.Post("apo-volume://x"));
+            _out.WriteLine("failed closed: " + ex.Message);
+            Assert.False(File.Exists(_path));
+            // TakeAll degrades to empty rather than throwing, under the same contention.
+            Assert.Empty(spool.TakeAll());
+        }
+        finally
+        {
+            release.Set();
+            holder.Join();
+        }
+    }
+
+    [Fact]
     public async Task Concurrent_posts_from_parallel_writers_all_land()
     {
         // Cross-process handoff is the whole point — simulate contention with parallel writers

@@ -332,16 +332,17 @@ public partial class App : System.Windows.Application
         _tray!.Update(_state.Percent, _state.Muted);
 
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
-        if (_settings.ProtocolLinksEnabled)
+        try
         {
-            try
-            {
-                new ProtocolRegistration().Register(ExePath); // idempotent; re-points a moved exe
-            }
-            catch (InvalidOperationException ex)
-            {
-                _tray!.ShowWarning(ex.Message);
-            }
+            var registration = new ProtocolRegistration();
+            if (_settings.ProtocolLinksEnabled)
+                registration.Register(ExePath); // idempotent; re-points a moved exe
+            else
+                registration.Unregister(); // fail-closed: purge any stale registration when off
+        }
+        catch (InvalidOperationException ex)
+        {
+            _tray!.ShowWarning(ex.Message);
         }
         SetupAutoUpdate();
         if (e.Args.Contains("--updated"))
@@ -356,16 +357,21 @@ public partial class App : System.Windows.Application
 
         // A protocol link launched THIS instance (nothing was running): handle it now that the
         // tray/OSD pipeline exists. Runs after the flag handling so a combined launch behaves.
+        // Ignored outright when links are disabled — even if a stale OS registration launched us.
         var linkArg = e.Args.FirstOrDefault(ProtocolLink.IsProtocolArg);
-        if (linkArg is not null)
+        if (linkArg is not null && _settings.ProtocolLinksEnabled)
             EnqueueProtocolLinks(new[] { linkArg });
     }
 
     /// <summary>Second-launch side of the protocol handoff: spool the link (if this launch
     /// carries one) for the running instance to pick up on the show-event signal. Best-effort —
-    /// an unwritable spool just means the running instance shows its OSD.</summary>
+    /// an unwritable spool just means the running instance shows its OSD. Reads
+    /// <see cref="Settings.ProtocolLinksEnabled"/> off the freshly-loaded settings (this is a
+    /// short-lived second process, so its <see cref="_settings"/> is current) and refuses to
+    /// spool when links are off — fail-closed even against a stale OS registration.</summary>
     private void PostProtocolLinkForRunningInstance(string[] args)
     {
+        if (!_settings.ProtocolLinksEnabled) return;
         var link = args.FirstOrDefault(ProtocolLink.IsProtocolArg);
         if (link is null) return;
         try
@@ -764,6 +770,10 @@ public partial class App : System.Windows.Application
     {
         if (_startupWizard is { IsVisible: true })
         {
+            // Drain-and-discard any spooled link: the tray/OSD pipeline doesn't exist during
+            // first-run setup, and leaving it in the spool would surface it on an unrelated
+            // later second launch. Same stale-intent policy as the cold-start discard.
+            _protocolSpool.TakeAll();
             _startupWizard.Activate();
             return;
         }
@@ -782,6 +792,7 @@ public partial class App : System.Windows.Application
     /// stack a second dialog via re-entrant dispatch.</summary>
     private async void EnqueueProtocolLinks(IEnumerable<string> links)
     {
+        if (!_settings.ProtocolLinksEnabled) return; // toggled off since the link was spooled — drop it
         foreach (var link in links)
             _pendingProtocolLinks.Enqueue(link);
         if (_processingProtocolLinks) return;
@@ -1027,24 +1038,29 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        // Same event-before-mutex teardown order as BeginShutdown: with the show event gone, the
-        // relaunch falls through its probe to the mutex and takes over via the teardown wait.
-        _showEvent?.Dispose();
+        // Relaunch via the SAME proven handoff as the elevation bounce: start the successor
+        // FIRST, then BeginShutdown (which disposes the show event before Shutdown drains, so the
+        // successor's probe misses the dying event and takes over via the mutex teardown-wait).
+        // Starting first means a failed Process.Start never disposes our IPC — we stay fully
+        // functional on the old image, and the completed swap runs on any later start.
+        System.Diagnostics.Process? proc;
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ExePath, "--updated")
+            proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ExePath, "--updated")
             {
                 UseShellExecute = true,
             });
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            // Relaunch refused: stay running on the old image; the swap itself already
-            // succeeded, so any later start runs the new build.
+            proc = null;
+        }
+        if (proc is null)
+        {
             _tray?.ShowInfo($"Updated to {release.TagName} — restart apo-volume to finish.");
             return;
         }
-        Shutdown();
+        BeginShutdown();
     }
 
     private static void OpenUrl(string url)

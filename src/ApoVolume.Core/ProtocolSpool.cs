@@ -71,6 +71,12 @@ public sealed class ProtocolSpool
             {
                 taken = true; // previous holder died mid-write; the file ops below cope
             }
+            if (!taken)
+                // Fail CLOSED: never run the file ops unsynchronized against a sibling that's
+                // holding the mutex — concurrent append vs read-delete could lose or truncate a
+                // link. A throw surfaces as the IOException the callers already handle (Post
+                // treats it as "nothing delivered"; TakeAll returns empty).
+                throw new IOException("Timed out acquiring the protocol spool lock.");
             action();
         }
         finally
