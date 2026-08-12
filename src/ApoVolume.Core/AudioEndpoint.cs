@@ -34,6 +34,104 @@ public static class AudioEndpoint
         }
     }
 
+    /// <summary>Enumerates the ACTIVE render endpoints with their display names (the EQ
+    /// editor's device tabs). Best-effort like the default-endpoint read: failures shrink the
+    /// list (possibly to empty) instead of throwing.</summary>
+    public static IReadOnlyList<RenderEndpoint> GetRenderEndpoints()
+    {
+        var result = new List<RenderEndpoint>();
+        try
+        {
+            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            try
+            {
+                if (enumerator.EnumAudioEndpoints(EDataFlow.Render, DeviceStateActive, out var collection) < 0
+                    || collection is null)
+                    return result;
+                try
+                {
+                    if (collection.GetCount(out int count) < 0)
+                        return result;
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (collection.Item(i, out var device) < 0 || device is null)
+                            continue;
+                        try
+                        {
+                            if (device.GetId(out var idPtr) < 0 || idPtr == IntPtr.Zero)
+                                continue;
+                            var id = Marshal.PtrToStringUni(idPtr);
+                            Marshal.FreeCoTaskMem(idPtr);
+                            if (id is null || EndpointGuid(id) is not { } guid)
+                                continue;
+                            result.Add(new RenderEndpoint(id, guid, ReadFriendlyName(device) ?? guid));
+                        }
+                        finally
+                        {
+                            Marshal.ReleaseComObject(device);
+                        }
+                    }
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(collection);
+                }
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(enumerator);
+            }
+        }
+        catch (COMException) { }
+        catch (InvalidCastException) { }
+        return result;
+    }
+
+    /// <summary>PKEY_Device_FriendlyName via the endpoint's property store, e.g.
+    /// "Speakers (Realtek High Definition Audio)". Null when unreadable.</summary>
+    private static string? ReadFriendlyName(IMMDevice device)
+    {
+        const int stgmRead = 0;
+        if (device.OpenPropertyStore(stgmRead, out var storePtr) < 0 || storePtr == IntPtr.Zero)
+            return null;
+        try
+        {
+            var store = (IPropertyStore)Marshal.GetObjectForIUnknown(storePtr);
+            try
+            {
+                var key = new PropertyKey { FmtId = PkeyDeviceFriendlyNameFmtId, Pid = 14 };
+                if (store.GetValue(ref key, out var value) < 0)
+                    return null;
+                try
+                {
+                    return value.Vt == VtLpwstr && value.Data != IntPtr.Zero
+                        ? Marshal.PtrToStringUni(value.Data)
+                        : null;
+                }
+                finally
+                {
+                    PropVariantClear(ref value);
+                }
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(store);
+            }
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+        catch (InvalidCastException)
+        {
+            return null;
+        }
+        finally
+        {
+            Marshal.Release(storePtr);
+        }
+    }
+
     /// <summary>Extracts the endpoint GUID (with braces) from a full endpoint id — the part
     /// Equalizer APO uses as its "Child APOs" subkey name. Null when the id has no GUID tail.</summary>
     public static string? EndpointGuid(string? endpointId)
@@ -46,6 +144,14 @@ public static class AudioEndpoint
         var guid = endpointId[brace..];
         return Guid.TryParse(guid, out _) ? guid : null;
     }
+
+    private const int DeviceStateActive = 0x1; // DEVICE_STATE_ACTIVE
+    private const ushort VtLpwstr = 31;        // VT_LPWSTR
+    private static readonly Guid PkeyDeviceFriendlyNameFmtId =
+        new("a45c254e-df1c-4efd-8020-67d146a850e0");
+
+    [DllImport("ole32.dll")]
+    private static extern int PropVariantClear(ref PropVariant pvar);
 
     // The interop below is shared with EndpointVolume (internal, one place for the whole
     // MMDevice family). Full member lists where notification callbacks can hand us any value.
@@ -80,7 +186,7 @@ public static class AudioEndpoint
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDeviceEnumerator
     {
-        [PreserveSig] int EnumAudioEndpoints(EDataFlow dataFlow, int stateMask, out IntPtr devices);
+        [PreserveSig] int EnumAudioEndpoints(EDataFlow dataFlow, int stateMask, out IMMDeviceCollection? devices);
         [PreserveSig] int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice? endpoint);
         [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice? device);
         [PreserveSig] int RegisterEndpointNotificationCallback(IMMNotificationClient client);
@@ -113,10 +219,47 @@ public static class AudioEndpoint
         [PreserveSig] int OnPropertyValueChanged([MarshalAs(UnmanagedType.LPWStr)] string deviceId, PropertyKey key);
     }
 
+    [ComImport]
+    [Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMMDeviceCollection
+    {
+        [PreserveSig] int GetCount(out int count);
+        [PreserveSig] int Item(int index, out IMMDevice? device);
+    }
+
+    [ComImport]
+    [Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out int count);
+        [PreserveSig] int GetAt(int index, out PropertyKey key);
+        [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+        [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+        [PreserveSig] int Commit();
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct PropertyKey
     {
         public Guid FmtId;
         public int Pid;
     }
+
+    /// <summary>PROPVARIANT trimmed to the header + first pointer-sized data slot — all this
+    /// interop reads is VT_LPWSTR, whose string pointer lives in that slot. Sized out to the
+    /// full 16-byte data area so the callee never writes past the struct.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PropVariant
+    {
+        public ushort Vt;
+        public ushort Reserved1, Reserved2, Reserved3;
+        public IntPtr Data;
+        public IntPtr Data2;
+    }
 }
+
+/// <summary>One active render endpoint: full id (settings key), braced GUID (EAPO's Device
+/// guard / Child APOs key), and the human display name for UI.</summary>
+public sealed record RenderEndpoint(string Id, string Guid, string FriendlyName);
