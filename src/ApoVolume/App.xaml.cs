@@ -789,7 +789,18 @@ public partial class App : System.Windows.Application
         try
         {
             while (_pendingProtocolLinks.Count > 0)
-                await HandleProtocolLinkAsync(_pendingProtocolLinks.Dequeue());
+            {
+                try
+                {
+                    await HandleProtocolLinkAsync(_pendingProtocolLinks.Dequeue());
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // e.g. an unreachable skins root — this is an async void handler, so
+                    // anything escaping here would crash the process.
+                    _tray?.ShowWarning($"Skin install failed: {ex.Message}");
+                }
+            }
         }
         finally
         {
