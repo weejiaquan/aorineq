@@ -16,7 +16,11 @@
   </ItemGroup>
   <ItemGroup>
     <!-- ApplicationIcon only stamps the Win32 icon on the exe (taskbar/alt-tab/Explorer). The
-         same file is embedded as a WPF resource so the windows' Icon and the tray can load it. -->
+         same file is embedded as a WPF resource so the windows' Icon and the tray can load it.
+         The .NET SDK does NOT auto-include .ico as a WPF Resource: without these explicit items
+         the XAML still compiles and the icons silently fail to resolve at runtime. The muted
+         variant is tray-only — it is what the tray shows while audio is muted. -->
     <Resource Include="ApoVolume.ico" />
+    <Resource Include="ApoVolume-muted.ico" />
   </ItemGroup>
 </Project>
