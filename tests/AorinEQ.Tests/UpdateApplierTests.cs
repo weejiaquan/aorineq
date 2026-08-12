@@ -105,6 +105,104 @@ public class UpdateApplierTests : IDisposable
         Assert.True(UpdateApplier.TryDeleteOld(exe));
     }
 
+    // ---- v3.0.0: the swap that also RENAMES the exe ----
+
+    [Fact]
+    public void TargetPathFor_is_always_the_release_asset_name_beside_the_running_exe()
+    {
+        Assert.Equal(PathOf(UpdateChecker.ExeAssetName), UpdateApplier.TargetPathFor(PathOf("AorinEQ.exe")));
+        Assert.Equal(PathOf(UpdateChecker.ExeAssetName), UpdateApplier.TargetPathFor(PathOf("ApoVolume.exe")));
+    }
+
+    [Fact]
+    public void Apply_returns_the_path_it_installed_to_when_the_name_did_not_change()
+    {
+        var exe = PathOf("AorinEQ.exe");
+        var staged = PathOf("staged.exe");
+        File.WriteAllText(exe, "OLD BUILD");
+        File.WriteAllText(staged, "NEW BUILD");
+
+        Assert.Equal(exe, UpdateApplier.Apply(exe, staged));
+    }
+
+    [Fact]
+    public void Apply_installs_under_the_current_name_when_the_running_exe_still_has_the_old_one()
+    {
+        // The pre-v3.0.0 → v3.0.0 upgrade: the running image is ApoVolume.exe, the release ships
+        // AorinEQ.exe. Landing the new build back at the old path would leave this machine
+        // running v3 out of a file called ApoVolume.exe forever.
+        var legacyExe = PathOf("ApoVolume.exe");
+        var staged = PathOf("staged.exe");
+        File.WriteAllText(legacyExe, "OLD BUILD");
+        File.WriteAllText(staged, "NEW BUILD");
+
+        string installed;
+        using (File.Open(legacyExe, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+        {
+            installed = UpdateApplier.Apply(legacyExe, staged);
+        }
+
+        _out.WriteLine("installed at: " + installed);
+        Assert.Equal(PathOf("AorinEQ.exe"), installed);
+        Assert.Equal("NEW BUILD", File.ReadAllText(installed));
+        Assert.False(File.Exists(legacyExe)); // the old name is gone, not left as a decoy
+        Assert.False(File.Exists(staged));
+    }
+
+    [Fact]
+    public void The_backup_of_a_renamed_swap_is_named_after_the_NEW_exe_so_cleanup_finds_it()
+    {
+        // TryDeleteOld looks beside the RUNNING exe, and after the relaunch that is AorinEQ.exe.
+        // A backup called ApoVolume.exe.old would sit there forever.
+        var legacyExe = PathOf("ApoVolume.exe");
+        var staged = PathOf("staged.exe");
+        File.WriteAllText(legacyExe, "OLD BUILD");
+        File.WriteAllText(staged, "NEW BUILD");
+
+        var installed = UpdateApplier.Apply(legacyExe, staged);
+
+        Assert.Equal("OLD BUILD", File.ReadAllText(UpdateApplier.OldPathFor(installed)));
+        Assert.False(File.Exists(UpdateApplier.OldPathFor(legacyExe)));
+        Assert.True(UpdateApplier.TryDeleteOld(installed));
+        Assert.Equal(new[] { installed }, Directory.GetFiles(_dir));
+    }
+
+    [Fact]
+    public void A_renamed_swap_replaces_a_stale_file_already_sitting_at_the_new_name()
+    {
+        // e.g. an earlier attempt that died between the two moves. The staged build has already
+        // passed the sha256 gate, so it is the authority for that name.
+        var legacyExe = PathOf("ApoVolume.exe");
+        var staged = PathOf("staged.exe");
+        File.WriteAllText(legacyExe, "OLD BUILD");
+        File.WriteAllText(PathOf("AorinEQ.exe"), "STALE");
+        File.WriteAllText(staged, "NEW BUILD");
+
+        var installed = UpdateApplier.Apply(legacyExe, staged);
+
+        Assert.Equal("NEW BUILD", File.ReadAllText(installed));
+        Assert.Equal("OLD BUILD", File.ReadAllText(UpdateApplier.OldPathFor(installed)));
+    }
+
+    [Fact]
+    public void A_renamed_swap_rolls_the_running_exe_back_to_its_own_name_on_failure()
+    {
+        var legacyExe = PathOf("ApoVolume.exe");
+        var staged = PathOf("staged.exe");
+        File.WriteAllText(legacyExe, "OLD BUILD");
+        File.WriteAllText(staged, "NEW BUILD");
+
+        using (File.Open(staged, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Throws<InvalidOperationException>(() => UpdateApplier.Apply(legacyExe, staged));
+        }
+
+        // Back under the name the still-running process was launched as — not the new one.
+        Assert.Equal("OLD BUILD", File.ReadAllText(legacyExe));
+        Assert.False(File.Exists(PathOf("AorinEQ.exe")));
+        Assert.False(File.Exists(UpdateApplier.OldPathFor(PathOf("AorinEQ.exe"))));
+    }
+
     [Fact]
     public void CanWriteTo_true_for_a_writable_directory_and_false_for_missing()
     {
