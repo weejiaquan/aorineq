@@ -136,6 +136,92 @@ public class ApoWriterTests : IDisposable
             Path.GetFileName(f) is not ("apo-volume.txt" or "config.txt")));
     }
 
+    /// <summary>Root-cause regression for the v2.1.0 field defect: a render that never reached
+    /// apo-volume.txt and only landed on the NEXT render. Equalizer APO re-reads the file every
+    /// time we change it, and while ANY reader holds a handle the atomic temp+rename replace
+    /// fails (MoveFileEx can't free the name, even under FILE_SHARE_DELETE) — so the write is
+    /// lost and the user's audible state silently lags the UI. The last requested state must
+    /// land on its own, without another WriteConfig call.</summary>
+    [Fact]
+    public void WriteConfig_lands_the_last_state_after_a_transient_reader_lock()
+    {
+        using var w = new ApoWriter(_dir);
+        w.WriteConfig(VolumeModel(-10));
+        w.Flush();
+        Assert.Contains("Preamp: -10.0 dB", File.ReadAllText(w.VolumeFilePath));
+        Thread.Sleep(120); // past the coalescer interval: the next post is its own leading write
+
+        // The EAPO-reader shape: read access, sharing reads. Not FileShare.None — this is what a
+        // well-behaved config reader does, and it is enough to break the rename.
+        using (new FileStream(w.VolumeFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            w.WriteConfig(VolumeModel(-42));
+            Thread.Sleep(250); // the write attempt happens and fails in here
+            var locked = File.ReadAllText(w.VolumeFilePath);
+            _out.WriteLine("content while a reader holds the file:\n" + locked);
+            Assert.DoesNotContain("Preamp: -42.0 dB", locked); // premise: the replace really is blocked
+        }
+
+        // Reader gone. NO further WriteConfig — the pending state must still converge on disk.
+        string? content = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < 3000)
+        {
+            content = File.ReadAllText(w.VolumeFilePath);
+            if (content.Contains("Preamp: -42.0 dB")) break;
+            Thread.Sleep(20);
+        }
+        _out.WriteLine($"content {sw.ElapsedMilliseconds} ms after the reader released:\n{content}");
+        Assert.Contains("Preamp: -42.0 dB", content);
+        Assert.Empty(Directory.GetFiles(_dir).Where(f =>
+            Path.GetFileName(f) is not ("apo-volume.txt" or "config.txt")));
+    }
+
+    /// <summary>The live shape of the defect — a key-repeat burst that spans the blocked window.
+    /// A recovery must land the value requested LAST, not the stale payload whose attempt
+    /// happened to fail, and must not resurrect any intermediate value afterwards.</summary>
+    [Fact]
+    public void WriteConfig_converges_to_the_last_value_of_a_burst_that_spans_a_reader_lock()
+    {
+        using var w = new ApoWriter(_dir);
+        w.WriteConfig(VolumeModel(-1));
+        w.Flush();
+        Thread.Sleep(120);
+
+        using (new FileStream(w.VolumeFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // Whole burst happens while the file cannot be replaced: every attempt fails.
+            for (int p = 2; p <= 20; p++)
+            {
+                w.WriteConfig(VolumeModel(-p));
+                Thread.Sleep(15); // key-repeat cadence, faster than the 50 ms coalescer window
+            }
+            Thread.Sleep(250); // the burst's trailing write attempt happens (and fails) in here
+            var locked = File.ReadAllText(w.VolumeFilePath);
+            _out.WriteLine("content at the end of the blocked burst:\n" + locked);
+            Assert.Contains("Preamp: -1.0 dB", locked); // nothing from the burst got through
+        }
+
+        // No further WriteConfig: -20 (the last request) must arrive by itself.
+        string? content = null;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < 3000)
+        {
+            content = File.ReadAllText(w.VolumeFilePath);
+            if (content.Contains("Preamp: -20.0 dB")) break;
+            Thread.Sleep(20);
+        }
+        _out.WriteLine($"content {sw.ElapsedMilliseconds} ms after the reader released "
+            + $"({w.WriteCount} successful writes of 20 requests):\n{content}");
+        Assert.Contains("Preamp: -20.0 dB", content);
+
+        // And it must settle there — no queued straggler may roll the value back.
+        Thread.Sleep(1000);
+        var settled = File.ReadAllText(w.VolumeFilePath);
+        _out.WriteLine("content after settling:\n" + settled);
+        Assert.Contains("Preamp: -20.0 dB", settled);
+    }
+
     [Fact]
     public void WriteConfig_raises_WriteFailing_once_after_five_consecutive_failures()
     {
