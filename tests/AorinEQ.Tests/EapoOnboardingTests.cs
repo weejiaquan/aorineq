@@ -8,6 +8,7 @@ namespace AorinEQ.Tests;
 /// <summary>Real-machine tests (repo convention: no mocks). This dev machine has Equalizer APO
 /// installed and active, which the detection tests rely on the same way the schtasks tests rely
 /// on a real Task Scheduler.</summary>
+[Collection(RealAudioDeviceCollection.Name)]
 public class EapoOnboardingTests
 {
     private readonly ITestOutputHelper _out;

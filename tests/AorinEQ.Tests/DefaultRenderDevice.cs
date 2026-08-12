@@ -46,6 +46,43 @@ internal static class DefaultRenderDevice
     public static RenderEndpoint? Other(string? current) =>
         All.FirstOrDefault(e => e.Id != current);
 
+    /// <summary>Switches the default and does not return until the machine has gone quiet again:
+    /// the id has actually changed AND no further device notification has arrived for
+    /// <see cref="QuietPeriod"/>.
+    ///
+    /// Every test here leaves through this. One switch produces SEVERAL notifications, and they
+    /// arrive asynchronously, so a test that returns the moment the id flips leaves its own tail
+    /// running into whatever executes next — where a notification stamped with the device the
+    /// PREVIOUS test was on arrives in the middle of this one's assertions. That is not the
+    /// product being wrong; it is one test's exhaust landing in another's measurement.</summary>
+    public static void SetDefaultAndSettle(string endpointId)
+    {
+        using var watcher = new EndpointVolume();
+        long lastEventTicks = DateTime.UtcNow.Ticks;
+        watcher.DefaultDeviceChanged += () =>
+            Interlocked.Exchange(ref lastEventTicks, DateTime.UtcNow.Ticks);
+
+        SetDefault(endpointId);
+
+        var deadline = DateTime.UtcNow + SettleTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var quietFor = DateTime.UtcNow - new DateTime(Interlocked.Read(ref lastEventTicks), DateTimeKind.Utc);
+            if (Current == endpointId && quietFor >= QuietPeriod)
+                return;
+            Thread.Sleep(25);
+        }
+        throw new TimeoutException(
+            $"the default device did not settle on '{endpointId}' within {SettleTimeout.TotalSeconds:F0}s "
+            + $"(it now reads '{Current}')");
+    }
+
+    /// <summary>How long without a device notification counts as settled. Notifications for one
+    /// switch land within a few ms of each other (measured), so this is many times the gap.</summary>
+    private static readonly TimeSpan QuietPeriod = TimeSpan.FromMilliseconds(400);
+
+    private static readonly TimeSpan SettleTimeout = TimeSpan.FromSeconds(15);
+
     private const int RoleConsole = 0;
     private const int RoleMultimedia = 1;
     private const int RoleCommunications = 2;

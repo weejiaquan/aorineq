@@ -11,6 +11,7 @@ namespace AorinEQ.Tests;
 /// its APOs — and a driver replacement resets that store while leaving Equalizer APO's own record
 /// of the device untouched. Checking only the record (which is all this app did until 3.4.0)
 /// reports a detached device as working.</summary>
+[Collection(RealAudioDeviceCollection.Name)]
 public class EapoEndpointTests
 {
     private readonly ITestOutputHelper _out;

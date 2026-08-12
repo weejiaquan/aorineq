@@ -17,6 +17,7 @@ namespace AorinEQ.Tests;
 /// further notification is ever delivered. A test that switches the device ONCE passes on that bug.
 ///
 /// Every test here restores the default device it found.</summary>
+[Collection(RealAudioDeviceCollection.Name)]
 [Trait(Requires.Key, Requires.AudioEndpoint)]
 [Trait(Requires.Key, Requires.MultipleRenderEndpoints)]
 public class EndpointVolumeDeviceChangeTests
@@ -41,13 +42,12 @@ public class EndpointVolumeDeviceChangeTests
         _out.WriteLine($"switching against: {other!.FriendlyName} ({other.Id})");
 
         using var ev = new EndpointVolume();
-        var delivered = new SemaphoreSlim(0);
-        var seen = new ConcurrentQueue<string>();
-        ev.DefaultDeviceChanged += () =>
-        {
-            seen.Enqueue($"DefaultDeviceChanged @ {DateTime.UtcNow:HH:mm:ss.fff}");
-            delivered.Release();
-        };
+        // Each delivery records WHICH device was default when it was handled, so a switch is
+        // credited by evidence rather than by a bare count — a count cannot tell this switch's
+        // notification from the previous switch's, and the previous one arriving late would
+        // otherwise be enough to pass.
+        var deliveries = new BlockingCollection<string?>();
+        ev.DefaultDeviceChanged += () => deliveries.Add(AudioEndpoint.GetDefaultRenderEndpointId());
 
         var observed = new List<(int Index, string Target, bool Seen)>();
         try
@@ -56,11 +56,8 @@ public class EndpointVolumeDeviceChangeTests
             for (int i = 1; i <= Switches; i++)
             {
                 string target = current == original ? other.Id : original;
-                // Drain anything left over from the previous switch so each wait below is
-                // answered by THIS switch and not by a straggler from the last one.
-                while (delivered.Wait(0)) { }
-                DefaultRenderDevice.SetDefault(target);
-                bool got = delivered.Wait(PerSwitchTimeout);
+                DefaultRenderDevice.SetDefaultAndSettle(target);
+                bool got = WaitForDeliveryNaming(deliveries, target);
                 observed.Add((i, target == original ? "original" : "other", got));
                 _out.WriteLine($"switch {i} -> {(target == original ? "original" : "other")}: "
                     + (got ? "OBSERVED" : "NOT DELIVERED"));
@@ -69,14 +66,29 @@ public class EndpointVolumeDeviceChangeTests
         }
         finally
         {
-            DefaultRenderDevice.SetDefault(original!);
+            DefaultRenderDevice.SetDefaultAndSettle(original!);
             _out.WriteLine($"restored default: {DefaultRenderDevice.Current}");
         }
 
-        _out.WriteLine($"deliveries: [{string.Join(" | ", seen)}]");
         Assert.All(observed, o =>
             Assert.True(o.Seen, $"switch {o.Index} (to {o.Target}) was never delivered — "
                 + $"only {observed.Count(x => x.Seen)}/{Switches} switches were observed"));
+    }
+
+    /// <summary>Consumes deliveries until one reports <paramref name="endpointId"/> as the default
+    /// it saw. Stragglers from an earlier switch are discarded rather than mistaken for this
+    /// switch's answer — and on the bug this fixes, nothing arrives at all and it times out.</summary>
+    private static bool WaitForDeliveryNaming(BlockingCollection<string?> deliveries, string endpointId)
+    {
+        var deadline = DateTime.UtcNow + PerSwitchTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+            if (!deliveries.TryTake(out var saw, remaining)) break;
+            if (saw == endpointId) return true;
+        }
+        return false;
     }
 
     /// <summary>Following the device is the POINT of the notification: after each switch the
@@ -102,10 +114,21 @@ public class EndpointVolumeDeviceChangeTests
             for (int i = 1; i <= Switches; i++)
             {
                 string target = current == original ? other!.Id : original!;
-                while (stamps.TryTake(out _)) { }
-                DefaultRenderDevice.SetDefault(target);
+                DefaultRenderDevice.SetDefaultAndSettle(target);
 
-                string? stamped = stamps.TryTake(out var s, PerSwitchTimeout) ? s : null;
+                // Consume stamps until one names the new endpoint. Taking the FIRST stamp instead
+                // reads whatever arrived next — which under load is the tail of the PREVIOUS
+                // switch, correctly stamped with the device we just left, and the assertion then
+                // fails for the one reason it must never fail for: the product being right.
+                string? stamped = null;
+                var deadline = DateTime.UtcNow + PerSwitchTimeout;
+                while (DateTime.UtcNow < deadline)
+                {
+                    var remaining = deadline - DateTime.UtcNow;
+                    if (remaining <= TimeSpan.Zero || !stamps.TryTake(out var s, remaining)) break;
+                    stamped = s;
+                    if (s == target) break;
+                }
                 bool readable = ev.TryRead() is not null;
                 results.Add((i, target, stamped, readable));
                 _out.WriteLine($"switch {i}: expected {target}");
@@ -115,7 +138,7 @@ public class EndpointVolumeDeviceChangeTests
         }
         finally
         {
-            DefaultRenderDevice.SetDefault(original!);
+            DefaultRenderDevice.SetDefaultAndSettle(original!);
         }
 
         Assert.All(results, r =>
@@ -167,7 +190,7 @@ public class EndpointVolumeDeviceChangeTests
         }
         finally
         {
-            DefaultRenderDevice.SetDefault(original!);
+            DefaultRenderDevice.SetDefaultAndSettle(original!);
         }
     }
 
@@ -192,7 +215,7 @@ public class EndpointVolumeDeviceChangeTests
         }
         finally
         {
-            DefaultRenderDevice.SetDefault(original!);
+            DefaultRenderDevice.SetDefaultAndSettle(original!);
         }
 
         var sw = Stopwatch.StartNew();

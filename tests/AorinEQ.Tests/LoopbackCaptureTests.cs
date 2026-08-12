@@ -8,6 +8,7 @@ namespace AorinEQ.Tests;
 /// Data flow isn't asserted — event-driven loopback only signals while audio renders — but
 /// init/teardown must work cleanly and repeatedly, because the EQ window opens and closes
 /// the capture on every show/hide.</summary>
+[Collection(RealAudioDeviceCollection.Name)]
 public class LoopbackCaptureTests
 {
     private readonly ITestOutputHelper _out;

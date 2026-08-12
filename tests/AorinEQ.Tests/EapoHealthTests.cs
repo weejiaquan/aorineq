@@ -15,6 +15,7 @@ namespace AorinEQ.Tests;
 /// therefore proven in the release's live verification instead, which removes the user's REAL
 /// registration under one elevated helper, watches the RUNNING app notice it without a restart,
 /// and restores it byte-identically. Everything below runs at the desk and on a hosted runner.</summary>
+[Collection(RealAudioDeviceCollection.Name)]
 public class EapoHealthTests
 {
     private readonly ITestOutputHelper _out;

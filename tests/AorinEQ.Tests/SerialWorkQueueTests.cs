@@ -135,33 +135,57 @@ public class SerialWorkQueueTests
     }
 
     /// <summary>Work that was queued but had not started must be discarded, not run: by the time
-    /// Dispose returns the owner has torn down the state those actions would touch.</summary>
+    /// Dispose returns the owner has torn down the state those actions would touch.
+    ///
+    /// ORDERING IS THE TEST. The worker is held inside the first action for the whole of Dispose,
+    /// so the ten behind it provably never started before it — releasing the worker first and
+    /// then disposing is a race the QUEUE is entitled to win (those actions start legally in that
+    /// window), and it is what made an earlier version of this test fail under load.</summary>
     [Fact]
     public void Queued_but_unstarted_work_does_not_run_after_Dispose()
     {
         var queue = new SerialWorkQueue("test-discard-on-dispose");
         var block = new ManualResetEventSlim();
         var started = new ManualResetEventSlim();
+        var firstFinished = new ManualResetEventSlim();
+        var anyLaterRan = new ManualResetEventSlim();
         int laterRan = 0;
         try
         {
-            queue.Post(() => { started.Set(); block.Wait(); });
-            Assert.True(started.Wait(Settle));
+            queue.Post(() =>
+            {
+                started.Set();
+                block.Wait();
+                firstFinished.Set();
+            });
+            Assert.True(started.Wait(Settle), "the blocking action never started");
+
             for (int i = 0; i < 10; i++)
             {
-                Assert.True(queue.Post(() => Interlocked.Increment(ref laterRan)));
+                Assert.True(queue.Post(() =>
+                {
+                    Interlocked.Increment(ref laterRan);
+                    anyLaterRan.Set();
+                }));
             }
 
-            block.Set();          // the running action finishes...
-            queue.Dispose();      // ...and the ten behind it must be discarded
-            Thread.Sleep(300);
+            // Disposed while the worker is STILL parked in the first action: the ten behind it
+            // cannot have started, so anything that runs them now ran them after Dispose.
+            queue.Dispose();
+
+            block.Set();
+            Assert.True(firstFinished.Wait(Settle), "the in-flight action never finished");
         }
         finally
         {
             block.Set();
         }
 
+        // Waiting on the wrong outcome, not on the clock: a queue that drains instead of
+        // discarding sets this immediately, and a correct one can never set it at all.
+        bool leaked = anyLaterRan.Wait(TimeSpan.FromSeconds(1));
         _out.WriteLine($"queued-behind actions that ran after Dispose: {Volatile.Read(ref laterRan)}");
+        Assert.False(leaked);
         Assert.Equal(0, Volatile.Read(ref laterRan));
     }
 

@@ -6,6 +6,7 @@ namespace AorinEQ.Tests;
 
 /// <summary>Real-COM tests against this machine's audio endpoints (no mocks, per repo policy).
 /// They require at least one active render device, which every dev/E2E machine here has.</summary>
+[Collection(RealAudioDeviceCollection.Name)]
 [Trait(Requires.Key, Requires.AudioEndpoint)]
 public class AudioEndpointTests
 {
