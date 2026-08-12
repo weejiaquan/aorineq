@@ -26,8 +26,21 @@ public sealed class ApoWriter : IDisposable
     public const string IncludeLine = "Include: " + VolumeFileName;
     public const string ManagedHeader = "# managed by apo-volume - do not hand-edit";
 
+    /// <summary>Retry budget for a failed write, and the delay before the first retry. Each
+    /// step doubles, so the attempts land 25, 75, 175, 375 and 775 ms after the first failure:
+    /// the last requested state reaches disk within ~0.8 s of a transient lock clearing.
+    /// Bounded on purpose — a file that stays unwritable raises <see cref="WriteFailing"/>
+    /// rather than retrying forever.</summary>
+    private const int MaxWriteRetries = 5;
+    private const int FirstRetryDelayMs = 25;
+
     private readonly Coalescer _coalescer = new(TimeSpan.FromMilliseconds(50));
     private readonly object _includeLock = new();
+    private readonly object _retryLock = new();
+    private readonly Timer _retryTimer;
+    private EqConfigModel? _latestModel;
+    private EqConfigModel? _writtenModel;
+    private int _retryAttempt;
     private FileSystemWatcher? _watcher;
     private int _writeCount;
     private int _consecutiveFailures;
@@ -39,7 +52,9 @@ public sealed class ApoWriter : IDisposable
 
     /// <summary>
     /// Raised once after 5 consecutive write failures (e.g. apo-volume.txt not writable),
-    /// so the UI can surface it. Not raised again until a success resets the streak.
+    /// so the UI can surface it. Retry attempts count toward the streak, so a file that is
+    /// genuinely unwritable surfaces within the retry window instead of after five user
+    /// actions. Not raised again until a success resets the streak.
     /// </summary>
     public event Action? WriteFailing;
 
@@ -47,6 +62,7 @@ public sealed class ApoWriter : IDisposable
     {
         VolumeFilePath = Path.Combine(configDir, VolumeFileName);
         ConfigTxtPath = Path.Combine(configDir, "config.txt");
+        _retryTimer = new Timer(_ => OnRetryDue());
     }
 
     public static string FormatPreamp(double db)
@@ -129,23 +145,78 @@ public sealed class ApoWriter : IDisposable
     }
 
     /// <summary>Coalesced atomic write of the rendered config (temp file + rename in the same
-    /// directory, so EAPO's own change watcher never reads a half-written file). Same error
-    /// contract as the old single-line write: transient failures retry on the next write,
-    /// five consecutive failures raise <see cref="WriteFailing"/> once.</summary>
-    public void WriteConfig(EqConfigModel model) =>
-        _coalescer.Post(() =>
+    /// directory, so EAPO's own change watcher never reads a half-written file). Records
+    /// <paramref name="model"/> as the state that must end up on disk, then posts a write.
+    /// A failed attempt no longer waits for an unrelated later render to recover it — it
+    /// re-arms itself on the backoff ladder (see <see cref="MaxWriteRetries"/>) until the
+    /// latest state lands or the budget runs out, at which point five consecutive failures
+    /// have raised <see cref="WriteFailing"/> once.</summary>
+    public void WriteConfig(EqConfigModel model)
+    {
+        lock (_retryLock)
         {
-            var temp = VolumeFilePath + ".tmp";
-            try
+            _latestModel = model;
+            _retryAttempt = 0; // a fresh request gets the full retry budget
+        }
+        _coalescer.Post(WriteLatest);
+    }
+
+    /// <summary>Writes whatever state was requested LAST, never the payload a retry was
+    /// scheduled for — a retry that fires after newer edits must land the newest state, and
+    /// coalescing must never resurrect an intermediate one. Runs only on the coalescer, so
+    /// retries and fresh writes are serialized like every other write.</summary>
+    private void WriteLatest()
+    {
+        EqConfigModel? model;
+        lock (_retryLock)
+        {
+            model = _latestModel;
+            if (model is null || ReferenceEquals(model, _writtenModel))
+                return; // a retry whose state already landed: never write the same state twice
+        }
+        var temp = VolumeFilePath + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, RenderConfig(model));
+            File.Move(temp, VolumeFilePath, overwrite: true);
+            Interlocked.Increment(ref _writeCount);
+            _consecutiveFailures = 0;
+            lock (_retryLock)
             {
-                File.WriteAllText(temp, RenderConfig(model));
-                File.Move(temp, VolumeFilePath, overwrite: true);
-                Interlocked.Increment(ref _writeCount);
-                _consecutiveFailures = 0;
+                _writtenModel = model;
+                _retryAttempt = 0;
+                _retryTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan); // nothing left to recover
             }
-            catch (IOException) { TryDeleteTemp(temp); OnWriteFailed(); }               // transient share violation/AV lock: next write retries
-            catch (UnauthorizedAccessException) { TryDeleteTemp(temp); OnWriteFailed(); } // same: graceful degradation, no crash
-        });
+            return;
+        }
+        catch (IOException) { TryDeleteTemp(temp); }                // transient share violation/AV lock
+        catch (UnauthorizedAccessException) { TryDeleteTemp(temp); } // a reader holds the name: the rename is denied
+        OnWriteFailed();
+        ScheduleRetry();
+    }
+
+    /// <summary>Arms the next attempt on the doubling backoff ladder. Timer-driven, so nothing
+    /// spins and no caller thread ever waits on a retry; bounded by
+    /// <see cref="MaxWriteRetries"/>, so a permanently unwritable file settles into the
+    /// <see cref="WriteFailing"/> path instead of writing forever.</summary>
+    private void ScheduleRetry()
+    {
+        lock (_retryLock)
+        {
+            if (_disposed || _retryAttempt >= MaxWriteRetries)
+                return;
+            _retryAttempt++;
+            _retryTimer.Change(TimeSpan.FromMilliseconds(FirstRetryDelayMs << (_retryAttempt - 1)),
+                Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private void OnRetryDue()
+    {
+        if (_disposed)
+            return;
+        _coalescer.Post(WriteLatest); // back through the coalescer: never two writes at once
+    }
 
     private static void TryDeleteTemp(string temp)
     {
@@ -164,9 +235,12 @@ public sealed class ApoWriter : IDisposable
         }
     }
 
-    /// <summary>Synchronous barrier: returns once any pending <see cref="WriteVolume"/> has hit
-    /// the file. Lets mode transitions sequence the preamp write against other side effects
-    /// (e.g. unmuting the Windows endpoint only after the mute preamp is on disk).</summary>
+    /// <summary>Synchronous barrier: returns once any pending <see cref="WriteConfig"/> has had
+    /// its attempt at the file. Lets mode transitions sequence the preamp write against other
+    /// side effects (e.g. unmuting the Windows endpoint only after the mute preamp is on disk).
+    /// A barrier, not a success proof — if that attempt hit a locked file the retry ladder lands
+    /// it shortly after, which is why callers that need proof (mute handover) read the file
+    /// back rather than trusting the return.</summary>
     public void Flush() => _coalescer.Flush();
 
     public bool EnsureInclude()
@@ -218,6 +292,9 @@ public sealed class ApoWriter : IDisposable
         _disposed = true;
         _watcher?.Dispose();
         lock (_includeLock) { } // wait out any in-flight EnsureInclude
+        // Coalescer first: its Dispose flushes the trailing write, and _disposed already stops
+        // that attempt from arming a retry — so the timer is idle by the time it is disposed.
         _coalescer.Dispose();
+        lock (_retryLock) { _retryTimer.Dispose(); }
     }
 }
