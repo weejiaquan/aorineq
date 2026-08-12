@@ -160,6 +160,80 @@ public class GatedDownloadTests
     }
 
     [Fact]
+    public async Task Download_rejects_a_redirect_to_a_non_https_location()
+    {
+        // The gate must survive redirects: an allowed-scheme URL that 302s to http://evil is a
+        // real bypass if HttpClient's auto-redirect is left on. This listener answers the first
+        // request with a 302 to plain http on a real (non-loopback) host.
+        var (listener, url) = NewListenerPair();
+        var serve = Task.Run(async () =>
+        {
+            var ctx = await listener.GetContextAsync();
+            ctx.Response.StatusCode = 302;
+            ctx.Response.Headers["Location"] = "http://example.com/evil.zip";
+            ctx.Response.Close();
+        });
+        var dest = TempDest();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => GatedDownload.DownloadAsync(
+            url, dest, 20 * 1024 * 1024, GatedDownload.ZipMagic, null));
+        await serve;
+        _out.WriteLine("error: " + ex.Message);
+        Assert.Contains("non-https", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(dest));
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task Download_follows_a_redirect_to_an_allowed_location()
+    {
+        // Legitimate GitHub asset URLs 302 to objects.githubusercontent.com (https). Two
+        // listeners: the first redirects to the second (both loopback, both allowed).
+        var payload = ZipPayload(50_000);
+        var (target, targetUrl) = NewListenerPair();
+        var serveTarget = Task.Run(async () =>
+        {
+            var ctx = await target.GetContextAsync();
+            ctx.Response.ContentLength64 = payload.Length;
+            await ctx.Response.OutputStream.WriteAsync(payload);
+            ctx.Response.Close();
+        });
+        var (front, frontUrl) = NewListenerPair();
+        var serveFront = Task.Run(async () =>
+        {
+            var ctx = await front.GetContextAsync();
+            ctx.Response.StatusCode = 302;
+            ctx.Response.Headers["Location"] = targetUrl;
+            ctx.Response.Close();
+        });
+        var dest = TempDest();
+        try
+        {
+            await GatedDownload.DownloadAsync(frontUrl, dest, 20 * 1024 * 1024, GatedDownload.ZipMagic, null);
+            await Task.WhenAll(serveFront, serveTarget);
+            Assert.Equal(payload, await File.ReadAllBytesAsync(dest));
+        }
+        finally
+        {
+            File.Delete(dest);
+            front.Stop();
+            target.Stop();
+        }
+    }
+
+    private static (HttpListener Listener, string Url) NewListenerPair()
+    {
+        var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        int port = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        var prefix = $"http://localhost:{port}/";
+        var listener = new HttpListener();
+        listener.Prefixes.Add(prefix);
+        listener.Start();
+        return (listener, prefix + "file.bin");
+    }
+
+    [Fact]
     public async Task Download_http_error_status_throws_readable_message()
     {
         var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);

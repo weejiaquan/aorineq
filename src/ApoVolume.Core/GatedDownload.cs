@@ -20,15 +20,18 @@ public static class GatedDownload
         byte[] magic, string? sha256, IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttps && !(uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)))
-            throw new InvalidOperationException("Downloads must use https.");
+        RequireAllowedScheme(url);
 
-        using var client = NewClient();
+        // Auto-redirect is OFF: HttpClient's default would silently follow a 302 from an https
+        // URL down to http/file, defeating the transport gate. Redirects are instead followed by
+        // hand, re-validating the scheme of EVERY hop (GitHub asset URLs legitimately redirect to
+        // objects.githubusercontent.com — over https, which is what this enforces).
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var client = NewClient(handler);
         try
         {
-            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+            using var response = await GetFollowingValidatedRedirectsAsync(client, url,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 throw new InvalidOperationException(
                     $"Download failed: server returned {(int)response.StatusCode} {response.ReasonPhrase}.");
@@ -86,6 +89,77 @@ public static class GatedDownload
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    /// <summary>GETs a text resource (the GitHub API feed, the sha256 asset) with the same
+    /// scheme gate and hand-followed redirects as the file download, so a poisoned redirect
+    /// can't drop the fetch onto http/file either. Throws on any transport failure or bad hop.
+    /// The response body is size-capped at <paramref name="maxBytes"/>.</summary>
+    public static async Task<string> GetStringAsync(string url, TimeSpan timeout, long maxBytes,
+        CancellationToken cancellationToken = default)
+    {
+        RequireAllowedScheme(url);
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        var client = new HttpClient(handler, disposeHandler: false) { Timeout = timeout };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+        try
+        {
+            using var response = await GetFollowingValidatedRedirectsAsync(client, url,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException(
+                    $"Request failed: server returned {(int)response.StatusCode}.");
+            if (response.Content.Headers.ContentLength > maxBytes)
+                throw new InvalidOperationException("Response too large.");
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            if (bytes.Length > maxBytes)
+                throw new InvalidOperationException("Response too large.");
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    /// <summary>https, or http to a loopback host (which is what the in-process listener tests
+    /// use). Anything else — http to a real host, file, ftp — is rejected. Applied to the
+    /// original URL AND every redirect hop.</summary>
+    private static bool IsAllowedScheme(Uri uri) =>
+        uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback);
+
+    private static void RequireAllowedScheme(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || !IsAllowedScheme(uri))
+            throw new InvalidOperationException("Downloads must use https.");
+    }
+
+    /// <summary>GETs <paramref name="url"/> following up to 10 redirects by hand, rejecting any
+    /// hop whose scheme isn't allowed (an https URL that 302s to http/file is refused). Shared by
+    /// the download and the sha256-asset fetch. Disposes intermediate redirect responses.</summary>
+    private static async Task<HttpResponseMessage> GetFollowingValidatedRedirectsAsync(
+        HttpClient client, string url, HttpCompletionOption completion, CancellationToken cancellationToken)
+    {
+        var current = new Uri(url);
+        for (int hop = 0; hop < 10; hop++)
+        {
+            var response = await client.GetAsync(current, completion, cancellationToken);
+            if (!IsRedirect(response.StatusCode))
+                return response;
+            var location = response.Headers.Location;
+            response.Dispose();
+            if (location is null)
+                throw new InvalidOperationException("Download failed: redirect without a target.");
+            // Relative redirects resolve against the current absolute URL, keeping the scheme.
+            current = location.IsAbsoluteUri ? location : new Uri(current, location);
+            if (!IsAllowedScheme(current))
+                throw new InvalidOperationException(
+                    "Download failed: the server redirected to a non-https location.");
+        }
+        throw new InvalidOperationException("Download failed: too many redirects.");
+    }
+
+    private static bool IsRedirect(System.Net.HttpStatusCode code) =>
+        (int)code is 301 or 302 or 303 or 307 or 308;
+
     private static bool HasMagic(string path, byte[] magic)
     {
         try
@@ -100,9 +174,9 @@ public static class GatedDownload
         }
     }
 
-    private static HttpClient NewClient()
+    private static HttpClient NewClient(HttpMessageHandler handler)
     {
-        var client = new HttpClient();
+        var client = new HttpClient(handler, disposeHandler: false);
         client.Timeout = TimeSpan.FromMinutes(10); // large file on slow links; cancellation still applies
         client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
         return client;

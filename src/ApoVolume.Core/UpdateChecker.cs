@@ -26,9 +26,6 @@ public static class UpdateChecker
     public const string ExeAssetName = "ApoVolume.exe";
     public const string Sha256AssetName = "ApoVolume.exe.sha256";
 
-    // GitHub's API rejects requests without a User-Agent.
-    private const string UserAgent = "apo-volume";
-
     /// <summary>Parses a release tag ("v1.8.0" or "1.8.0") into a Version; null on anything
     /// else — including prerelease-suffixed tags, which are never shipped as /latest.</summary>
     public static Version? ParseVersionTag(string? tag)
@@ -99,14 +96,9 @@ public static class UpdateChecker
         string json;
         try
         {
-            using var client = new HttpClient();
-            client.Timeout = TimeSpan.FromSeconds(10); // a slow API must never stall startup work
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
-            using var response = await client.GetAsync(url, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-                return new(UpdateStatus.Error, null,
-                    $"Update check failed: server returned {(int)response.StatusCode}.");
-            json = await response.Content.ReadAsStringAsync(cancellationToken);
+            // 1 MB cap: the /releases/latest JSON is a few KB; anything vast is a wrong endpoint.
+            json = await GatedDownload.GetStringAsync(url, TimeSpan.FromSeconds(10), 1024 * 1024,
+                cancellationToken);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
             or InvalidOperationException or UriFormatException)
@@ -128,18 +120,15 @@ public static class UpdateChecker
     /// as <see cref="GatedDownload"/>.</summary>
     public static async Task<string?> FetchSha256Async(string url, CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttps && !(uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)))
-            return null;
         try
         {
-            using var client = new HttpClient();
-            client.Timeout = TimeSpan.FromSeconds(30);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
-            return ParseSha256Text(await client.GetStringAsync(uri, cancellationToken));
+            // Same https-or-loopback gate + hand-followed redirects as the exe download; 4 KB is
+            // ample for a one-line digest file.
+            return ParseSha256Text(await GatedDownload.GetStringAsync(url, TimeSpan.FromSeconds(30),
+                4096, cancellationToken));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
-            or InvalidOperationException)
+            or InvalidOperationException or UriFormatException)
         {
             return null;
         }
