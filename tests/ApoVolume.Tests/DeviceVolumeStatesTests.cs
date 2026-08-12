@@ -62,6 +62,27 @@ public class DeviceVolumeStatesTests
     }
 
     [Fact]
+    public void Live_seed_survives_a_trip_through_no_default_device()
+    {
+        // codex r2: SwitchTo(null) used to resurrect the startup seed, which then leaked into
+        // the next first-seen device (e.g. the last endpoint unplugged, then a new one added).
+        var states = new DeviceVolumeStates(Settings.Default with { Percent = 50 });
+        var a = states.SwitchTo(DevA);
+        a.SetPercent(85);
+        a.ToggleMute();
+
+        var fallback = states.SwitchTo(null);
+        _out.WriteLine($"fallback after null switch: {fallback.Percent}% muted={fallback.Muted}");
+        Assert.Equal(85, fallback.Percent);
+        Assert.True(fallback.Muted); // mute state adopted too, not just the percent
+
+        var b = states.SwitchTo(DevB);
+        _out.WriteLine($"new device seeded: {b.Percent}% muted={b.Muted}");
+        Assert.Equal(85, b.Percent);
+        Assert.True(b.Muted);
+    }
+
+    [Fact]
     public void Active_tracks_the_last_switch_and_null_falls_back()
     {
         var states = new DeviceVolumeStates(Settings.Default with { Percent = 33 });

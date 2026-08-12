@@ -45,12 +45,17 @@ public sealed class DeviceVolumeStates
     }
 
     /// <summary>Makes <paramref name="endpointId"/>'s state the active one (creating it from
-    /// persisted state or the legacy seed on first sight) and returns it. Null switches to the
-    /// device-less fallback state.</summary>
+    /// persisted state, or seeded from the volume currently in use on first sight) and returns
+    /// it. Null switches to the device-less fallback state, which first ADOPTS the outgoing
+    /// state's percent/mute — otherwise a trip through "no default device" (the last endpoint
+    /// unplugged, audio service restart) would resurrect the startup seed and hand it to the
+    /// next device seen.</summary>
     public VolumeState SwitchTo(string? endpointId)
     {
         if (endpointId is null)
         {
+            _fallback.SetPercent(Active.Percent);
+            _fallback.SetMuted(Active.Muted);
             ActiveId = null;
             Active = _fallback;
             return _fallback;

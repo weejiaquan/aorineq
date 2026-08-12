@@ -35,6 +35,10 @@ public partial class AutoEqImportDialog : Window
         Loaded += async (_, _) => await LoadIndexAsync(refresh: false);
     }
 
+    /// <summary>Index load/refresh. Catches EVERYTHING: this runs from async void handlers
+    /// (Loaded, the refresh button), where an escaping exception would crash the process
+    /// rather than fail a dialog — and the finally must always clear <see cref="_busy"/> or
+    /// the dialog would be stuck refusing every later action.</summary>
     private async Task LoadIndexAsync(bool refresh)
     {
         if (_busy)
@@ -48,9 +52,11 @@ public partial class AutoEqImportDialog : Window
             StatusText.Text = $"{_entries.Count} profiles available.";
             UpdateResults();
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex)
         {
-            StatusText.Text = ex.Message;
+            StatusText.Text = ex is InvalidOperationException
+                ? ex.Message
+                : $"Couldn't load the AutoEq index: {ex.Message}";
         }
         finally
         {
@@ -72,6 +78,9 @@ public partial class AutoEqImportDialog : Window
     private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         ImportButton.IsEnabled = ResultsList.SelectedItem is ResultItem && !_busy;
 
+    /// <summary>async void by necessity (a WPF event handler), so nothing may escape: any
+    /// failure becomes a status line, and the busy/button state is always restored. Success
+    /// closes the dialog, in which case _busy staying true is correct.</summary>
     private async void OnImport(object sender, RoutedEventArgs e)
     {
         if (_busy || ResultsList.SelectedItem is not ResultItem item)
@@ -84,8 +93,7 @@ public partial class AutoEqImportDialog : Window
             ImportedPreset = await AutoEqIndex.DownloadPresetAsync(item.Entry, ApoPaths.GetPresetsRoot());
             DialogResult = true;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException
-            or IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
             StatusText.Text = $"Import failed: {ex.Message}";
             _busy = false;

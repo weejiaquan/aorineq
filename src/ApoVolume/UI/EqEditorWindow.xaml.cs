@@ -713,6 +713,11 @@ public partial class EqEditorWindow : Window
     {
         if (_draggingBand < 0 || _draggingBand >= _bands.Count)
             return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndDrag(); // button released outside the window: stop tracking
+            return;
+        }
         var pos = e.GetPosition(Plot);
         var band = _bands[_draggingBand];
         double gain = band.HasGain ? Math.Round(DbFromY(pos.Y), 1) : 0;
@@ -724,13 +729,20 @@ public partial class EqEditorWindow : Window
         OnBandsEdited();
     }
 
-    private void OnPlotMouseUp(object sender, MouseButtonEventArgs e)
+    private void OnPlotMouseUp(object sender, MouseButtonEventArgs e) => EndDrag();
+
+    /// <summary>Also wired to the canvas's LostMouseCapture: capture can be stolen (the
+    /// right-click type menu, window deactivation, an Alt-Tab mid-drag), and without this the
+    /// drag would stay "live" and keep rewriting the band on the next mouse move.</summary>
+    private void OnPlotLostCapture(object sender, MouseEventArgs e) => EndDrag();
+
+    private void EndDrag()
     {
-        if (_draggingBand >= 0)
-        {
-            _draggingBand = -1;
+        if (_draggingBand < 0)
+            return;
+        _draggingBand = -1;
+        if (Plot.IsMouseCaptured)
             Plot.ReleaseMouseCapture();
-        }
     }
 
     private void OnPlotMouseWheel(object sender, MouseWheelEventArgs e)

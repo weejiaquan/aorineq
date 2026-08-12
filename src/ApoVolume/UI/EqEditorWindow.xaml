@@ -78,7 +78,8 @@
                         SizeChanged="OnPlotSizeChanged"
                         MouseLeftButtonDown="OnPlotMouseDown" MouseMove="OnPlotMouseMove"
                         MouseLeftButtonUp="OnPlotMouseUp" MouseWheel="OnPlotMouseWheel"
-                        MouseRightButtonUp="OnPlotRightClick" />
+                        MouseRightButtonUp="OnPlotRightClick"
+                        LostMouseCapture="OnPlotLostCapture" />
             </Border>
 
             <StackPanel Grid.Column="1" Margin="10,0,0,0">
