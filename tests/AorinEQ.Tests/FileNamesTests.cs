@@ -95,4 +95,45 @@ public class FileNamesTests
         Assert.Equal(48, shown.Length);
         Assert.EndsWith("…", shown);
     }
+
+    [Fact]
+    public void Path_display_keeps_the_folder_that_says_which_skin_it_is()
+    {
+        // The real shape: every skin names its files empty/full/muted, so the file name alone
+        // would not identify the skin, and the full path does not fit the designer's column.
+        var full = Path.Combine(Path.GetTempPath(), "AorinEQ", "skins", "seia-bar-shadow", "empty.png");
+        var shown = FileNames.PathForDisplay(full);
+        _out.WriteLine($"{full}  ->  {shown}");
+
+        Assert.Equal(Path.Combine("seia-bar-shadow", "empty.png"), shown);
+        Assert.DoesNotContain(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar), shown);
+    }
+
+    [Fact]
+    public void Path_display_falls_back_when_there_is_no_folder_to_name()
+    {
+        _out.WriteLine(FileNames.PathForDisplay("empty.png"));
+
+        Assert.Equal("empty.png", FileNames.PathForDisplay("empty.png"));
+        // A folder path has no file name to show; showing it whole beats showing nothing.
+        var folder = Path.Combine("C:", "skins") + Path.DirectorySeparatorChar;
+        Assert.Equal(folder, FileNames.PathForDisplay(folder));
+        Assert.Equal("", FileNames.PathForDisplay(""));
+    }
+
+    [Fact]
+    public void Path_display_is_shorter_than_the_designer_column_for_a_real_appdata_path()
+    {
+        // The bug this exists for: 60+ characters of path ellipsized down to a few, in a column
+        // ~334px wide (~60 characters at the 11pt caption size the panel uses).
+        var full = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "AorinEQ", "skins", "seia-bar-shadow", "full.png");
+        var shown = FileNames.PathForDisplay(full);
+        _out.WriteLine($"{full.Length} chars -> {shown.Length} chars: {shown}");
+
+        Assert.True(full.Length > 40, $"fixture is not a realistic long path: {full}");
+        Assert.True(shown.Length <= 40, $"still too long for the column: {shown}");
+        Assert.EndsWith("full.png", shown);
+    }
 }

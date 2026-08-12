@@ -110,7 +110,9 @@
             <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="170" />
+                    <!-- 170 of content plus the 22 the scrollbar and its gutter take, so the
+                         controls keep the width they had before the panel started scrolling. -->
+                    <ColumnDefinition Width="192" />
                 </Grid.ColumnDefinitions>
 
                 <Border Grid.Column="0" Background="{DynamicResource EqPlotBrush}" CornerRadius="6" ClipToBounds="True">
@@ -122,7 +124,13 @@
                             LostMouseCapture="OnPlotLostCapture" />
                 </Border>
 
-                <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                <!-- In Advanced mode this column is ~490px of controls, and at MinHeight 520 the
+                     row that holds it gets ~120 — everything from Gain down to the level readout
+                     was not merely clipped but painted over by the band strip below, which is
+                     declared after it and has an opaque background. It scrolls now. -->
+                <ScrollViewer Grid.Column="1" Margin="10,0,0,0" Padding="0,0,8,0" Focusable="False"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
                     <!-- Per-band controls: the full editor only. The meters below stay in both
                          modes — knowing how loud it is matters just as much with three sliders. -->
                     <StackPanel x:Name="BandPanel">
@@ -173,6 +181,7 @@
                         </StackPanel>
                     </Grid>
                 </StackPanel>
+                </ScrollViewer>
             </Grid>
 
             <!-- Simple mode: three macro sliders over the SAME bands the strip below edits. -->

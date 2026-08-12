@@ -120,189 +120,223 @@
                     </ScrollViewer>
                 </Border>
 
-                <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                    <TextBlock Text="Images (PNG, sprite-sheet PNG, or GIF)" FontWeight="SemiBold" Margin="0,0,0,6" />
-                    <TextBlock Text="empty — artwork at 0%" FontSize="11" />
-                    <DockPanel Margin="0,2,0,6">
-                        <Button DockPanel.Dock="Right" Content="Browse…" Padding="8,2" Click="OnBrowseEmpty" />
-                        <Button DockPanel.Dock="Right" Content="Frames…" Padding="8,2" Margin="0,0,4,0" Click="OnImportEmptyFrames"
-                                ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
-                        <TextBlock x:Name="EmptyPathText" Text="—" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    </DockPanel>
-                    <TextBlock Text="full — artwork at 100%" FontSize="11" />
-                    <DockPanel Margin="0,2,0,4">
-                        <Button DockPanel.Dock="Right" Content="Browse…" Padding="8,2" Click="OnBrowseFull" />
-                        <Button DockPanel.Dock="Right" Content="Frames…" Padding="8,2" Margin="0,0,4,0" Click="OnImportFullFrames"
-                                ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
-                        <TextBlock x:Name="FullPathText" Text="—" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    </DockPanel>
-                    <TextBlock Text="muted — optional artwork while muted" FontSize="11" />
-                    <DockPanel Margin="0,2,0,4">
-                        <Button DockPanel.Dock="Right" Content="Browse…" Padding="8,2" Click="OnBrowseMuted" />
-                        <Button DockPanel.Dock="Right" Content="Frames…" Padding="8,2" Margin="0,0,4,0" Click="OnImportMutedFrames"
-                                ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
-                        <Button x:Name="ClearMutedButton" DockPanel.Dock="Right" Content="Clear" Padding="8,2" Margin="0,0,4,0"
-                                Click="OnClearMuted" ToolTip="Remove the muted artwork and fall back to dimming" />
-                        <TextBlock x:Name="MutedPathText" Text="—" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    </DockPanel>
-                    <TextBlock x:Name="ImageErrorText" Foreground="{DynamicResource SystemFillColorCriticalBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" />
+                <!-- The options are taller than the window at any size the user can make it
+                     (MinHeight 520 leaves ~400px here for ~900px of controls), so they scroll.
+                     Padding on the right keeps the scrollbar beside the content instead of over
+                     it; PreviewMouseWheel is handled so the wheel scrolls the panel from anywhere
+                     in it (see OnOptionsWheel). Focusable=False keeps the viewer itself out of the
+                     tab order, so Tab walks control to control and the viewer brings each into
+                     view as it goes. -->
+                <ScrollViewer x:Name="OptionsScroll" Grid.Column="1" Margin="12,0,0,0"
+                              Padding="0,0,10,0" Focusable="False"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              PreviewMouseWheel="OnOptionsWheel">
+                    <!-- One vertical rhythm throughout: 18 above a section heading, 6 under it,
+                         10 between rows, 4 between a caption and the control it captions. Every
+                         row shares the panel's left edge. -->
+                    <StackPanel>
+                        <TextBlock Text="Images" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBlock Text="PNG, sprite-sheet PNG, or GIF. All layers must share one frame size."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
 
-                    <Separator Margin="0,4,0,8" />
-                    <TextBlock Text="Animation" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="fps" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                        <TextBox x:Name="FpsBox" Grid.Column="1" Text="10" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        <TextBlock Grid.Column="2" Text="empty" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
-                                   ToolTip="Sprite-sheet frame count for the empty layer (GIFs are automatic)" />
-                        <TextBox x:Name="EmptyFramesBox" Grid.Column="3" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        <TextBlock Grid.Column="4" Text="full" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
-                                   ToolTip="Sprite-sheet frame count for the full layer (GIFs are automatic)" />
-                        <TextBox x:Name="FullFramesBox" Grid.Column="5" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        <TextBlock Grid.Column="6" Text="muted" VerticalAlignment="Center" Margin="8,0,4,0" FontSize="11"
-                                   ToolTip="Sprite-sheet frame count for the muted layer (GIFs are automatic)" />
-                        <TextBox x:Name="MutedFramesBox" Grid.Column="7" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                    </Grid>
+                        <TextBlock Text="empty &#8212; artwork at 0%" FontSize="11" Margin="0,0,0,4" />
+                        <TextBlock x:Name="EmptyPathText" Text="&#8212;" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <Button Content="Browse&#8230;" Padding="10,3" Click="OnBrowseEmpty" />
+                            <Button Content="Frames&#8230;" Padding="10,3" Margin="6,0,0,0" Click="OnImportEmptyFrames"
+                                    ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
+                        </StackPanel>
 
-                    <Separator Margin="0,4,0,8" />
-                    <TextBlock Text="Fill range" FontWeight="SemiBold" Margin="0,0,0,2"
-                               ToolTip="Where the bar lives inside the image: 0% and 100% in image pixels. Drag the colored handles on the preview." />
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="0% at" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                        <TextBox x:Name="FillStartBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        <TextBlock Grid.Column="3" Text="100% at" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                        <TextBox x:Name="FillEndBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                    </Grid>
+                        <TextBlock Text="full &#8212; artwork at 100%" FontSize="11" Margin="0,0,0,4" />
+                        <TextBlock x:Name="FullPathText" Text="&#8212;" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <Button Content="Browse&#8230;" Padding="10,3" Click="OnBrowseFull" />
+                            <Button Content="Frames&#8230;" Padding="10,3" Margin="6,0,0,0" Click="OnImportFullFrames"
+                                    ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
+                        </StackPanel>
 
-                    <Separator Margin="0,4,0,8" />
-                    <TextBlock Margin="0,0,0,2">
-                        <Run Text="Fill preview: " /><Run x:Name="FillLabel" Text="62%" />
-                    </TextBlock>
-                    <Slider x:Name="FillSlider" Minimum="0" Maximum="100" Value="62"
-                            ValueChanged="OnControlChanged" Margin="0,0,0,4" />
-                    <CheckBox x:Name="MuteCheck" Content="Preview mute"
-                              Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,4" />
-                    <TextBlock Margin="0,0,0,2"
-                               ToolTip="Opacity of the dimmed artwork while muted — only used when the skin has no muted artwork">
-                        <Run Text="Mute dim: " /><Run x:Name="MutedDimLabel" Text="0.60" />
-                    </TextBlock>
-                    <Slider x:Name="MutedDimSlider" Minimum="0" Maximum="1" Value="0.6"
-                            TickFrequency="0.05" IsSnapToTickEnabled="True"
-                            ValueChanged="OnControlChanged" Margin="0,0,0,4" />
+                        <TextBlock Text="muted &#8212; optional artwork while muted" FontSize="11" Margin="0,0,0,4" />
+                        <TextBlock x:Name="MutedPathText" Text="&#8212;" FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <Button Content="Browse&#8230;" Padding="10,3" Click="OnBrowseMuted" />
+                            <Button Content="Frames&#8230;" Padding="10,3" Margin="6,0,0,0" Click="OnImportMutedFrames"
+                                    ToolTip="Build a sprite sheet from a numbered PNG frame sequence (e.g. Photoshop's Export Layers to Files)" />
+                            <Button x:Name="ClearMutedButton" Content="Clear" Padding="10,3" Margin="6,0,0,0"
+                                    Click="OnClearMuted" ToolTip="Remove the muted artwork and fall back to dimming" />
+                        </StackPanel>
+                        <TextBlock x:Name="ImageErrorText" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                   FontSize="11" TextWrapping="Wrap" />
 
-                    <Separator Margin="0,4,0,8" />
-                    <CheckBox x:Name="ShowNumberCheck" Content="Show number (drag it on the preview)"
-                              Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,6" />
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="X" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBox x:Name="NumberXBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        <TextBlock Grid.Column="3" Text="Y" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBox x:Name="NumberYBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                    </Grid>
-
-                    <!-- Number text styling (enabled only while Show number is checked) -->
-                    <StackPanel x:Name="TextStylePanel">
-                        <Grid Margin="0,0,0,4">
+                        <TextBlock Text="Animation" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <Grid Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Frames per second" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                            <TextBox x:Name="FpsBox" Grid.Column="1" Text="10" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                        </Grid>
+                        <TextBlock Text="Sprite-sheet frame counts (GIFs are automatic)" FontSize="11" Margin="0,0,0,4" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="44" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="Font" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                            <!-- Editable so a skin's font that isn't installed here is preserved verbatim
-                                 rather than silently rewritten. -->
-                            <ComboBox x:Name="FontCombo" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="True"
-                                      SelectionChanged="OnControlChanged" LostFocus="OnControlChanged" />
-                            <TextBlock Grid.Column="3" Text="Size" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                            <TextBox x:Name="FontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="empty" FontSize="11" Margin="0,0,0,4" />
+                                <TextBox x:Name="EmptyFramesBox" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="full" FontSize="11" Margin="0,0,0,4" />
+                                <TextBox x:Name="FullFramesBox" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="muted" FontSize="11" Margin="0,0,0,4" />
+                                <TextBox x:Name="MutedFramesBox" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </StackPanel>
                         </Grid>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <CheckBox x:Name="BoldCheck" Content="Bold" VerticalAlignment="Center" Margin="0,0,12,0"
-                                      Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                            <TextBlock Text="Color" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                            <Button x:Name="TextColorSwatch" Width="34" Height="24" Click="OnPickTextColor"
-                                    ToolTip="Text color" />
-                            <TextBlock Text="Align" VerticalAlignment="Center" Margin="12,0,4,0" FontSize="11"
-                                       ToolTip="What X anchors: the number's left edge, center, or right edge" />
-                            <ComboBox x:Name="AlignCombo" Width="76" SelectionChanged="OnControlChanged">
-                                <ComboBoxItem Content="Left" Tag="left" IsSelected="True" />
-                                <ComboBoxItem Content="Center" Tag="center" />
-                                <ComboBoxItem Content="Right" Tag="right" />
-                            </ComboBox>
+
+                        <TextBlock Text="Fill range" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <TextBlock Text="Where the bar lives inside the image, in image pixels. Drag the colored handles on the preview."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="0% at" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                            <TextBox x:Name="FillStartBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            <TextBlock Grid.Column="3" Text="100% at" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                            <TextBox x:Name="FillEndBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                        </Grid>
+
+                        <TextBlock Text="Preview &amp; mute" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <TextBlock Margin="0,0,0,4">
+                            <Run Text="Fill preview: " /><Run x:Name="FillLabel" Text="62%" />
+                        </TextBlock>
+                        <Slider x:Name="FillSlider" Minimum="0" Maximum="100" Value="62"
+                                ValueChanged="OnControlChanged" Margin="0,0,0,10" />
+                        <CheckBox x:Name="MuteCheck" Content="Preview mute"
+                                  Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,10" />
+                        <TextBlock Margin="0,0,0,4"
+                                   ToolTip="Opacity of the dimmed artwork while muted &#8212; only used when the skin has no muted artwork">
+                            <Run Text="Mute dim: " /><Run x:Name="MutedDimLabel" Text="0.60" />
+                        </TextBlock>
+                        <Slider x:Name="MutedDimSlider" Minimum="0" Maximum="1" Value="0.6"
+                                TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                ValueChanged="OnControlChanged" />
+
+                        <TextBlock Text="Percent text" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <CheckBox x:Name="ShowNumberCheck" Content="Show number (drag it on the preview)"
+                                  Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,10" />
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="X" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                            <TextBox x:Name="NumberXBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            <TextBlock Grid.Column="3" Text="Y" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                            <TextBox x:Name="NumberYBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                        </Grid>
+
+                        <!-- Number text styling (enabled only while Show number is checked) -->
+                        <StackPanel x:Name="TextStylePanel">
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="56" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Font" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <!-- Editable so a skin's font that isn't installed here is preserved verbatim
+                                     rather than silently rewritten. -->
+                                <ComboBox x:Name="FontCombo" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="True"
+                                          SelectionChanged="OnControlChanged" LostFocus="OnControlChanged" />
+                                <TextBlock Grid.Column="3" Text="Size" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <TextBox x:Name="FontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <CheckBox x:Name="BoldCheck" Content="Bold" VerticalAlignment="Center" Margin="0,0,16,0"
+                                          Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                                <TextBlock Text="Color" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <Button x:Name="TextColorSwatch" Width="34" Height="24" Click="OnPickTextColor"
+                                        ToolTip="Text color" />
+                                <TextBlock Text="Align" VerticalAlignment="Center" Margin="16,0,8,0" FontSize="11"
+                                           ToolTip="What X anchors: the number's left edge, center, or right edge" />
+                                <ComboBox x:Name="AlignCombo" Width="86" SelectionChanged="OnControlChanged">
+                                    <ComboBoxItem Content="Left" Tag="left" IsSelected="True" />
+                                    <ComboBoxItem Content="Center" Tag="center" />
+                                    <ComboBoxItem Content="Right" Tag="right" />
+                                </ComboBox>
+                            </StackPanel>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="OutlineCheck" Grid.Column="0" Content="Outline" VerticalAlignment="Center"
+                                          Margin="0,0,8,0" Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                                <Button x:Name="OutlineColorSwatch" Grid.Column="1" Width="34" Height="24" Margin="0,0,16,0"
+                                        Click="OnPickOutlineColor" ToolTip="Outline color" />
+                                <TextBlock Grid.Column="2" Text="Width" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <TextBox x:Name="OutlineWidthBox" Grid.Column="3" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <CheckBox x:Name="ShadowCheck" Content="Shadow" VerticalAlignment="Center" Margin="0,0,8,0"
+                                          Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                                <Button x:Name="ShadowColorSwatch" Width="34" Height="24"
+                                        Click="OnPickShadowColor" ToolTip="Shadow color" />
+                            </StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Blur" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <!-- MinWidth 48 is the v3.1.1 floor: in the old fixed-width row
+                                     these two had collapsed to 12px and 20px. The row is far wider
+                                     now, but the floor stays as the guard it was measured to be. -->
+                                <TextBox x:Name="ShadowBlurBox" Grid.Column="1" MinWidth="48" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                                <TextBlock Grid.Column="3" Text="Depth" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <TextBox x:Name="ShadowDepthBox" Grid.Column="4" MinWidth="48" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </Grid>
                         </StackPanel>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="40" />
-                            </Grid.ColumnDefinitions>
-                            <CheckBox x:Name="OutlineCheck" Grid.Column="0" Content="Outline" VerticalAlignment="Center"
-                                      Margin="0,0,6,0" Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                            <Button x:Name="OutlineColorSwatch" Grid.Column="1" Width="34" Height="24" Margin="0,0,8,0"
-                                    Click="OnPickOutlineColor" ToolTip="Outline color" />
-                            <TextBlock Grid.Column="2" Text="Width" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                            <TextBox x:Name="OutlineWidthBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        </Grid>
-                        <Grid Margin="0,0,0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <CheckBox x:Name="ShadowCheck" Grid.Column="0" Content="Shadow" VerticalAlignment="Center"
-                                      Margin="0,0,6,0" Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                            <Button x:Name="ShadowColorSwatch" Grid.Column="1" Width="34" Height="24" Margin="0,0,8,0"
-                                    Click="OnPickShadowColor" ToolTip="Shadow color" />
-                            <TextBlock Grid.Column="2" Text="Blur" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                            <TextBox x:Name="ShadowBlurBox" Grid.Column="3" MinWidth="48" Margin="0,0,8,0" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            <TextBlock Grid.Column="4" Text="Depth" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
-                            <TextBox x:Name="ShadowDepthBox" Grid.Column="5" MinWidth="48" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        </Grid>
+
+                        <TextBlock Text="Scale" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <TextBlock Margin="0,0,0,4">
+                            <Run Text="Scale: " /><Run x:Name="ScaleLabel" Text="1.00" />
+                        </TextBlock>
+                        <Slider x:Name="ScaleSlider" Minimum="0.25" Maximum="4" Value="1"
+                                TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                ValueChanged="OnControlChanged" />
+
+                        <Button x:Name="TestButton" Content="Test on desktop" Padding="10,4"
+                                Margin="0,18,0,0" Click="OnTestOnDesktop" />
                     </StackPanel>
-
-                    <TextBlock Margin="0,0,0,2">
-                        <Run Text="Scale: " /><Run x:Name="ScaleLabel" Text="1.00" />
-                    </TextBlock>
-                    <Slider x:Name="ScaleSlider" Minimum="0.25" Maximum="4" Value="1"
-                            TickFrequency="0.05" IsSnapToTickEnabled="True"
-                            ValueChanged="OnControlChanged" Margin="0,0,0,8" />
-
-                    <Separator Margin="0,4,0,8" />
-                    <Button x:Name="TestButton" Content="Test on desktop" Padding="10,4" Click="OnTestOnDesktop" />
-                </StackPanel>
+                </ScrollViewer>
             </Grid>
 
             <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
