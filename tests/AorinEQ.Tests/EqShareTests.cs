@@ -62,6 +62,18 @@ public class EqShareTests
     }
 
     [Fact]
+    public void Share_url_is_written_with_the_current_scheme_only()
+    {
+        // The legacy scheme is accepted, never produced — a link the user copies today should
+        // not be spelled with a name the app no longer goes by.
+        Assert.True(EqShare.TryBuildShareUrl(EveryBandType(), out var url, out _));
+        _out.WriteLine(url);
+
+        Assert.StartsWith("aorineq://", url);
+        Assert.DoesNotContain(ProtocolLink.LegacyScheme, url);
+    }
+
+    [Fact]
     public void Share_url_parses_back_into_the_same_preset()
     {
         var preset = EveryBandType();

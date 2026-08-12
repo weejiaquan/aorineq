@@ -38,7 +38,14 @@ public static class ProtocolPages
 /// preset) or it is rejected outright. Nothing downstream re-validates.</summary>
 public sealed record ProtocolLink(string Action)
 {
-    public const string Scheme = "apo-volume";
+    public const string Scheme = "aorineq";
+
+    /// <summary>The pre-v3.0.0 scheme, kept registered as an ALIAS so links already written
+    /// somewhere keep working. It is accepted here and nowhere else special: a legacy link parses
+    /// into exactly the same <see cref="ProtocolLink"/> as its current-scheme twin, so there is
+    /// one handler and no second code path. Nothing in the app ever EMITS it — see
+    /// <see cref="EqShare.TryBuildShareUrl"/>.</summary>
+    public const string LegacyScheme = "apo-volume";
 
     public const string InstallSkinAction = "install-skin";
     public const string ApplyPresetAction = "apply-preset";
@@ -83,10 +90,13 @@ public sealed record ProtocolLink(string Action)
     /// <summary>The window an <c>open</c> link shows (<see cref="ProtocolPages"/>).</summary>
     public string? Page { get; init; }
 
-    /// <summary>Whether a command-line argument is an aorineq:// link (by scheme prefix only —
-    /// validation is <see cref="Parse"/>'s job). Used to spot the link among process args.</summary>
+    /// <summary>Whether a command-line argument is one of our links (by scheme prefix only —
+    /// validation is <see cref="Parse"/>'s job). Used to spot the link among process args.
+    /// Accepts <see cref="LegacyScheme"/> too, because that class is still registered and the
+    /// shell will hand us such an arg.</summary>
     public static bool IsProtocolArg(string arg) =>
-        arg.StartsWith(Scheme + "://", StringComparison.OrdinalIgnoreCase);
+        arg.StartsWith(Scheme + "://", StringComparison.OrdinalIgnoreCase)
+        || arg.StartsWith(LegacyScheme + "://", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether a protocol arg can safely ride the elevation bounce's unquoted
     /// space-joined forwarding: no whitespace, no quotes, nothing that could smuggle extra
@@ -101,7 +111,7 @@ public sealed record ProtocolLink(string Action)
         if (string.IsNullOrEmpty(raw) || raw.Length > MaxLength)
             return Malformed;
         if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)
-            || !string.Equals(uri.Scheme, Scheme, StringComparison.OrdinalIgnoreCase))
+            || !(Matches(uri.Scheme, Scheme) || Matches(uri.Scheme, LegacyScheme)))
             return Malformed;
 
         // The action rides in the authority slot: aorineq://<action>?<query>. Anything in the
