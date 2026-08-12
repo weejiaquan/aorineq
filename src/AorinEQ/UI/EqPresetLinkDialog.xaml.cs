@@ -28,7 +28,7 @@ public sealed record EqPresetLinkResult(EqPresetLinkChoice Choice, EqPreset? Pre
 ///
 /// Owned by no window (a link can arrive with nothing else open), centered, topmost so it can't
 /// get lost behind the browser that fired the link.</summary>
-public partial class EqPresetLinkDialog : Window
+public partial class EqPresetLinkDialog : Wpf.Ui.Controls.FluentWindow
 {
     /// <summary>The wording used in place of a host for an inline (data=) share link.</summary>
     public const string SharedLinkSource = "a shared link";

@@ -14,7 +14,7 @@ namespace AorinEQ.UI;
 /// <see cref="SkinOsdWindow"/> uses, lets the user drag the percent number into place, shares
 /// skins as zip files, and saves via <see cref="SkinWriter"/>. One instance per app (OnClosing
 /// cancels-and-hides like SettingsWindow); App owns the lifetime.</summary>
-public partial class SkinDesignerWindow : Window
+public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
 {
     private readonly Func<Settings> _currentSettings; // live OSD settings, for the desktop test
 

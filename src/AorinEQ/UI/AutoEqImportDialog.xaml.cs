@@ -9,7 +9,7 @@ namespace AorinEQ.UI;
 /// cached on disk (refresh button refetches); Import downloads the selected model's
 /// ParametricEQ file into the presets folder and closes with <see cref="ImportedPreset"/>
 /// set. All network work is async — the dialog stays responsive.</summary>
-public partial class AutoEqImportDialog : Window
+public partial class AutoEqImportDialog : Wpf.Ui.Controls.FluentWindow
 {
     private const int MaxResults = 200;
 

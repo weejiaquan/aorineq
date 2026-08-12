@@ -9,7 +9,7 @@ namespace AorinEQ.UI;
 /// parser the AutoEq/file imports use (<see cref="EqPreset.TryParse"/>). Validation is live —
 /// the offending line and reason are shown inline and OK is blocked — so a scope is never
 /// partially replaced.</summary>
-public partial class EqTextDialog : Window
+public partial class EqTextDialog : Wpf.Ui.Controls.FluentWindow
 {
     /// <summary>The parsed replacement, set only when the dialog closes with OK.</summary>
     public EqPreset? Result { get; private set; }

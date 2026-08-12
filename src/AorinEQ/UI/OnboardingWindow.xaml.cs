@@ -12,7 +12,7 @@ namespace AorinEQ.UI;
 /// immediately (EAPO not required), choosing the APO preamp flows into the one state machine:
 /// Explain → Downloading → InstallerRunning → re-detect → (Retry | Configurator | Success);
 /// Success offers the audio-service restart that substitutes for a reboot.</summary>
-public partial class OnboardingWindow : Window
+public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
 {
     private enum Step
     {
