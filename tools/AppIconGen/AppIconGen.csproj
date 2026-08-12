@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>AppIconGen</AssemblyName>
+    <RootNamespace>AorinEQ.Tools.AppIconGen</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Both the art and the .ico container live in Core, where the test project can reach them:
+         tests/AorinEQ.Tests references Core and nothing else, so anything asserted has to be there
+         and this project stays a command line around it. -->
+    <ProjectReference Include="..\..\src\AorinEQ.Core\AorinEQ.Core.csproj" />
+  </ItemGroup>
+</Project>
