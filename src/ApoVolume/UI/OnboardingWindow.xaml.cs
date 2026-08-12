@@ -38,13 +38,20 @@ public partial class OnboardingWindow : Window
     /// "system"), before any install flow runs. The owner persists/applies it.</summary>
     public event Action<string>? ModeSelected;
 
+    /// <summary>Raised alongside <see cref="ModeSelected"/> with the auto-update checkbox state
+    /// confirmed on the mode page. The owner persists/applies it.</summary>
+    public event Action<bool>? AutoUpdateSelected;
+
     /// <summary>A non-null <paramref name="modeChoice"/> starts the wizard on the volume-mode
-    /// page with that mode preselected; null keeps the classic EAPO-install-only flow.</summary>
-    public OnboardingWindow(bool blocking, string? modeChoice = null)
+    /// page with that mode preselected; null keeps the classic EAPO-install-only flow.
+    /// <paramref name="autoUpdate"/> preselects the update checkbox (first run: the default-on
+    /// spec value; setup guide: the current setting).</summary>
+    public OnboardingWindow(bool blocking, string? modeChoice = null, bool autoUpdate = true)
     {
         _blocking = blocking;
         _startedOnModeChoice = modeChoice is not null;
         InitializeComponent();
+        AutoUpdateBox.IsChecked = autoUpdate;
         if (modeChoice is not null)
             ShowModeChoice(modeChoice);
         else
@@ -126,6 +133,7 @@ public partial class OnboardingWindow : Window
             {
                 var mode = EapoModeRadio.IsChecked == true ? VolumeModes.Eapo : VolumeModes.System;
                 _selectedMode = mode;
+                AutoUpdateSelected?.Invoke(AutoUpdateBox.IsChecked == true);
                 ModeSelected?.Invoke(mode);
                 if (mode == VolumeModes.System)
                     Finish(proceed: true); // Windows volume needs no EAPO — nothing left to set up

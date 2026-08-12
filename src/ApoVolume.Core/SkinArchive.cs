@@ -10,6 +10,10 @@ public static class SkinArchive
     private static readonly string[] AllowedFiles =
         { "empty.png", "empty.gif", "full.png", "full.gif", "muted.png", "muted.gif", "skin.json" };
 
+    /// <summary>Size cap for a skin zip fetched from an apo-volume:// link — generous for
+    /// animated skins, tiny next to the updater's exe cap.</summary>
+    public const long MaxZipBytes = 20 * 1024 * 1024;
+
     /// <summary>Suggested skin name for a zip: its filename without extension.</summary>
     public static string DefaultName(string zipPath) => Path.GetFileNameWithoutExtension(zipPath);
 

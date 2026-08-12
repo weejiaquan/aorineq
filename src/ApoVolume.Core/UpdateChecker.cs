@@ -123,6 +123,28 @@ public static class UpdateChecker
         return new(available ? UpdateStatus.UpdateAvailable : UpdateStatus.UpToDate, release);
     }
 
+    /// <summary>Fetches and parses the ApoVolume.exe.sha256 asset. Null on any failure —
+    /// without a verified digest no update download ever starts. Same https-or-loopback rule
+    /// as <see cref="GatedDownload"/>.</summary>
+    public static async Task<string?> FetchSha256Async(string url, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && !(uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)))
+            return null;
+        try
+        {
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+            return ParseSha256Text(await client.GetStringAsync(uri, cancellationToken));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
+            or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Parses the ApoVolume.exe.sha256 asset: a lowercase-normalized 64-hex digest,
     /// accepted bare or in sha256sum's "&lt;hex&gt; *name" / "&lt;hex&gt;  name" formats.
     /// Null on anything else.</summary>

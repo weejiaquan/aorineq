@@ -10,6 +10,7 @@ public sealed class TrayIcon : IDisposable
     private readonly Icon _normalIcon;
     private readonly Icon _mutedIcon;
     private readonly ToolStripMenuItem _muteItem;
+    private Action? _balloonClickAction;
 
     public event Action? OpenRequested;
     public event Action? MuteToggleRequested;
@@ -41,6 +42,10 @@ public sealed class TrayIcon : IDisposable
         {
             if (e.Button == MouseButtons.Left) OpenRequested?.Invoke();
         };
+        // One handler for the lifetime of the icon; each balloon sets (or clears) the action so
+        // a click on a stale balloon can never fire a newer balloon's action.
+        _icon.BalloonTipClicked += (_, _) => _balloonClickAction?.Invoke();
+        _icon.BalloonTipClosed += (_, _) => _balloonClickAction = null;
     }
 
     public void Update(int percent, bool muted)
@@ -50,8 +55,26 @@ public sealed class TrayIcon : IDisposable
         _muteItem.Checked = muted;
     }
 
-    public void ShowWarning(string text) =>
+    public void ShowWarning(string text)
+    {
+        _balloonClickAction = null;
         _icon.ShowBalloonTip(5000, "apo-volume", text, ToolTipIcon.Warning);
+    }
+
+    public void ShowInfo(string text)
+    {
+        _balloonClickAction = null;
+        _icon.ShowBalloonTip(5000, "apo-volume", text, ToolTipIcon.Info);
+    }
+
+    /// <summary>An info balloon that runs <paramref name="onClick"/> when clicked — used by the
+    /// updater's "new version available — click to open the release page" notice when the exe
+    /// directory isn't writable for the in-place swap.</summary>
+    public void ShowNotice(string text, Action onClick)
+    {
+        _balloonClickAction = onClick;
+        _icon.ShowBalloonTip(10000, "apo-volume", text, ToolTipIcon.Info);
+    }
 
     private static Icon CreateGlyphIcon(string glyph)
     {

@@ -40,6 +40,13 @@ public partial class App : System.Windows.Application
     private bool _uacDeclined;
     private bool _togglingRunAsAdmin;
     private bool _togglingAutostart;
+    // apo-volume:// links arriving from second launches (via the spool) or this launch's args
+    // are processed strictly one at a time — each shows a modal confirm dialog.
+    private readonly ProtocolSpool _protocolSpool = new(ProtocolSpool.DefaultPath);
+    private readonly Queue<string> _pendingProtocolLinks = new();
+    private bool _processingProtocolLinks;
+    private System.Windows.Threading.DispatcherTimer? _updateTimer;
+    private bool _updateCheckRunning;
     // Monotonic token for SettingsWindow state syncs (dispatcher thread only): each sync bumps it
     // before its async autostart query, and only the newest token may apply its result — an older
     // in-flight query (e.g. from opening Settings mid-toggle) can no longer overwrite fresher state.
@@ -83,6 +90,9 @@ public partial class App : System.Windows.Application
         {
             if (EventWaitHandle.TryOpenExisting(ShowEventName, out var existing))
             {
+                // A browser-launched apo-volume:// link rides this second launch: spool it for
+                // the running instance BEFORE waking it, so the signal finds the link waiting.
+                PostProtocolLinkForRunningInstance(e.Args);
                 existing.Set();
                 existing.Dispose();
                 Shutdown();
@@ -129,6 +139,7 @@ public partial class App : System.Windows.Application
             {
                 // A healthy instance really is running (simultaneous-start race past the probe):
                 // its event exists by now, so this opens rather than creates it.
+                PostProtocolLinkForRunningInstance(e.Args);
                 _showEvent.Set(); // ask the running instance to show its slider
                 Shutdown();
                 return;
@@ -142,6 +153,12 @@ public partial class App : System.Windows.Application
             ShowInstanceConflictDialogAndShutdown();
             return;
         }
+
+        // This launch is becoming THE instance: any links a crashed/killed session left in the
+        // spool are stale user intent — discard rather than pop surprise install dialogs. (A link
+        // spooled by a second launch in this same instant is lost too; its signal then just shows
+        // the OSD. Clicking a link during the app's own startup is rare enough to accept that.)
+        _protocolSpool.TakeAll();
 
         // The second-instance listener starts as soon as the named event exists: a second launch
         // during first-run onboarding must activate the wizard (not vanish into a signal nobody
@@ -169,8 +186,10 @@ public partial class App : System.Windows.Application
         {
             bool proceed = false;
             var preselect = EapoDetection.Detect() == EapoStatus.Active ? VolumeModes.Eapo : VolumeModes.System;
-            _startupWizard = new OnboardingWindow(blocking: true, modeChoice: preselect);
+            _startupWizard = new OnboardingWindow(blocking: true, modeChoice: preselect,
+                autoUpdate: _settings.AutoUpdate);
             _startupWizard.ModeSelected += m => _settings = _settings with { VolumeMode = m };
+            _startupWizard.AutoUpdateSelected += on => _settings = _settings with { AutoUpdate = on };
             _startupWizard.Completed += p => proceed = p;
             _startupWizard.ShowDialog();
             _startupWizard = null;
@@ -312,12 +331,50 @@ public partial class App : System.Windows.Application
             _writer!.WriteVolume(_state.CurrentDb);
         _tray!.Update(_state.Percent, _state.Muted);
 
+        // Protocol links + auto-update, both post-init: neither may block or fail startup.
+        if (_settings.ProtocolLinksEnabled)
+        {
+            try
+            {
+                new ProtocolRegistration().Register(ExePath); // idempotent; re-points a moved exe
+            }
+            catch (InvalidOperationException ex)
+            {
+                _tray!.ShowWarning(ex.Message);
+            }
+        }
+        SetupAutoUpdate();
+        if (e.Args.Contains("--updated"))
+            _tray!.ShowInfo($"Updated to apo-volume {GetVersionString()}.");
+
         // Fresh-launch flags only (also used by E2E automation): when an instance is already
         // running, a second launch signals the OSD as usual — these are not IPC commands.
         if (e.Args.Contains("--settings"))
             OpenSettings();
         if (e.Args.Contains("--onboarding"))
             OpenOnboarding();
+
+        // A protocol link launched THIS instance (nothing was running): handle it now that the
+        // tray/OSD pipeline exists. Runs after the flag handling so a combined launch behaves.
+        var linkArg = e.Args.FirstOrDefault(ProtocolLink.IsProtocolArg);
+        if (linkArg is not null)
+            EnqueueProtocolLinks(new[] { linkArg });
+    }
+
+    /// <summary>Second-launch side of the protocol handoff: spool the link (if this launch
+    /// carries one) for the running instance to pick up on the show-event signal. Best-effort —
+    /// an unwritable spool just means the running instance shows its OSD.</summary>
+    private void PostProtocolLinkForRunningInstance(string[] args)
+    {
+        var link = args.FirstOrDefault(ProtocolLink.IsProtocolArg);
+        if (link is null) return;
+        try
+        {
+            _protocolSpool.Post(link);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     /// <summary>
@@ -332,8 +389,11 @@ public partial class App : System.Windows.Application
         if (!_settings.RunAsAdmin || Elevation.IsElevated || args.Contains("--no-elevate"))
             return false;
 
-        // Whitelisted flags survive the bounce (no argument-quoting concerns by construction).
-        var forwarded = string.Join(' ', args.Where(a => a is "--settings" or "--onboarding"));
+        // Whitelisted flags survive the bounce (no argument-quoting concerns by construction —
+        // protocol links are additionally screened for whitespace/quote smuggling since the
+        // join below is unquoted).
+        var forwarded = string.Join(' ', args.Where(
+            a => a is "--settings" or "--onboarding" || ProtocolLink.IsSafeToForward(a)));
         if (TryRelaunchElevatedAndShutdown(forwarded))
             return true;
 
@@ -610,6 +670,9 @@ public partial class App : System.Windows.Application
                 autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, GetVersionString(), _settings);
             _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
+            _settingsWindow.ProtocolLinksChanged += OnProtocolLinksToggled;
+            _settingsWindow.AutoUpdateChanged += OnAutoUpdateToggled;
+            _settingsWindow.CheckUpdatesRequested += () => _ = RunUpdateCheckAsync(interactive: true);
             _settingsWindow.VolumeModeChanged += OnVolumeModeChanged;
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
             _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
@@ -632,8 +695,10 @@ public partial class App : System.Windows.Application
     {
         if (_onboarding is null)
         {
-            _onboarding = new OnboardingWindow(blocking: false, modeChoice: _settings.VolumeMode);
+            _onboarding = new OnboardingWindow(blocking: false, modeChoice: _settings.VolumeMode,
+                autoUpdate: _settings.AutoUpdate);
             _onboarding.ModeSelected += OnWizardModeSelected;
+            _onboarding.AutoUpdateSelected += OnAutoUpdateToggled;
             _onboarding.Closed += (_, _) =>
             {
                 _onboarding = null;
@@ -693,7 +758,8 @@ public partial class App : System.Windows.Application
 
     /// <summary>A second launch signaled the show event. Same contract as the tray's
     /// OpenRequested — nothing changed, just bring the right surface forward: the first-run
-    /// wizard while onboarding, otherwise the OSD (a no-op before the OSD exists).</summary>
+    /// wizard while onboarding, a protocol link's confirm dialog when one was spooled,
+    /// otherwise the OSD (a no-op before the OSD exists).</summary>
     private void OnSecondLaunchSignal()
     {
         if (_startupWizard is { IsVisible: true })
@@ -701,8 +767,288 @@ public partial class App : System.Windows.Application
             _startupWizard.Activate();
             return;
         }
+        var links = _protocolSpool.TakeAll();
+        if (links.Count > 0)
+        {
+            EnqueueProtocolLinks(links);
+            return;
+        }
         if (_osd is not null)
             ShowOsd(interactive: true);
+    }
+
+    /// <summary>Queues protocol links and drains the queue one link at a time — each link shows
+    /// a modal confirm dialog, and a second link arriving mid-dialog must wait its turn, not
+    /// stack a second dialog via re-entrant dispatch.</summary>
+    private async void EnqueueProtocolLinks(IEnumerable<string> links)
+    {
+        foreach (var link in links)
+            _pendingProtocolLinks.Enqueue(link);
+        if (_processingProtocolLinks) return;
+        _processingProtocolLinks = true;
+        try
+        {
+            while (_pendingProtocolLinks.Count > 0)
+                await HandleProtocolLinkAsync(_pendingProtocolLinks.Dequeue());
+        }
+        finally
+        {
+            _processingProtocolLinks = false;
+        }
+    }
+
+    /// <summary>One apo-volume:// link, end to end: strict parse (balloon-only on anything
+    /// off), the confirm dialog (the trust boundary — nothing downloads before a click), the
+    /// gated zip download, the staged <see cref="SkinArchive.Import"/>, and — for Install &amp;
+    /// Use — the live switch to the new skin.</summary>
+    private async Task HandleProtocolLinkAsync(string raw)
+    {
+        var result = ProtocolLink.Parse(raw);
+        if (result.Status == ProtocolParseStatus.UnknownAction)
+        {
+            _tray?.ShowWarning("This link needs a newer version of apo-volume.");
+            return;
+        }
+        if (result.Status != ProtocolParseStatus.Ok)
+        {
+            _tray?.ShowWarning("Invalid apo-volume link.");
+            return;
+        }
+
+        var link = result.Link!;
+        bool overwrites = Directory.Exists(Path.Combine(ApoPaths.GetSkinsRoot(), link.Name));
+        var choice = SkinInstallDialog.Confirm(link.Name, new Uri(link.Url).Host, overwrites);
+        if (choice == SkinInstallChoice.Cancel)
+            return;
+
+        var staging = Path.Combine(Path.GetTempPath(), "apo-skin-" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            await GatedDownload.DownloadAsync(link.Url, staging, SkinArchive.MaxZipBytes,
+                GatedDownload.ZipMagic, link.Sha256);
+            SkinArchive.Import(staging, ApoPaths.GetSkinsRoot(), link.Name);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _tray?.ShowWarning($"Skin install failed: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            try { File.Delete(staging); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        if (choice == SkinInstallChoice.InstallAndUse)
+        {
+            _settings = _settings with { OsdStyle = OsdStyles.Skin, SkinName = link.Name };
+            ApplyOsdConfig(_settings); // content stamp differs if the active skin was overwritten
+            SaveSettings();
+            ShowOsd(interactive: false);
+            _ = SyncSettingsWindowStateAsync(); // style/skin combos, if Settings is open
+        }
+        else
+        {
+            _settingsWindow?.RefreshSkins();
+            _tray?.ShowInfo($"Skin '{link.Name}' installed.");
+        }
+    }
+
+    /// <summary>Four-part assembly version — what release tags compare against (see
+    /// <see cref="UpdateChecker.IsNewer"/>'s normalization).</summary>
+    private static Version CurrentVersion =>
+        Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0);
+
+    /// <summary>Post-init updater wiring: clean up the previous version's <c>.old</c> image
+    /// (retrying once after 30 s — right after an update relaunch it IS the still-exiting old
+    /// process), create the 24 h re-check timer, and kick the startup check when enabled.</summary>
+    private void SetupAutoUpdate()
+    {
+        if (!UpdateApplier.TryDeleteOld(ExePath))
+        {
+            var cleanup = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(30),
+            };
+            cleanup.Tick += (_, _) =>
+            {
+                cleanup.Stop();
+                UpdateApplier.TryDeleteOld(ExePath);
+            };
+            cleanup.Start();
+        }
+
+        _updateTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromHours(24),
+        };
+        _updateTimer.Tick += (_, _) => _ = RunUpdateCheckAsync(interactive: false);
+        if (_settings.AutoUpdate)
+        {
+            _updateTimer.Start();
+            _ = RunUpdateCheckAsync(interactive: false);
+        }
+    }
+
+    /// <summary>Handles the Settings/onboarding auto-update toggle: persist, and start/stop the
+    /// periodic check (turning it on also checks right away).</summary>
+    private void OnAutoUpdateToggled(bool on)
+    {
+        if (on == _settings.AutoUpdate) return;
+        _settings = _settings with { AutoUpdate = on };
+        SaveSettings();
+        if (on)
+        {
+            _updateTimer?.Start();
+            _ = RunUpdateCheckAsync(interactive: false);
+        }
+        else
+        {
+            _updateTimer?.Stop();
+        }
+        _ = SyncSettingsWindowStateAsync();
+    }
+
+    /// <summary>Handles the "Enable apo-volume:// links" toggle: persist and register/unregister
+    /// the scheme. Failures balloon; the checkbox re-syncs from the persisted setting.</summary>
+    private void OnProtocolLinksToggled(bool on)
+    {
+        if (on == _settings.ProtocolLinksEnabled) return;
+        _settings = _settings with { ProtocolLinksEnabled = on };
+        SaveSettings();
+        try
+        {
+            var registration = new ProtocolRegistration();
+            if (on) registration.Register(ExePath);
+            else registration.Unregister();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _tray?.ShowWarning(ex.Message);
+        }
+        _ = SyncSettingsWindowStateAsync();
+    }
+
+    /// <summary>One update check + (when an update is out) the download/apply flow.
+    /// Background runs (startup, 24 h timer) are silent on everything except a completed swap;
+    /// the interactive path (Settings "Check now") reports every outcome via the Settings
+    /// status line. Never throws; never blocks startup.</summary>
+    private async Task RunUpdateCheckAsync(bool interactive)
+    {
+        if (_updateCheckRunning) return;
+        _updateCheckRunning = true;
+        try
+        {
+            if (interactive)
+                _settingsWindow?.SetUpdateStatus("Checking…");
+            var result = await UpdateChecker.CheckAsync(CurrentVersion);
+            switch (result.Status)
+            {
+                case UpdateStatus.Error:
+                    _settingsWindow?.SetUpdateStatus(result.Error ?? "Update check failed.");
+                    return;
+                case UpdateStatus.UpToDate:
+                    _settingsWindow?.SetUpdateStatus(
+                        $"Latest release: {result.Release!.TagName} — you're up to date.");
+                    return;
+            }
+
+            var release = result.Release!;
+            _settingsWindow?.SetUpdateStatus($"Downloading {release.TagName}…");
+            await DownloadAndApplyUpdateAsync(release, interactive);
+        }
+        finally
+        {
+            _updateCheckRunning = false;
+        }
+    }
+
+    /// <summary>Downloads a newer release through the gates (sha256 asset REQUIRED, 200 MB cap,
+    /// MZ magic) and applies the in-place swap. Unwritable exe directory → no swap, just a
+    /// clickable balloon to the release page. After the swap: RunAsAdmin sessions finish on the
+    /// next start (no surprise UAC); otherwise relaunch immediately via the mutex-takeover path
+    /// and exit.</summary>
+    private async Task DownloadAndApplyUpdateAsync(ReleaseInfo release, bool interactive)
+    {
+        var exeDir = Path.GetDirectoryName(ExePath)!;
+        if (!UpdateApplier.CanWriteTo(exeDir))
+        {
+            _settingsWindow?.SetUpdateStatus(
+                $"{release.TagName} is available, but {exeDir} isn't writable — get it from the release page.");
+            _tray?.ShowNotice($"apo-volume {release.TagName} is available — click to open the release page.",
+                () => OpenUrl(release.HtmlUrl));
+            return;
+        }
+
+        var staging = Path.Combine(Path.GetTempPath(), "apo-update-" + Guid.NewGuid().ToString("N") + ".exe");
+        try
+        {
+            var sha = await UpdateChecker.FetchSha256Async(release.Sha256Url!);
+            if (sha is null)
+                throw new InvalidOperationException("couldn't verify the release checksum.");
+            await GatedDownload.DownloadAsync(release.ExeUrl!, staging, UpdateApplier.MaxExeBytes,
+                GatedDownload.ExeMagic, sha);
+            UpdateApplier.Apply(ExePath, staging);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _settingsWindow?.SetUpdateStatus($"Update to {release.TagName} failed: {ex.Message}");
+            if (interactive)
+                _tray?.ShowWarning($"Update failed: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            try { File.Delete(staging); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        // The swap is done — the exe path now holds the new build; this process keeps running
+        // from its renamed .old image until it exits.
+        if (_settings.RunAsAdmin)
+        {
+            // Auto-restarting would spring a surprise UAC prompt; the next launch runs the
+            // new exe anyway.
+            _settingsWindow?.SetUpdateStatus($"Updated to {release.TagName} — applies on the next start.");
+            _tray?.ShowInfo($"Update to {release.TagName} will apply the next time apo-volume starts.");
+            return;
+        }
+
+        // Same event-before-mutex teardown order as BeginShutdown: with the show event gone, the
+        // relaunch falls through its probe to the mutex and takes over via the teardown wait.
+        _showEvent?.Dispose();
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ExePath, "--updated")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Relaunch refused: stay running on the old image; the swap itself already
+            // succeeded, so any later start runs the new build.
+            _tray?.ShowInfo($"Updated to {release.TagName} — restart apo-volume to finish.");
+            return;
+        }
+        Shutdown();
+    }
+
+    private static void OpenUrl(string url)
+    {
+        if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+        }
     }
 
     private bool SystemModeActive => _settings.VolumeMode == VolumeModes.System;
