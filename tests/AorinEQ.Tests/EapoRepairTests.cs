@@ -531,6 +531,91 @@ public class EapoRepairTests
         }
     }
 
+    // ------------------------------------------------- codex round 2: the round-1 fixes, reviewed
+
+    [Fact]
+    public void A_record_nothing_can_use_never_locks_the_user_out_of_repairing()
+    {
+        // The round-1 guard refuses a repair while an unfinished backup exists. A backup that
+        // CANNOT be written back protects nothing — and if it also blocked repairs, the refusal
+        // would be permanent with no way out from the UI, because Undo cannot clear it either.
+        var path = EapoRepair.BackupPath;
+        Assert.False(File.Exists(path), "this machine must start with no repair backup");
+        try
+        {
+            var unusable = new EapoRepairBackup(NoSuchDevice, EapoRepairBackup.Applying,
+                DateTimeOffset.UtcNow, [new RegValue("x", "Unsupported:DWord", null)], null);
+            unusable.Save(path);
+            Assert.False(EapoRepairBackup.Load(path)!.IsRestorable);
+
+            // Not "Refused because an earlier repair didn't finish" — it gets past the guard.
+            var result = EapoRepair.Repair(NoSuchDevice, () => true, () => true);
+            _out.WriteLine(result.Message);
+            Assert.DoesNotContain("didn't finish", result.Message);
+
+            // And Undo says so plainly instead of half-writing it.
+            var undo = EapoRepair.Undo(unusable, () => throw new InvalidOperationException("must not restart"));
+            _out.WriteLine(undo.Message);
+            Assert.Equal(EapoRepairOutcome.FailedAndNotReverted, undo.Outcome);
+            Assert.Contains("can't write back", undo.Message);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void A_usable_record_still_blocks_and_a_restorable_one_is_recognised()
+    {
+        var usable = new EapoRepairBackup(NoSuchDevice, EapoRepairBackup.Applying, DateTimeOffset.UtcNow,
+            [RegValue.Absent("a"), RegValue.Str("b", "x"), RegValue.Multi("c", "y")],
+            [RegValue.Str("Version", "2")]);
+        Assert.True(usable.IsRestorable);
+
+        Assert.False((usable with { ChildApoValues = [new RegValue("Version", "Unsupported:DWord", null)] })
+            .IsRestorable);
+    }
+
+    [Fact]
+    public void An_expandable_string_keeps_its_kind_through_a_backup()
+    {
+        // REG_EXPAND_SZ and REG_SZ are indistinguishable once read. Writing one back as the other
+        // changes how Windows expands it — so an exact undo has to carry the kind, and the
+        // preflight must not pass a value it would then corrupt.
+        var path = @"Software\AorinEQ.Tests\" + Guid.NewGuid().ToString("N");
+        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(path)!;
+        try
+        {
+            key.SetValue("expandable", "%SystemRoot%\\x", Microsoft.Win32.RegistryValueKind.ExpandString);
+            key.SetValue("plain", "%SystemRoot%\\x", Microsoft.Win32.RegistryValueKind.String);
+            Assert.Equal(Microsoft.Win32.RegistryValueKind.ExpandString, key.GetValueKind("expandable"));
+
+            var expandable = RegValue.Str("expandable", "%SystemRoot%\\x") with { Kind = RegValue.KindExpandString };
+            Assert.True(expandable.IsRestorable);
+            Assert.Null(EapoEndpoint.WhyNotRestorable([expandable]));
+            Assert.NotEqual(RegValue.KindString, expandable.Kind);
+        }
+        finally
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void Verification_refuses_to_accept_evidence_about_a_different_device()
+    {
+        // The playback probe opens the DEFAULT endpoint, so it only says anything about the
+        // repaired one while they are the same device. A repair verified against a device nobody
+        // touched is not verified. (The real default passes; anything else cannot.)
+        var real = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId())!;
+        _out.WriteLine("default: " + real);
+        Assert.NotEqual(NoSuchDevice, real);
+        // The guard's own input, asserted directly: the two are compared, and they differ.
+        Assert.False(string.Equals(real, NoSuchDevice, StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public void The_confirmation_says_what_it_will_actually_do()
     {

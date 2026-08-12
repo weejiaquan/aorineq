@@ -25,6 +25,15 @@ public sealed record EapoRepairBackup(
 
     public bool IsInterrupted => Stage == Applying;
 
+    /// <summary>Whether this record could actually be written back. A record that cannot is not an
+    /// undo, and — crucially — must not be allowed to BLOCK anything either: refusing every future
+    /// repair to protect a record nothing can use would lock the user out permanently. Shipped
+    /// code never writes such a record (the same rule gates the capture), so this covers a file
+    /// that was corrupted, hand-edited, or written by something else.</summary>
+    public bool IsRestorable =>
+        EapoEndpoint.WhyNotRestorable(FxValues) is null
+        && (ChildApoValues is null || EapoEndpoint.WhyNotRestorable(ChildApoValues) is null);
+
     public void Save(string path)
     {
         var dir = Path.GetDirectoryName(path);
@@ -225,7 +234,12 @@ public static class EapoRepair
         // only description of a device nothing has checked since. Refuse rather than overwrite;
         // the only case that is safe to replace is a completed repair of this same device, whose
         // captured "before" state is the same one being captured again.
-        if (EapoRepairBackup.Load(BackupPath) is { } existing
+        //
+        // A record that CANNOT be written back is deliberately not a blocker: it protects nothing,
+        // and treating it as one would refuse every future repair with no way out from the UI. The
+        // fresh capture that replaces it is a usable record of the same machine, which is strictly
+        // better than an unusable one.
+        if (EapoRepairBackup.Load(BackupPath) is { IsRestorable: true } existing
             && (existing.IsInterrupted
                 || !string.Equals(existing.EndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
         {
@@ -313,6 +327,15 @@ public static class EapoRepair
     /// itself is a no-op.</summary>
     public static EapoRepairResult Undo(EapoRepairBackup backup, Func<bool> restartAudio)
     {
+        // Checked BEFORE the first write, not discovered halfway through it: a restore that throws
+        // partway leaves the endpoint in a third state that is neither where it was nor where the
+        // repair put it.
+        if (!backup.IsRestorable)
+        {
+            return new(EapoRepairOutcome.FailedAndNotReverted,
+                "AorinEQ's record of your original settings has values it can't write back, so it won't "
+                + "half-restore them. Equalizer APO's own Configurator can reset this device.");
+        }
         try
         {
             RestoreFrom(backup);

@@ -12,6 +12,10 @@ namespace AorinEQ.Core;
 public sealed record RegValue(string Name, string Kind, string[]? Data)
 {
     public const string KindString = "String";
+    /// <summary>REG_EXPAND_SZ. Kept DISTINCT from <see cref="KindString"/>: the two look identical
+    /// once read, and writing one back as the other changes how Windows expands it. An exact undo
+    /// has to put back the kind as well as the bytes.</summary>
+    public const string KindExpandString = "ExpandString";
     public const string KindMultiString = "MultiString";
     /// <summary>The value did not exist. Restoring it means DELETING whatever is there now.</summary>
     public const string KindAbsent = "Absent";
@@ -22,7 +26,7 @@ public sealed record RegValue(string Name, string Kind, string[]? Data)
 
     /// <summary>Whether this build can write this value back. A backup is only worth taking if
     /// every value in it can be restored, so anything else must stop a repair before it starts.</summary>
-    public bool IsRestorable => Kind is KindAbsent or KindString or KindMultiString;
+    public bool IsRestorable => Kind is KindAbsent or KindString or KindExpandString or KindMultiString;
 
     public string? Single => Kind == KindString && Data is { Length: 1 } ? Data[0] : null;
 }
@@ -155,8 +159,9 @@ public static class EapoEndpoint
         var data = key.GetValue(name);
         return kind switch
         {
-            RegistryValueKind.String or RegistryValueKind.ExpandString when data is string s =>
-                new RegValue(name, RegValue.KindString, [s]),
+            RegistryValueKind.String when data is string s => new RegValue(name, RegValue.KindString, [s]),
+            RegistryValueKind.ExpandString when data is string s =>
+                new RegValue(name, RegValue.KindExpandString, [s]),
             RegistryValueKind.MultiString when data is string[] m =>
                 new RegValue(name, RegValue.KindMultiString, m),
             // Anything else is recorded honestly as something this build cannot write back, which
@@ -375,6 +380,9 @@ public static class EapoEndpoint
                     break;
                 case RegValue.KindString:
                     key.SetValue(value.Name, value.Data![0], RegistryValueKind.String);
+                    break;
+                case RegValue.KindExpandString:
+                    key.SetValue(value.Name, value.Data![0], RegistryValueKind.ExpandString);
                     break;
                 case RegValue.KindMultiString:
                     key.SetValue(value.Name, value.Data!, RegistryValueKind.MultiString);
