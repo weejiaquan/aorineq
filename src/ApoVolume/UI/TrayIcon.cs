@@ -17,7 +17,7 @@ namespace ApoVolume.UI;
 public sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
-    private readonly TrayIconRenderer _renderer = new();
+    private readonly TrayIconRenderer _renderer;
     // Windows raises UserPreferenceChanged/DisplaySettingsChanged on its own thread, while both
     // NotifyIcon and the renderer are affine to the thread that built them.
     private readonly Dispatcher _dispatcher = System.Windows.Application.Current.Dispatcher;
@@ -41,42 +41,61 @@ public sealed class TrayIcon : IDisposable
     /// submenu here so it always shows the current preset files and active selection.</summary>
     public event Action? MenuOpening;
 
+    /// <summary>Construction takes native resources — the renderer's first icon handle, then the
+    /// shell's notification-area entry — and creating the NotifyIcon can fail (Win32Exception if
+    /// the shell isn't accepting icons). Everything is therefore unwound on the way out, so a
+    /// tray that fails to appear doesn't strand an icon handle behind it.</summary>
     public TrayIcon()
     {
-        _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
-        _eqPresetMenu = new ToolStripMenuItem("EQ preset");
-
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripMenuItem("Open volume slider", null, (_, _) => OpenRequested?.Invoke()));
-        menu.Items.Add(_muteItem);
-        menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null, (_, _) => EqualizerRequested?.Invoke()));
-        menu.Items.Add(_eqPresetMenu);
-        menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => SettingsRequested?.Invoke()));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
-        menu.Opening += (_, _) => MenuOpening?.Invoke();
-
-        _icon = new NotifyIcon
+        _renderer = new TrayIconRenderer();
+        NotifyIcon? icon = null;
+        ContextMenuStrip? menu = null;
+        try
         {
-            Icon = CurrentIcon(),
-            Text = "ApoVolume",
-            Visible = true,
-            ContextMenuStrip = menu,
-        };
-        _icon.MouseClick += (_, e) =>
-        {
-            if (e.Button == MouseButtons.Left) OpenRequested?.Invoke();
-        };
-        // One handler for the lifetime of the icon; each balloon sets (or clears) the action so
-        // a click on a stale balloon can never fire a newer balloon's action.
-        _icon.BalloonTipClicked += (_, _) => _balloonClickAction?.Invoke();
-        _icon.BalloonTipClosed += (_, _) => _balloonClickAction = null;
+            _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
+            _eqPresetMenu = new ToolStripMenuItem("EQ preset");
 
-        // The glyph is theme- and size-dependent, and both can change while the app sits idle:
-        // switching Windows to dark mode, or moving the taskbar to a monitor at another DPI. Both
-        // are re-read by CurrentIcon, so both handlers just re-apply.
-        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
-        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            menu = new ContextMenuStrip();
+            menu.Items.Add(new ToolStripMenuItem("Open volume slider", null, (_, _) => OpenRequested?.Invoke()));
+            menu.Items.Add(_muteItem);
+            menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null, (_, _) => EqualizerRequested?.Invoke()));
+            menu.Items.Add(_eqPresetMenu);
+            menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => SettingsRequested?.Invoke()));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
+            menu.Opening += (_, _) => MenuOpening?.Invoke();
+
+            icon = new NotifyIcon
+            {
+                Icon = CurrentIcon(),
+                Text = "ApoVolume",
+                Visible = true,
+                ContextMenuStrip = menu,
+            };
+            icon.MouseClick += (_, e) =>
+            {
+                if (e.Button == MouseButtons.Left) OpenRequested?.Invoke();
+            };
+            // One handler for the lifetime of the icon; each balloon sets (or clears) the action so
+            // a click on a stale balloon can never fire a newer balloon's action.
+            icon.BalloonTipClicked += (_, _) => _balloonClickAction?.Invoke();
+            icon.BalloonTipClosed += (_, _) => _balloonClickAction = null;
+            _icon = icon;
+
+            // The glyph is theme- and size-dependent, and both can change while the app sits idle:
+            // switching Windows to dark mode, or moving the taskbar to a monitor at another DPI.
+            // Both are re-read by CurrentIcon, so both handlers just re-apply. Subscribed last, so
+            // a callback can never land on a half-built tray.
+            SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        }
+        catch
+        {
+            icon?.Dispose();
+            menu?.Dispose();
+            _renderer.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Volume state is visible three ways: the glyph itself (arc count, or a cross while
