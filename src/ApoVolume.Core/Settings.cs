@@ -17,7 +17,8 @@ public sealed record Settings(
     string OsdStyle = "dark-pill", string SkinName = "",
     string OsdAnchor = "bottom-center", int OsdOffsetX = 0, int OsdOffsetY = 0,
     double HideDelaySeconds = 1.5, bool AnimationEnabled = true, int AnimationMs = 150,
-    int StepPercent = 2, string VolumeMode = VolumeModes.Eapo)
+    int StepPercent = 2, string VolumeMode = VolumeModes.Eapo,
+    bool ProtocolLinksEnabled = true, bool AutoUpdate = true)
 {
     public static Settings Default { get; } = new(50, false);
 
