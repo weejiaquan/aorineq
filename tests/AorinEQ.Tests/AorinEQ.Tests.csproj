@@ -38,6 +38,10 @@
          checks the shipped asset rather than a copy that could drift. -->
     <None Include="..\..\src\AorinEQ\AorinEQ.ico" Link="AorinEQ.ico"
           CopyToOutputDirectory="PreserveNewest" />
+    <!-- Likewise the real Inno Setup script, so InstallerScriptTests pins the shipped installer
+         rather than a copy of it. Nothing else in the build reads this file. -->
+    <None Include="..\..\installer\AorinEQ.iss" Link="AorinEQ.iss"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

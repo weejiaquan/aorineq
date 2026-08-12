@@ -20,10 +20,25 @@ same symptom — per-app volume works, master volume does nothing — should ben
 
 ## Download
 
-Grab `AorinEQ.exe` from the [latest release](../../releases/latest). Self-contained
-single file — no .NET install required.
+From the [latest release](../../releases/latest), either:
+
+- **`AorinEQ-Setup.exe`** — the installer. Installs for the current user only, into
+  `%LOCALAPPDATA%\Programs\AorinEQ`, so there is **no UAC prompt** and it appears in the Start
+  Menu and in Apps & Features like any other app. It does *not* add itself to Windows startup —
+  that stays a Settings toggle (see below) — and it does not touch your Equalizer APO config.
+- **`AorinEQ.exe`** — the portable single file. Run it from anywhere; nothing is installed.
+
+Both are the same self-contained build: no .NET install required. Each ships with a
+`.sha256` sidecar you can check with `Get-FileHash`. In-app updates work either way, because
+both locations are writable without elevation.
 
 Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in `publish\`).
+That builds all four release files; the installer step needs
+[Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install --id JRSoftware.InnoSetup`).
+
+Uninstalling asks whether to keep `%APPDATA%\AorinEQ` — your skins, EQ presets and settings —
+and keeps it unless you say otherwise.
 
 ## Requirements
 
@@ -34,7 +49,8 @@ Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in
 
 ## Install
 
-1. Run `AorinEQ.exe`. On first run it creates `aorineq.txt` in the APO config folder
+1. Run `AorinEQ.exe` (or the Start Menu entry, if you used the installer). On first run it
+   creates `aorineq.txt` in the APO config folder
    and adds `Include: aorineq.txt` to `config.txt` (elevating once only if needed).
 2. Set your DAC's physical volume to your maximum comfortable loudness — once. From now on
    the keyboard controls loudness digitally below that ceiling.

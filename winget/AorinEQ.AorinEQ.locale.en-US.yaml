@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+
+PackageIdentifier: AorinEQ.AorinEQ
+PackageVersion: 3.3.0
+PackageLocale: en-US
+Publisher: AorinEQ
+PublisherUrl: https://github.com/weejiaquan/aorineq
+PublisherSupportUrl: https://github.com/weejiaquan/aorineq/issues
+PackageName: AorinEQ
+PackageUrl: https://github.com/weejiaquan/aorineq
+License: MIT
+LicenseUrl: https://github.com/weejiaquan/aorineq/blob/master/LICENSE
+Copyright: MIT License
+ShortDescription: Volume keys, an on-screen display and a parametric equalizer for USB DACs that ignore Windows volume.
+Description: |-
+  AorinEQ is a Windows tray app for USB DACs that advertise hardware volume but ignore the host's
+  volume commands, leaving the Windows slider dead. It intercepts the volume keys and applies a
+  Windows-style 0-100% volume as digital attenuation through Equalizer APO, before audio reaches
+  the DAC, so the keys, the on-screen flyout and the tray slider all work again.
+  It also carries a parametric equalizer with an AutoEq importer, skinnable on-screen displays with
+  a built-in designer, and per-device volume and EQ.
+  Equalizer APO must be installed and enabled on the playback device; AorinEQ guides that setup on
+  first run. It never adds itself to Windows startup on its own - that is a toggle in its settings.
+Moniker: aorineq
+Tags:
+  - audio
+  - dac
+  - equalizer
+  - equalizer-apo
+  - eq
+  - tray
+  - volume
+ReleaseNotesUrl: https://github.com/weejiaquan/aorineq/releases/tag/v3.3.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
