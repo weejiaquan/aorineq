@@ -42,6 +42,21 @@
          rather than a copy of it. Nothing else in the build reads this file. -->
     <None Include="..\..\installer\AorinEQ.iss" Link="AorinEQ.iss"
           CopyToOutputDirectory="PreserveNewest" />
+    <!-- And the real build files, so VersionSingleSourceTests reads the version the build actually
+         imports and the project bodies that must not override it. MSBuild only ever looks for
+         Directory.Build.props by walking UP from a project directory, so the copy that lands in
+         bin\ is inert. -->
+    <None Include="..\..\Directory.Build.props" Link="Directory.Build.props"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\AorinEQ\AorinEQ.csproj" Link="AorinEQ.csproj"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\AorinEQ.Core\AorinEQ.Core.csproj" Link="AorinEQ.Core.csproj"
+          CopyToOutputDirectory="PreserveNewest" />
+    <!-- The SDK's default None glob excludes the project file itself, so this is an Include like
+         the rest and not a duplicate item. -->
+    <None Include="AorinEQ.Tests.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\tools\AppIconGen\AppIconGen.csproj" Link="AppIconGen.csproj"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

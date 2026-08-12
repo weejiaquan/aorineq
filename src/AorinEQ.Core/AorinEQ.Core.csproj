@@ -3,7 +3,9 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>3.2.0</Version>
+    <!-- <Version> is deliberately absent: it comes from Directory.Build.props, the one place it
+         is written. This project is where the drift happened - it said 3.2.0 while the app said
+         3.3.0. See the comment there before adding one back. -->
   </PropertyGroup>
   <ItemGroup>
     <!-- System.Drawing, for the runtime-drawn tray glyph (TrayGlyph/TrayIconRenderer). Taken from

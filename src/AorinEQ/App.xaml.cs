@@ -1005,7 +1005,7 @@ public partial class App : System.Windows.Application
         if (choice == SkinInstallChoice.Cancel)
             return;
 
-        var staging = Path.Combine(Path.GetTempPath(), "apo-skin-" + Guid.NewGuid().ToString("N") + ".zip");
+        var staging = Path.Combine(Path.GetTempPath(), "aorineq-skin-" + Guid.NewGuid().ToString("N") + ".zip");
         try
         {
             await GatedDownload.DownloadAsync(link.Url!, staging, SkinArchive.MaxZipBytes,
@@ -1103,7 +1103,7 @@ public partial class App : System.Windows.Application
     private static async Task<EqPreset> DownloadEqPresetAsync(ProtocolLink link)
     {
         var staging = Path.Combine(Path.GetTempPath(),
-            "apo-preset-" + Guid.NewGuid().ToString("N") + ".txt");
+            "aorineq-preset-" + Guid.NewGuid().ToString("N") + ".txt");
         try
         {
             await GatedDownload.DownloadAsync(link.Url!, staging, MaxPresetTextBytes,

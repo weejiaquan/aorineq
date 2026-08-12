@@ -9,7 +9,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>AorinEQ</AssemblyName>
     <ApplicationIcon>AorinEQ.ico</ApplicationIcon>
-    <Version>3.3.0</Version>
+    <!-- <Version> is deliberately absent: it comes from Directory.Build.props, the one place it
+         is written. See the comment there before adding one back. -->
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AorinEQ.Core\AorinEQ.Core.csproj" />
