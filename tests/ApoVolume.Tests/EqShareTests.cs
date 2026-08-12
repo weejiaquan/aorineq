@@ -199,6 +199,30 @@ public class EqShareTests
         Assert.Equal(EqPreset.MaxQ, band.Q);
     }
 
+    /// <summary>The payload format is a published contract (README → "The `data` payload
+    /// format"), so third-party sites encode against it. This pins the worked example in the
+    /// docs to the real encoder and decoder, in both directions — a format change that forgets
+    /// the documentation fails here.</summary>
+    [Fact]
+    public void The_documented_example_payload_is_exactly_what_the_codec_produces()
+    {
+        const string plain = "v1|-6.1|LSC,105,-1.4,0.7;PK,3200,2.6,1.8";
+        const string encoded = "djF8LTYuMXxMU0MsMTA1LC0xLjQsMC43O1BLLDMyMDAsMi42LDEuOA";
+        var documented = new EqPreset("HD650", -6.1, new[]
+        {
+            new EqBand(EqBandType.LowShelf, 105, -1.4, 0.7),
+            new EqBand(EqBandType.Peak, 3200, 2.6, 1.8),
+        });
+
+        Assert.Equal(plain, Encoding.UTF8.GetString(FromBase64Url(encoded)));
+        Assert.Equal(encoded, EqShare.Encode(documented));
+
+        Assert.True(EqShare.TryDecode(encoded, "HD650", out var decoded, out var error), error);
+        Assert.Equal(documented.Name, decoded.Name);
+        Assert.Equal(documented.PreampDb, decoded.PreampDb);
+        Assert.Equal(documented.Bands, decoded.Bands); // record equality would compare the list refs
+    }
+
     [Fact]
     public void Decoded_preset_takes_the_name_the_link_carries_not_one_from_the_payload()
     {
