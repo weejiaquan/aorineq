@@ -31,7 +31,7 @@ namespace AorinEQ.UI;
 /// post-EQ meters/spectrum from WASAPI loopback. The editor owns NO durable state — every
 /// change is pushed immediately through <see cref="ScopeChanged"/> and read back from the
 /// app's settings on scope switches, so the config file always reflects what's on screen.</summary>
-public partial class EqEditorWindow : Window
+public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
 {
     // Frequency axis, curve resolution and dB scales live in EqCurveRenderer, which the
     // read-only previews (the apply-preset dialog, Simple mode) draw with too.
@@ -77,12 +77,13 @@ public partial class EqEditorWindow : Window
     private bool _syncing;          // programmatic UI updates must not re-enter handlers
     private int _draggingBand = -1;
 
+    /// <summary>Colours for every custom-drawn surface in this window. Re-resolved whenever
+    /// Windows switches theme — the plot, meters and spectrum are drawn by hand, so nothing in the
+    /// Fluent dictionaries can retheme them for us. See <see cref="EqPalette"/>.</summary>
+    private EqPalette _palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
+
     // Plot elements (persistent between redraws where possible).
-    private readonly Polygon _spectrumPolygon = new()
-    {
-        Fill = new SolidColorBrush(Color.FromArgb(48, 120, 200, 255)),
-        IsHitTestVisible = false,
-    };
+    private readonly Polygon _spectrumPolygon = new() { IsHitTestVisible = false };
     private readonly List<UIElement> _gridElements = new();
     private readonly List<UIElement> _curveElements = new();
     private readonly List<Ellipse> _nodes = new();
@@ -123,6 +124,14 @@ public partial class EqEditorWindow : Window
         _getActiveDeviceId = getActiveDeviceId;
         _getVolumeDbFor = getVolumeDbFor;
         InitializeComponent();
+
+        ApplyPalette();
+        // The window chrome is rethemed by the Fluent dictionaries; the hand-drawn surfaces are
+        // not, so they re-resolve here. WPF-UI raises this on the UI thread, so it can touch the
+        // visual tree directly, and it is unsubscribed on Closed — the editor is created and
+        // destroyed repeatedly, and a static event would otherwise keep every one of them alive.
+        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += OnAppThemeChanged;
+        Closed += (_, _) => Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnAppThemeChanged;
 
         BandTypeCombo.ItemsSource = Enum.GetValues<EqBandType>();
         _capture.SamplesAvailable += OnSamples;
@@ -618,7 +627,7 @@ public partial class EqEditorWindow : Window
         var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 3) };
         var indexLabel = new TextBlock
         {
-            Foreground = new SolidColorBrush(Color.FromRgb(0x99, 0x99, 0xA5)),
+            Foreground = Brush(_palette.TextDim),
             FontSize = 10, VerticalAlignment = VerticalAlignment.Center,
         };
         DockPanel.SetDock(indexLabel, Dock.Left);
@@ -653,7 +662,7 @@ public partial class EqEditorWindow : Window
             BorderBrush = System.Windows.Media.Brushes.Transparent,
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(3),
-            Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x28)),
+            Background = Brush(_palette.PanelBackground),
             Child = stack,
             Tag = index,
         };
@@ -663,10 +672,64 @@ public partial class EqEditorWindow : Window
         return frame;
     }
 
-    private static TextBlock StripLabel(string text) => new()
+    /// <summary>Windows switched light/dark: re-resolve the hand-drawn palette and repaint the
+    /// surfaces that use it.</summary>
+    private void OnAppThemeChanged(Wpf.Ui.Appearance.ApplicationTheme theme, Color accent)
+    {
+        ApplyPalette();
+        RestyleStripColumns();
+        RedrawAll();
+    }
+
+    /// <summary>Resolves the palette for the current theme and publishes it as this window's brush
+    /// resources, which every DynamicResource in its XAML then picks up.</summary>
+    private void ApplyPalette()
+    {
+        _palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
+        Resources["EqPlotBrush"] = Brush(_palette.PlotBackground);
+        Resources["EqPanelBrush"] = Brush(_palette.PanelBackground);
+        Resources["EqTextBrush"] = Brush(_palette.Text);
+        Resources["EqTextDimBrush"] = Brush(_palette.TextDim);
+        Resources["EqCurveBrush"] = Brush(_palette.Curve);
+        Resources["EqNodeSelectedBrush"] = Brush(_palette.NodeSelected);
+        Resources["EqMeterTrackBrush"] = Brush(_palette.MeterTrack);
+        Resources["EqMeterRmsBrush"] = Brush(_palette.MeterRms);
+        Resources["EqMeterPeakBrush"] = Brush(_palette.MeterPeak);
+        Resources["EqClipIdleBrush"] = Brush(_palette.ClipIdle);
+        Resources["EqClipIdleTextBrush"] = Brush(_palette.ClipIdleText);
+        _spectrumPolygon.Fill = Brush(_palette.Spectrum);
+    }
+
+    /// <summary>The band strip's columns are built in code, so their colours do not come from the
+    /// XAML resources and have to be re-applied by hand after a theme change. The selected
+    /// column's border is owned by SyncStripFromModel, which runs right after.</summary>
+    private void RestyleStripColumns()
+    {
+        foreach (var column in _columns)
+        {
+            column.Index.Foreground = Brush(_palette.TextDim);
+            column.Frame.Background = Brush(_palette.PanelBackground);
+        }
+        // Repaints the selected column's border, which is owned by the value sync rather than by
+        // the loop above. Recolouring in place rather than rebuilding the strip is deliberate: a
+        // rebuild retires the typable boxes, and a theme change must not discard what the user is
+        // halfway through typing into one.
+        RefreshBandStripValues();
+    }
+
+    /// <summary>A frozen WPF brush from a Core palette colour. Frozen because these are handed to
+    /// elements redrawn at 30 fps and are never changed in place.</summary>
+    private static SolidColorBrush Brush(System.Drawing.Color c)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(c.A, c.R, c.G, c.B));
+        brush.Freeze();
+        return brush;
+    }
+
+    private TextBlock StripLabel(string text) => new()
     {
         Text = text, FontSize = 9.5,
-        Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x85)),
+        Foreground = Brush(_palette.TextDim),
         Margin = new Thickness(0, 3, 0, 1),
     };
 
@@ -769,7 +832,7 @@ public partial class EqEditorWindow : Window
                 column.Q.Text = cell.Q;
             column.Gain.IsEnabled = cell.GainEnabled; // gainless types have no Gain token at all
             column.Frame.BorderBrush = cell.Selected
-                ? new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x5A))
+                ? Brush(_palette.NodeSelected)
                 : System.Windows.Media.Brushes.Transparent;
         }
         _syncing = false;
@@ -1056,9 +1119,9 @@ public partial class EqEditorWindow : Window
             System.Windows.Controls.Panel.SetZIndex(_spectrumPolygon, 1);
         }
 
-        var lineBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0x2E, 0x38));
-        var zeroBrush = new SolidColorBrush(Color.FromRgb(0x4A, 0x4A, 0x58));
-        var textBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x78));
+        var lineBrush = Brush(_palette.Grid);
+        var zeroBrush = Brush(_palette.ZeroLine);
+        var textBrush = Brush(_palette.AxisText);
 
         foreach (var f in GridFrequencies)
         {
@@ -1119,9 +1182,7 @@ public partial class EqEditorWindow : Window
         {
             var polyline = new Polyline
             {
-                Stroke = new SolidColorBrush(i == _selectedBand
-                    ? Color.FromArgb(150, 255, 200, 90)
-                    : Color.FromArgb(80, 140, 170, 255)),
+                Stroke = Brush(i == _selectedBand ? _palette.BandSelectedFill : _palette.BandFill),
                 StrokeThickness = 1,
                 IsHitTestVisible = false,
                 Opacity = bypassOpacity,
@@ -1137,7 +1198,7 @@ public partial class EqEditorWindow : Window
         {
             var summed = new Polyline
             {
-                Stroke = new SolidColorBrush(Color.FromRgb(0x6F, 0xA8, 0xFF)),
+                Stroke = Brush(_palette.Curve),
                 StrokeThickness = 2.4,
                 IsHitTestVisible = false,
                 Opacity = bypassOpacity,
@@ -1156,10 +1217,8 @@ public partial class EqEditorWindow : Window
             var node = new Ellipse
             {
                 Width = 14, Height = 14,
-                Fill = new SolidColorBrush(i == _selectedBand
-                    ? Color.FromRgb(0xFF, 0xC8, 0x5A)
-                    : Color.FromRgb(0x6F, 0xA8, 0xFF)),
-                Stroke = Brushes.White,
+                Fill = Brush(i == _selectedBand ? _palette.NodeSelected : _palette.Node),
+                Stroke = Brush(_palette.NodeStroke),
                 StrokeThickness = 1.2,
                 Tag = i,
                 Cursor = Cursors.SizeAll,
@@ -1357,8 +1416,8 @@ public partial class EqEditorWindow : Window
             ? "silent"
             : $"peak {Math.Max(_shownPeakL, _shownPeakR):0.0} dBFS";
 
-        ClipIndicator.Background = clipLatched ? Brushes.Firebrick : new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33));
-        ClipIndicator.Foreground = clipLatched ? Brushes.White : new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77));
+        ClipIndicator.Background = Brush(clipLatched ? _palette.ClipLatched : _palette.ClipIdle);
+        ClipIndicator.Foreground = Brush(clipLatched ? _palette.ClipLatchedText : _palette.ClipIdleText);
         ClipCountText.Text = clipCount == 0 ? "" : $"clipped {clipCount}×";
 
         UpdateSpectrum(snapshot);

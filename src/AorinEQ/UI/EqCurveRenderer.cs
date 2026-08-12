@@ -67,7 +67,12 @@ public static class EqCurveRenderer
     }
 
     /// <summary>Draws a read-only preview into <paramref name="canvas"/>: decade grid lines, the
-    /// 0 dB line, the summed curve and a corner scale label. Replaces whatever was there.</summary>
+    /// 0 dB line, the summed curve and a corner scale label. Replaces whatever was there.
+    ///
+    /// Colours come from the same <see cref="EqPalette"/> the editor draws with, resolved for the
+    /// current Windows theme — a preview of a preset must look like the editor that will show it,
+    /// and it must be legible on a light desktop too. The canvas background is painted here rather
+    /// than left to the caller, so the plot surface and the marks on it can never disagree.</summary>
     public static void DrawPreview(Canvas canvas, IReadOnlyList<EqBand> bands, int dbRange)
     {
         canvas.Children.Clear();
@@ -75,9 +80,11 @@ public static class EqCurveRenderer
         if (width < 20 || height < 20)
             return;
 
-        var gridBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0x2E, 0x38));
-        var zeroBrush = new SolidColorBrush(Color.FromRgb(0x4A, 0x4A, 0x58));
-        var textBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x6A, 0x78));
+        var palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
+        canvas.Background = Brush(palette.PlotBackground);
+        var gridBrush = Brush(palette.Grid);
+        var zeroBrush = Brush(palette.ZeroLine);
+        var textBrush = Brush(palette.AxisText);
 
         foreach (var f in new double[] { 100, 1000, 10000 })
         {
@@ -98,7 +105,7 @@ public static class EqCurveRenderer
             canvas.Children.Add(new Polyline
             {
                 Points = Curve(bands, width, height, dbRange),
-                Stroke = new SolidColorBrush(Color.FromRgb(0x6F, 0xA8, 0xFF)),
+                Stroke = Brush(palette.Curve),
                 StrokeThickness = 2,
             });
         }
@@ -112,5 +119,13 @@ public static class EqCurveRenderer
         Canvas.SetLeft(label, 4);
         Canvas.SetTop(label, 2);
         canvas.Children.Add(label);
+    }
+
+    /// <summary>A frozen WPF brush from a Core palette colour.</summary>
+    private static SolidColorBrush Brush(System.Drawing.Color c)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(c.A, c.R, c.G, c.B));
+        brush.Freeze();
+        return brush;
     }
 }
