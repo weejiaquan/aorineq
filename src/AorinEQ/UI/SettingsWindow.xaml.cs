@@ -76,13 +76,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// again immediately, and it is a real mode change, not a display state.</summary>
     public event Action? SwitchToSystemModeRequested;
 
-    /// <summary>Raised by "Repair automatically". App confirms in plain language, then runs the
-    /// elevated helper that writes the endpoint's effect settings.</summary>
-    public event Action? RepairEapoRequested;
-
-    /// <summary>Raised by "Undo repair" — offered for as long as a backup of the user's original
-    /// settings exists.</summary>
-    public event Action? UndoEapoRepairRequested;
 
     /// <summary>The last health reading and the mode it was judged against, kept so the banner can
     /// be re-rendered (mode change, theme change) without asking the machine again — and so the
@@ -288,57 +281,10 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         OpenConfiguratorButton.IsEnabled = EapoDetection.GetConfiguratorPath() is not null;
 
-        // Offered only when it is genuinely available for THIS device, and never when the device
-        // is already being processed — a "repair" that has nothing to repair is a button that
-        // invites a UAC prompt for nothing. The reason it is unavailable becomes the tooltip, so
-        // a disabled button still explains itself.
-        _repairUnavailableReason = health is null || health.ActiveOnDevice
-            ? null
-            : EapoRepair.WhyNotAvailable(health.EndpointGuid);
-        bool canRepair = health is { ActiveOnDevice: false } && _repairUnavailableReason is null;
-        RepairEapoButton.IsEnabled = canRepair;
-        RepairEapoButton.ToolTip = canRepair
-            ? "Switch Equalizer APO back on for the device you're using now."
-            : _repairUnavailableReason;
 
         ApplyEapoBanner();
     }
 
-    /// <summary>Null when the automatic repair is available. Also decides which job the banner's
-    /// first button has.</summary>
-    private string? _repairUnavailableReason;
-
-    /// <summary>Shows or hides "Undo repair". App calls this after every repair attempt and at
-    /// startup: the button exists exactly as long as a backup of the user's original settings
-    /// does.</summary>
-    public void SetEapoUndoAvailable(bool available) =>
-        UndoRepairButton.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
-
-    /// <summary>The one line under the repair buttons: progress while the elevated helper runs,
-    /// then its verdict. Buttons are disabled while it is busy so a second prompt cannot be
-    /// stacked on the first.</summary>
-    public void SetEapoRepairStatus(string text, bool busy)
-    {
-        EapoRepairStatusText.Text = text;
-        EapoRepairStatusText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
-        if (busy)
-        {
-            RepairEapoButton.IsEnabled = false;
-            UndoRepairButton.IsEnabled = false;
-            EapoBannerRepairButton.IsEnabled = false;
-        }
-        else
-        {
-            // Re-enabled from the fresh reading App takes right after this, not from here: what
-            // the buttons should offer depends on the state the helper left behind.
-            UndoRepairButton.IsEnabled = true;
-            EapoBannerRepairButton.IsEnabled = true;
-        }
-    }
-
-    private void OnRepairEapo(object sender, RoutedEventArgs e) => RepairEapoRequested?.Invoke();
-
-    private void OnUndoEapoRepair(object sender, RoutedEventArgs e) => UndoEapoRepairRequested?.Invoke();
 
     private static string YesNo(bool value) => value ? "Yes" : "No";
 
@@ -355,16 +301,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         }
         EapoBannerTitle.Text = EapoHealthCopy.BannerTitle(_health);
         EapoBannerBody.Text = EapoHealthCopy.BannerBody(_health, _volumeMode);
-        // One button, two jobs, and which one it has depends on what is actually possible: when
-        // AorinEQ can switch the device back on itself, that is what the button offers; otherwise
-        // it opens the tool that can (Equalizer APO's Configurator, or the setup guide when there
-        // is no install to configure). It never offers a repair that would then refuse.
-        _bannerOffersRepair = _health is { Installed: true, ActiveOnDevice: false }
-            && _repairUnavailableReason is null;
-        EapoBannerRepairButton.Content = _bannerOffersRepair
-            ? "Repair automatically"
-            : EapoHealthCopy.RepairButtonText(_health);
-        EapoBannerRepairButton.IsEnabled = true;
+        EapoBannerRepairButton.Content = EapoHealthCopy.RepairButtonText(_health);
         EapoSwitchModeButton.Visibility =
             _volumeMode == VolumeModes.System ? Visibility.Collapsed : Visibility.Visible;
         EapoBanner.Visibility = Visibility.Visible;
@@ -381,15 +318,12 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// not then spring an installer wizard on them.</summary>
     private void OnEapoRepair(object sender, RoutedEventArgs e)
     {
-        if (_bannerOffersRepair)
-            RepairEapoRequested?.Invoke();
-        else if (EapoDetection.GetConfiguratorPath() is null)
+        if (EapoDetection.GetConfiguratorPath() is null)
             SetupGuideRequested?.Invoke();
         else
             TryLaunchConfigurator();
     }
 
-    private bool _bannerOffersRepair;
 
     private void OnEapoSwitchMode(object sender, RoutedEventArgs e) => SwitchToSystemModeRequested?.Invoke();
 
