@@ -294,9 +294,14 @@ public sealed class ApoWriter : IDisposable
         {
             if (_disposed)
                 return false;
+            // A pre-v3.0.0 Include line becomes ours IN PLACE first. Appending while it was still
+            // there would leave BOTH registered and EAPO would apply the managed config twice —
+            // which is exactly what a migration interrupted between its file copy and its
+            // config.txt rewrite would otherwise produce on the very next include-guard pass.
+            bool rewrote = RewriteLegacyIncludeOnDisk();
             var lines = File.Exists(ConfigTxtPath) ? File.ReadAllLines(ConfigTxtPath) : Array.Empty<string>();
             if (lines.Any(l => Matches(l, IncludeLine)))
-                return false;
+                return rewrote;
             File.AppendAllText(ConfigTxtPath, Environment.NewLine + IncludeLine + Environment.NewLine);
             return true;
         }
@@ -335,19 +340,12 @@ public sealed class ApoWriter : IDisposable
             }
 
             // 2. Our line, where it stands.
-            if (File.Exists(ConfigTxtPath))
-            {
-                var lines = File.ReadAllLines(ConfigTxtPath);
-                var rewritten = RewriteLegacyInclude(lines);
-                if (!rewritten.SequenceEqual(lines))
-                {
-                    WriteConfigTxtAtomic(rewritten);
-                    changed = true;
-                }
-            }
+            changed |= RewriteLegacyIncludeOnDisk();
 
-            // 3. The stale file, now that nothing includes it.
-            if (File.Exists(legacyPath))
+            // 3. The stale file — but only once config.txt really has stopped naming it. Step 2
+            //    stands down rather than clobber a concurrent external write, and EAPO must never
+            //    be left including a file this deleted.
+            if (File.Exists(legacyPath) && !ConfigTxtIncludesLegacy())
             {
                 File.Delete(legacyPath);
                 changed = true;
@@ -386,21 +384,53 @@ public sealed class ApoWriter : IDisposable
     private static bool Matches(string line, string includeLine) =>
         line.Trim().Equals(includeLine, StringComparison.OrdinalIgnoreCase);
 
+    private bool ConfigTxtIncludesLegacy() =>
+        File.Exists(ConfigTxtPath)
+        && File.ReadAllLines(ConfigTxtPath).Any(l => Matches(l, LegacyIncludeLine));
+
+    /// <summary>Applies <see cref="RewriteLegacyInclude"/> to config.txt on disk, writing only
+    /// when it actually changes something. Callers hold <see cref="_includeLock"/>.</summary>
+    /// <returns>true when config.txt was rewritten.</returns>
+    private bool RewriteLegacyIncludeOnDisk()
+    {
+        if (!File.Exists(ConfigTxtPath))
+            return false;
+        var original = File.ReadAllText(ConfigTxtPath);
+        var lines = original.Split('\n').Select(l => l.TrimEnd('\r')).ToArray();
+        var rewritten = RewriteLegacyInclude(lines);
+        if (rewritten.SequenceEqual(lines))
+            return false;
+        return WriteConfigTxtAtomic(rewritten, original);
+    }
+
     /// <summary>Temp + rename in the same directory, on the same bounded backoff ladder the
     /// volume file's writes use: config.txt draws the same external writers (Peace, EAPO's own
     /// editor) and so the same transient locks, and EAPO's watcher must never read a partial
-    /// file. Rethrows the last failure once the budget is spent.</summary>
-    private void WriteConfigTxtAtomic(IReadOnlyList<string> lines)
+    /// file. Rethrows the last failure once the budget is spent.
+    ///
+    /// Unlike the volume file, config.txt is NOT ours, so this is a read-modify-write and a
+    /// concurrent save by another tool could be clobbered by our stale snapshot. The file is
+    /// therefore re-read immediately before the rename and the write abandoned if it changed
+    /// underneath us — narrowing the exposure to the instant between that check and the rename,
+    /// against a full rewrite that had no check at all. Losing that race costs nothing: the
+    /// include guard fires on the very write that beat us and tries again.</summary>
+    /// <returns>true when the rewrite landed; false when it was abandoned as stale.</returns>
+    private bool WriteConfigTxtAtomic(IReadOnlyList<string> lines, string expectedContent)
     {
         var temp = ConfigTxtPath + ".tmp";
-        var content = string.Join(Environment.NewLine, lines) + Environment.NewLine;
+        var content = string.Join(Environment.NewLine, lines);
         for (int attempt = 0; ; attempt++)
         {
             try
             {
                 File.WriteAllText(temp, content);
+                if (File.ReadAllText(ConfigTxtPath) != expectedContent)
+                {
+                    TryDeleteTemp(temp);
+                    return false; // someone else wrote it; our snapshot is stale, so drop it
+                }
                 File.Move(temp, ConfigTxtPath, overwrite: true);
-                return;
+                return true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

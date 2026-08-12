@@ -246,6 +246,87 @@ public class ApoIncludeMigrationTests : IDisposable
     }
 
     [Fact]
+    public void EnsureInclude_replaces_a_legacy_line_rather_than_adding_a_second_include()
+    {
+        // The interrupted-migration window: the file copy landed, the config.txt rewrite didn't,
+        // and startup carries on to EnsureInclude. A plain append here would leave BOTH lines and
+        // Equalizer APO would apply the managed config twice.
+        File.WriteAllText(LegacyFile, "Preamp: -20.2 dB\r\n");
+        File.WriteAllText(CurrentFile, "Preamp: -20.2 dB\r\n");
+        WriteConfigTxt("Include: peace.txt", "Include: apo-volume.txt");
+
+        using var w = new ApoWriter(_dir);
+        Assert.True(w.EnsureInclude());
+
+        _out.WriteLine("config.txt after EnsureInclude:\n" + File.ReadAllText(ConfigTxt));
+        Assert.Equal(new[] { "Include: peace.txt", ApoWriter.IncludeLine }, File.ReadAllLines(ConfigTxt));
+        Assert.False(w.EnsureInclude()); // and it settles: nothing left to do
+    }
+
+    [Fact]
+    public void The_config_txt_rewrite_stands_down_when_another_writer_changed_the_file_first()
+    {
+        // config.txt is not ours, so the rewrite is a read-modify-write: if Peace or EAPO's editor
+        // saves between our read and our replace, our stale snapshot must NOT overwrite it.
+        // Ordering here is forced, not hoped for — holding config.txt makes the rename fail, which
+        // puts the write on its retry ladder, and the competing content lands inside that window.
+        File.WriteAllText(LegacyFile, "Preamp: 0.0 dB\r\n");
+        WriteConfigTxt("Include: apo-volume.txt");
+        const string external = "# Peace rewrote this\r\nInclude: peace.txt\r\n";
+
+        using var w = new ApoWriter(_dir);
+        var failure = RunMigrationAgainstAnExternalWrite(w, external);
+
+        // If the ladder had run out instead, MigrateLegacyInclude would have thrown — this test
+        // fails loudly rather than passing without exercising the stand-down.
+        Assert.Null(failure);
+        _out.WriteLine("config.txt after the race:\n" + File.ReadAllText(ConfigTxt));
+        Assert.Equal(external, File.ReadAllText(ConfigTxt)); // theirs survived, byte for byte
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
+
+    /// <summary>Runs MigrateLegacyInclude while an external writer replaces config.txt underneath
+    /// it, with the ordering FORCED rather than hoped for: the open handle shares read and write
+    /// (so both our snapshot read and the external write go through) but not DELETE, so the
+    /// replacing rename is refused and the write goes onto its retry ladder. The external content
+    /// lands inside that window, and the next attempt sees a file that no longer matches the
+    /// snapshot.</summary>
+    private Exception? RunMigrationAgainstAnExternalWrite(ApoWriter w, string external)
+    {
+        Exception? failure = null;
+        var migrating = new Thread(() =>
+        {
+            try { w.MigrateLegacyInclude(); }
+            catch (Exception ex) { failure = ex; }
+        });
+        using (new FileStream(ConfigTxt, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            migrating.Start();
+            Thread.Sleep(150); // several attempts into the 25/50/100/200/400 ms ladder
+            File.WriteAllText(ConfigTxt, external);
+            Assert.True(migrating.Join(TimeSpan.FromSeconds(10)), "migration thread never finished");
+        }
+        return failure;
+    }
+
+    [Fact]
+    public void The_legacy_file_survives_a_rewrite_that_stood_down_while_config_txt_still_names_it()
+    {
+        // The deletion in step 3 is conditional on config.txt having actually stopped referencing
+        // the legacy file — otherwise a stood-down rewrite would leave EAPO including a file this
+        // migration had just deleted.
+        File.WriteAllText(LegacyFile, "Preamp: 0.0 dB\r\n");
+        WriteConfigTxt("Include: apo-volume.txt");
+        const string external = "# Peace rewrote this\r\nInclude: apo-volume.txt\r\n";
+
+        using var w = new ApoWriter(_dir);
+        Assert.Null(RunMigrationAgainstAnExternalWrite(w, external));
+
+        Assert.Equal(external, File.ReadAllText(ConfigTxt));
+        Assert.True(File.Exists(LegacyFile), "the file config.txt still includes must not be deleted");
+    }
+
+    [Fact]
     public void The_managed_header_and_include_line_name_the_new_file()
     {
         Assert.Equal("aorineq.txt", ApoWriter.VolumeFileName);
