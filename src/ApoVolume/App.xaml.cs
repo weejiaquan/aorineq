@@ -328,7 +328,7 @@ public partial class App : System.Windows.Application
         if (systemMode)
             AdoptEndpointState();
         else
-            _writer!.WriteVolume(_state.CurrentDb);
+            WriteVolumePreamp(_state.CurrentDb);
         _tray!.Update(_state.Percent, _state.Muted);
 
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
@@ -731,7 +731,7 @@ public partial class App : System.Windows.Application
     {
         if (_settings.VolumeMode == VolumeModes.Eapo && _writer is null && TryBuildEapoPipeline())
         {
-            _writer!.WriteVolume(_state.CurrentDb);
+            WriteVolumePreamp(_state.CurrentDb);
             HandMuteBackToPreamp();
         }
     }
@@ -1113,7 +1113,7 @@ public partial class App : System.Windows.Application
         {
             // Null only when eapo mode was selected while EAPO is still missing — the
             // onboarding-close hook builds the pipeline once EAPO exists.
-            _writer?.WriteVolume(_state.CurrentDb);
+            WriteVolumePreamp(_state.CurrentDb);
         }
         ShowOsd(interactive);
         _tray!.Update(_state.Percent, _state.Muted);
@@ -1152,6 +1152,18 @@ public partial class App : System.Windows.Application
             _state.SetMuted(s.Muted);
         }
     }
+
+    /// <summary>Endpoint GUID for the current default render device's config block, falling
+    /// back to EAPO's match-everything "all" pattern when the endpoint can't be read (no audio
+    /// device) — the preamp then applies everywhere, which is exactly the legacy behavior.</summary>
+    private static string ActiveDeviceGuid() =>
+        AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()) ?? "all";
+
+    /// <summary>Renders the config for a bare volume preamp on the active device (interim
+    /// single-device model until the per-device EQ state lands).</summary>
+    private void WriteVolumePreamp(double db) =>
+        _writer?.WriteConfig(new EqConfigModel(false, 0, Array.Empty<EqBand>(),
+            new[] { new DeviceEqSection(ActiveDeviceGuid(), db, false, 0, Array.Empty<EqBand>()) }));
 
     /// <summary>Creates the ApoWriter against the EAPO config dir, probes writability (elevating
     /// via --setup when needed), and starts the include guard. Throws the startup-dialog
@@ -1209,13 +1221,16 @@ public partial class App : System.Windows.Application
         }
     }
 
-    /// <summary>Whether apo-volume.txt currently reads exactly the preamp line for
-    /// <paramref name="db"/> — the proof gate for handing mute duty back from the endpoint.</summary>
+    /// <summary>Whether apo-volume.txt's block for the active device currently reads exactly
+    /// the preamp for <paramref name="db"/> — the proof gate for handing mute duty back from
+    /// the endpoint.</summary>
     private bool PreampFileReads(double db)
     {
         try
         {
-            return File.ReadAllText(_writer!.VolumeFilePath).TrimEnd() == ApoWriter.FormatPreamp(db);
+            var content = File.ReadAllText(_writer!.VolumeFilePath);
+            return ApoWriter.ReadDevicePreamp(content, ActiveDeviceGuid()) is { } read
+                && ApoWriter.FormatPreamp(read) == ApoWriter.FormatPreamp(db);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1263,7 +1278,7 @@ public partial class App : System.Windows.Application
             // The EQ chain itself is never touched.
             if (_writer is not null)
             {
-                _writer.WriteVolume(0);
+                _writer.WriteConfig(new EqConfigModel(false, 0, Array.Empty<EqBand>(), new[] { new DeviceEqSection(ActiveDeviceGuid(), 0, false, 0, Array.Empty<EqBand>()) }));
                 _writer.Flush();
             }
             else
@@ -1282,7 +1297,7 @@ public partial class App : System.Windows.Application
                     + "loudness until the setup guide completes.");
                 OpenOnboarding();
             }
-            _writer?.WriteVolume(_state.CurrentDb); // re-apply the saved percent to the preamp
+            WriteVolumePreamp(_state.CurrentDb); // re-apply the saved percent to the preamp
             HandMuteBackToPreamp();
         }
         SaveSettings();

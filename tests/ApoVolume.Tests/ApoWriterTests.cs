@@ -29,11 +29,19 @@ public class ApoWriterTests : IDisposable
         Assert.Equal(expected, ApoWriter.FormatPreamp(db));
     }
 
+    private const string TestGuid = "{aaaaaaaa-1111-2222-3333-444444444444}";
+
+    /// <summary>The volume-keypress shape: one device block, EQ off, just the preamp moving.</summary>
+    private static EqConfigModel VolumeModel(double db) => new(
+        GlobalEqEnabled: false, GlobalPresetPreampDb: 0, GlobalBands: Array.Empty<EqBand>(),
+        Devices: new[] { new DeviceEqSection(TestGuid, db, false, 0, Array.Empty<EqBand>()) });
+
     [Fact]
-    public void WriteVolume_writes_preamp_line_promptly()
+    public void WriteConfig_writes_the_rendered_blocks_promptly()
     {
         using var w = new ApoWriter(_dir);
-        w.WriteVolume(-25.2525);
+        var expected = ApoWriter.RenderConfig(VolumeModel(-25.2525));
+        w.WriteConfig(VolumeModel(-25.2525));
 
         // leading edge now runs on a ThreadPool thread, not synchronously: poll briefly.
         string? content = null;
@@ -43,12 +51,13 @@ public class ApoWriterTests : IDisposable
             if (File.Exists(w.VolumeFilePath))
             {
                 content = File.ReadAllText(w.VolumeFilePath);
-                if (content == "Preamp: -25.3 dB" + Environment.NewLine) break;
+                if (content == expected) break;
             }
             Thread.Sleep(10);
         }
-        _out.WriteLine($"file content after {sw.ElapsedMilliseconds} ms: " + (content?.TrimEnd() ?? "<none>"));
-        Assert.Equal("Preamp: -25.3 dB" + Environment.NewLine, content);
+        _out.WriteLine($"file content after {sw.ElapsedMilliseconds} ms:\n" + (content ?? "<none>"));
+        Assert.Equal(expected, content);
+        Assert.Contains("Preamp: -25.3 dB", content);
     }
 
     [Fact]
@@ -58,12 +67,12 @@ public class ApoWriterTests : IDisposable
         // Burst so a trailing write is still pending inside the coalescer window, then Flush:
         // the LAST value must be on disk the moment Flush returns, with no polling.
         for (int i = 0; i < 20; i++)
-            w.WriteVolume(-i);
-        w.WriteVolume(-120.0);
+            w.WriteConfig(VolumeModel(-i));
+        w.WriteConfig(VolumeModel(-120.0));
         w.Flush();
         var content = File.ReadAllText(w.VolumeFilePath);
-        _out.WriteLine("content immediately after Flush: " + content.TrimEnd());
-        Assert.Equal("Preamp: -120.0 dB" + Environment.NewLine, content);
+        _out.WriteLine("content immediately after Flush:\n" + content);
+        Assert.Contains("Preamp: -120.0 dB", content);
     }
 
     [Fact]
@@ -73,12 +82,12 @@ public class ApoWriterTests : IDisposable
         for (int p = 0; p <= 100; p++)
         {
             double db = p == 0 ? -120.0 : -50.0 * (100 - p) / 99.0;
-            w.WriteVolume(db);
+            w.WriteConfig(VolumeModel(db));
         }
         Thread.Sleep(500);
         var content = File.ReadAllText(w.VolumeFilePath);
-        _out.WriteLine($"final content: {content.TrimEnd()}; writes: {w.WriteCount} of 101");
-        Assert.Equal("Preamp: 0.0 dB" + Environment.NewLine, content); // p=100 → 0 dB
+        _out.WriteLine($"final content:\n{content}writes: {w.WriteCount} of 101");
+        Assert.Contains("Preamp: 0.0 dB", content); // p=100 → 0 dB
         Assert.True(w.WriteCount < 101, "writes must be coalesced under key spam");
     }
 
@@ -104,40 +113,43 @@ public class ApoWriterTests : IDisposable
     }
 
     [Fact]
-    public void WriteVolume_survives_locked_volume_file()
+    public void WriteConfig_survives_locked_volume_file()
     {
         using var w = new ApoWriter(_dir);
 
         using (var locker = new FileStream(w.VolumeFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            var ex = Record.Exception(() => w.WriteVolume(-10));
+            var ex = Record.Exception(() => w.WriteConfig(VolumeModel(-10)));
             _out.WriteLine("exception while file locked: " + (ex?.ToString() ?? "<none>"));
             Assert.Null(ex);
         }
 
         Thread.Sleep(60); // >50 ms pause, past the coalescer interval, file now unlocked
-        w.WriteVolume(-10);
+        w.WriteConfig(VolumeModel(-10));
         Thread.Sleep(200); // let the coalesced/leading write land on disk
 
         var content = File.ReadAllText(w.VolumeFilePath);
-        _out.WriteLine("content after unlock + retry: " + content.TrimEnd());
-        Assert.Equal("Preamp: -10.0 dB" + Environment.NewLine, content);
+        _out.WriteLine("content after unlock + retry:\n" + content);
+        Assert.Contains("Preamp: -10.0 dB", content);
+        // A failed atomic swap must not leave its temp file behind.
+        Assert.Empty(Directory.GetFiles(_dir).Where(f =>
+            Path.GetFileName(f) is not ("apo-volume.txt" or "config.txt")));
     }
 
     [Fact]
-    public void WriteVolume_raises_WriteFailing_once_after_five_consecutive_failures()
+    public void WriteConfig_raises_WriteFailing_once_after_five_consecutive_failures()
     {
         using var w = new ApoWriter(_dir);
         int firedCount = 0;
         w.WriteFailing += () => Interlocked.Increment(ref firedCount);
 
         // Each call is >60ms after the previous one (past the 50ms coalescer interval), so
-        // every WriteVolume call here is its own leading write attempt, not coalesced away.
+        // every WriteConfig call here is its own leading write attempt, not coalesced away.
         using (new FileStream(w.VolumeFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             for (int i = 0; i < 6; i++)
             {
-                w.WriteVolume(-10);
+                w.WriteConfig(VolumeModel(-10));
                 Thread.Sleep(70);
             }
         }
@@ -146,11 +158,11 @@ public class ApoWriterTests : IDisposable
 
         // A successful write resets the streak.
         Thread.Sleep(70);
-        w.WriteVolume(-10);
+        w.WriteConfig(VolumeModel(-10));
         Thread.Sleep(70);
         var content = File.ReadAllText(w.VolumeFilePath);
-        _out.WriteLine("content after recovery write: " + content.TrimEnd());
-        Assert.Equal("Preamp: -10.0 dB" + Environment.NewLine, content);
+        _out.WriteLine("content after recovery write:\n" + content);
+        Assert.Contains("Preamp: -10.0 dB", content);
         Assert.Equal(1, firedCount); // unchanged: no new failure streak yet
 
         // Force 5 more consecutive failures: the event must be able to fire again.
@@ -158,7 +170,7 @@ public class ApoWriterTests : IDisposable
         {
             for (int i = 0; i < 5; i++)
             {
-                w.WriteVolume(-20);
+                w.WriteConfig(VolumeModel(-20));
                 Thread.Sleep(70);
             }
         }
