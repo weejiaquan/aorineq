@@ -2,18 +2,33 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Navigation;
 using AorinEQ.Core;
 
 namespace AorinEQ.UI;
 
-public partial class SettingsWindow : Window
+/// <summary>The Settings shell: a Windows 11-style sidebar (WPF-UI's NavigationView) over six
+/// sections of setting cards.
+///
+/// The six section bodies are declared in this window's XAML — inside its namescope, so every
+/// control keeps the generated field this file already uses — and are detached from their holder at
+/// construction, then handed to the NavigationView's frame one at a time. Splitting them into six
+/// NavigationView Pages instead would have moved thirty named controls into six new namescopes and
+/// rewritten every handler below, for a release that deliberately changes no behaviour.</summary>
+public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 {
     private const string DefaultAnchor = "bottom-center";
 
     private bool _initializing = true;
 
     private readonly (ToggleButton Button, string Anchor)[] _anchorButtons;
+
+    /// <summary>Section name (see <see cref="SettingsSections"/>) to its detached body. Populated
+    /// once, in declaration order, so the NavigationView can show any of them on demand.</summary>
+    private readonly Dictionary<string, UIElement> _sections = new();
+
+    /// <summary>Section requested before the NavigationView had a template to put it in; applied
+    /// on Loaded. Null once it has been.</summary>
+    private string? _pendingSection;
 
     public event Action<bool>? AutostartChanged;
     public event Action<bool>? RunAsAdminChanged;
@@ -51,6 +66,8 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
 
+        DetachSections();
+
         _anchorButtons = new (ToggleButton, string)[]
         {
             (AnchorTopLeft, "top-left"), (AnchorTopCenter, "top-center"), (AnchorTopRight, "top-right"),
@@ -71,10 +88,88 @@ public partial class SettingsWindow : Window
 
         ApplyOsdSettings(settings);
         ApplyVolumeMode(settings);
+        ApplyDeviceVolumes(settings);
         PopulateSkins(settings.SkinName);
         RefreshEapoStatus();
 
         _initializing = false;
+
+        // Nothing is in the frame until a section is selected, so the window would open blank.
+        // Applied on Loaded — see Navigate.
+        Navigate(SettingsSections.All[0]);
+        Loaded += (_, _) => ApplyPendingSection();
+    }
+
+    /// <summary>Takes the six section bodies out of the collapsed holder they are declared in, so
+    /// exactly one is ever parented — a UIElement can only have one parent, and the NavigationView
+    /// frame becomes that parent as each is navigated to.</summary>
+    private void DetachSections()
+    {
+        var bodies = new (string Section, UIElement Body)[]
+        {
+            (SettingsSections.Volume, SectionVolume),
+            (SettingsSections.Osd, SectionOsd),
+            (SettingsSections.Skins, SectionSkins),
+            (SettingsSections.Equalizer, SectionEqualizer),
+            (SettingsSections.Updates, SectionUpdates),
+            (SettingsSections.About, SectionAbout),
+        };
+        SectionHolder.Children.Clear();
+        foreach (var (section, body) in bodies) _sections[section] = body;
+    }
+
+    /// <summary>Shows a section and selects its sidebar item. Public because deep links land here:
+    /// <c>aorineq://open?page=skins</c> routes through
+    /// <see cref="SettingsSections.ForProtocolPage"/>. An unknown name is ignored rather than
+    /// blanking the frame — the routing already resolves those to a real section.
+    ///
+    /// Before the window is loaded the NavigationView has no template yet, and its content
+    /// presenter — the thing ReplaceContent writes to — does not exist, so calling it from the
+    /// constructor throws. The request is therefore recorded and applied on Loaded. That also
+    /// makes a deep link that arrives while Settings is still opening land on the right section
+    /// instead of being lost.</summary>
+    public void Navigate(string section)
+    {
+        if (!_sections.ContainsKey(section)) return;
+        _pendingSection = section;
+        if (IsLoaded) ApplyPendingSection();
+    }
+
+    private void ApplyPendingSection()
+    {
+        if (_pendingSection is not { } section || !_sections.TryGetValue(section, out var body)) return;
+        _pendingSection = null;
+
+        // ReplaceContent does not raise SelectionChanged, so the sidebar is set separately; doing
+        // it in this order means the handler below is a no-op when the user drives the sidebar.
+        Nav.ReplaceContent(body);
+        var item = NavItemFor(section);
+        foreach (var other in NavItems()) other.IsActive = ReferenceEquals(other, item);
+    }
+
+    private IEnumerable<Wpf.Ui.Controls.NavigationViewItem> NavItems() =>
+        new[] { NavVolume, NavOsd, NavSkins, NavEqualizer, NavUpdates, NavAbout };
+
+    private Wpf.Ui.Controls.NavigationViewItem? NavItemFor(string section) =>
+        NavItems().FirstOrDefault(i => i.TargetPageTag == section);
+
+    /// <summary>The sidebar was clicked. The items carry no target page type, so nothing navigates
+    /// on its own — the tag names the section body to show.</summary>
+    private void OnSectionSelected(Wpf.Ui.Controls.NavigationView sender, RoutedEventArgs e)
+    {
+        if (sender.SelectedItem is Wpf.Ui.Controls.NavigationViewItem { TargetPageTag: { } tag })
+            Navigate(tag);
+    }
+
+    /// <summary>Read-only summary of the per-device volumes the app is tracking. Purely
+    /// informational — the volume itself is changed with the keys or the OSD, never here.</summary>
+    private void ApplyDeviceVolumes(Settings settings)
+    {
+        int count = settings.DeviceVolumes?.Count ?? 0;
+        DeviceVolumeText.Text = count == 0
+            ? "AorinEQ remembers a volume per playback device. None seen yet — press a volume key."
+            : $"AorinEQ remembers a volume per playback device, and follows the Windows default. "
+                + $"{count} device{(count == 1 ? "" : "s")} remembered.";
     }
 
     /// <summary>Live Equalizer APO status line + Configurator button state. Called at
@@ -132,6 +227,7 @@ public partial class SettingsWindow : Window
 
         ApplyOsdSettings(settings);
         ApplyVolumeMode(settings);
+        ApplyDeviceVolumes(settings);
         PopulateSkins(settings.SkinName);
         RefreshEapoStatus();
 
@@ -310,15 +406,6 @@ public partial class SettingsWindow : Window
     /// the skin designer saves, so the picker reflects new/renamed skins immediately.</summary>
     public void RefreshSkins() => PopulateSkins(SelectedTag(SkinCombo) ?? "");
 
-    /// <summary>Scrolls the skin picker into view and focuses it — where an
-    /// <c>aorineq://open?page=skins</c> link lands, since skins live inside this window
-    /// rather than in one of their own.</summary>
-    public void FocusSkins()
-    {
-        SkinCombo.BringIntoView();
-        SkinCombo.Focus();
-    }
-
     private void OnRescanSkins(object sender, RoutedEventArgs e)
     {
         PopulateSkins(SelectedTag(SkinCombo) ?? "");
@@ -395,17 +482,6 @@ public partial class SettingsWindow : Window
             AnimationEnabled: AnimationCheckBox.IsChecked == true,
             AnimationMs: (int)AnimationDurationSlider.Value,
             StepPercent: int.TryParse(SelectedTag(StepCombo), out var step) ? step : 2));
-    }
-
-    private void OnNavigate(object sender, RequestNavigateEventArgs e)
-    {
-        // When this window is running in an elevated session, ShellExecute here inherits the
-        // elevated token, so the browser process it launches is elevated too.
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri)
-        {
-            UseShellExecute = true,
-        });
-        e.Handled = true;
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
