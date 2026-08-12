@@ -64,6 +64,20 @@ public static class FileNames
         return kept.ToString(); // fewer text elements than the cap after all
     }
 
+    /// <summary>A path shortened to what identifies it in a narrow column: the file name with
+    /// the folder that holds it in front of it ("seia-bar-shadow\empty.png"). Every skin names
+    /// its files the same, so the file name alone would not say which skin, while the full path
+    /// cannot fit and would be ellipsized into uselessness. Falls back to the file name when
+    /// there is no folder to name. The full path belongs in the tooltip.</summary>
+    public static string PathForDisplay(string path)
+    {
+        var file = Path.GetFileName(path);
+        if (file.Length == 0)
+            return path; // a folder path or a trailing separator: nothing shorter is truthful
+        var folder = Path.GetFileName(Path.GetDirectoryName(path));
+        return string.IsNullOrEmpty(folder) ? file : Path.Combine(folder, file);
+    }
+
     private static string? ValidatePathSafety(string name, string what)
     {
         var trimmed = name.Trim();

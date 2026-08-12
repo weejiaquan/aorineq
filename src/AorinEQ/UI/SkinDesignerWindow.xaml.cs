@@ -133,10 +133,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         _emptySource = info.EmptyPath;
         _fullSource = info.FullPath;
         _mutedSource = info.MutedPath;
-        EmptyPathText.Text = info.EmptyPath;
-        FullPathText.Text = info.FullPath;
-        MutedPathText.Text = info.MutedPath ?? "—";
-        MutedPathText.ToolTip = info.MutedPath;
+        ShowLayerPath(EmptyPathText, info.EmptyPath);
+        ShowLayerPath(FullPathText, info.FullPath);
+        ShowLayerPath(MutedPathText, info.MutedPath);
         _initializing = true; // bulk control update must not re-enter OnControlChanged per control
         NameBox.Text = info.Name;
         ShowNumberCheck.IsChecked = info.Text is { Show: true };
@@ -178,10 +177,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         FillEndBox.Text = "";
         LoadTextStyle(null); // reset styling controls to defaults
         _initializing = false;
-        EmptyPathText.Text = "—";
-        FullPathText.Text = "—";
-        MutedPathText.Text = "—";
-        MutedPathText.ToolTip = null;
+        ShowLayerPath(EmptyPathText, null);
+        ShowLayerPath(FullPathText, null);
+        ShowLayerPath(MutedPathText, null);
         ImageErrorText.Text = "";
         RestartAnimationTimers(); // no frames -> stops both
         RefreshPreview();
@@ -197,8 +195,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     {
         _mutedSource = null;
         _mutedFrames = null;
-        MutedPathText.Text = "—";
-        MutedPathText.ToolTip = null;
+        ShowLayerPath(MutedPathText, null);
         _initializing = true;
         MutedFramesBox.Text = "1";
         _initializing = false;
@@ -234,15 +231,33 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         switch (layer)
         {
             case PreviewLayer.Empty:
-                _emptySource = path; EmptyPathText.Text = path; EmptyPathText.ToolTip = path;
+                _emptySource = path; ShowLayerPath(EmptyPathText, path);
                 break;
             case PreviewLayer.Full:
-                _fullSource = path; FullPathText.Text = path; FullPathText.ToolTip = path;
+                _fullSource = path; ShowLayerPath(FullPathText, path);
                 break;
             case PreviewLayer.Muted:
-                _mutedSource = path; MutedPathText.Text = path; MutedPathText.ToolTip = path;
+                _mutedSource = path; ShowLayerPath(MutedPathText, path);
                 break;
         }
+    }
+
+    /// <summary>The one way a layer's source is shown: shortened to fit the options column, with
+    /// the full path as the tooltip. Null clears the row back to its placeholder.</summary>
+    private static void ShowLayerPath(TextBlock target, string? path)
+    {
+        target.Text = path is null ? "—" : FileNames.PathForDisplay(path);
+        target.ToolTip = path;
+    }
+
+    /// <summary>The options panel scrolls on the wheel from anywhere in it. Handling the
+    /// tunnelling event at the ScrollViewer is what makes that true over the combo boxes, which
+    /// handle the bubbling MouseWheel themselves — and it stops a wheel aimed at the panel from
+    /// silently changing the font or the alignment sitting under the pointer.</summary>
+    private void OnOptionsWheel(object sender, MouseWheelEventArgs e)
+    {
+        OptionsScroll.ScrollToVerticalOffset(OptionsScroll.VerticalOffset - e.Delta);
+        e.Handled = true;
     }
 
     private void OnImportEmptyFrames(object sender, RoutedEventArgs e) => ImportFrames(PreviewLayer.Empty);
@@ -871,13 +886,12 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             // a GIF layer saved as empty.gif), so further edits are in-place.
             _emptySource = Path.Combine(folder, "empty" + (IsGif(_emptySource) ? ".gif" : ".png"));
             _fullSource = Path.Combine(folder, "full" + (IsGif(_fullSource) ? ".gif" : ".png"));
-            EmptyPathText.Text = _emptySource;
-            FullPathText.Text = _fullSource;
+            ShowLayerPath(EmptyPathText, _emptySource);
+            ShowLayerPath(FullPathText, _fullSource);
             if (_mutedSource is not null)
             {
                 _mutedSource = Path.Combine(folder, "muted" + (IsGif(_mutedSource) ? ".gif" : ".png"));
-                MutedPathText.Text = _mutedSource;
-                MutedPathText.ToolTip = _mutedSource;
+                ShowLayerPath(MutedPathText, _mutedSource);
             }
             _editingSkinName = name;
             PopulateSkinList(selectName: name);
