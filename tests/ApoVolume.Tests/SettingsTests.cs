@@ -123,6 +123,71 @@ public class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void Eq_and_device_volume_state_roundtrips()
+    {
+        const string dev = "{0.0.0.00000000}.{aaaaaaaa-1111-2222-3333-444444444444}";
+        var settings = Settings.Default with
+        {
+            DeviceVolumes = new Dictionary<string, DeviceVolumeSetting> { [dev] = new(80, true) },
+            DeviceEq = new Dictionary<string, EqScopeSetting>
+            {
+                [dev] = new("HD 650", -6.1, Enabled: true,
+                    Bands: new[] { new EqBand(EqBandType.LowShelf, 105, 6.4, 0.7) }),
+            },
+            GlobalEq = new EqScopeSetting("house", -2.0, Enabled: false,
+                Bands: new[] { new EqBand(EqBandType.Peak, 1000, 3.0, 1.0) }),
+        };
+        settings.Save(_path);
+        _out.WriteLine(File.ReadAllText(_path));
+        var s = Settings.Load(_path);
+        Assert.Equal(80, s.DeviceVolumes![dev].Percent);
+        Assert.True(s.DeviceVolumes[dev].Muted);
+        var eq = s.DeviceEq![dev];
+        Assert.Equal("HD 650", eq.PresetName);
+        Assert.Equal(-6.1, eq.PresetPreampDb, 3);
+        Assert.True(eq.Enabled);
+        var band = Assert.Single(eq.Bands!);
+        Assert.Equal(EqBandType.LowShelf, band.Type);
+        Assert.Equal(105, band.Fc, 3);
+        Assert.False(s.GlobalEq!.Enabled);
+        Assert.Equal(EqBandType.Peak, Assert.Single(s.GlobalEq.Bands!).Type);
+        // Band types persist as readable names, not bare numbers.
+        Assert.Contains("LowShelf", File.ReadAllText(_path));
+    }
+
+    [Fact]
+    public void Load_v19_file_without_eq_fields_defaults_null()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":40,\"Muted\":false,\"VolumeMode\":\"eapo\"}");
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded v1.9: {s}");
+        Assert.Null(s.DeviceVolumes);
+        Assert.Null(s.DeviceEq);
+        Assert.Null(s.GlobalEq);
+    }
+
+    [Fact]
+    public void Load_clamps_hostile_eq_and_device_values()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, """
+            {"Percent":50,"Muted":false,
+             "DeviceVolumes":{"dev":{"Percent":999,"Muted":false}},
+             "GlobalEq":{"PresetName":"x","PresetPreampDb":-500,"Enabled":true,
+                         "Bands":[{"Type":"Peak","Fc":999999,"GainDb":500,"Q":0}]}}
+            """);
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded hostile: {s.GlobalEq}");
+        Assert.Equal(100, s.DeviceVolumes!["dev"].Percent);
+        Assert.Equal(-60, s.GlobalEq!.PresetPreampDb);
+        var band = Assert.Single(s.GlobalEq.Bands!);
+        Assert.Equal(24000, band.Fc);
+        Assert.Equal(30, band.GainDb);
+        Assert.Equal(0.1, band.Q);
+    }
+
+    [Fact]
     public void Save_with_bare_filename_writes_to_current_directory()
     {
         var name = "apo-volume-test-" + Guid.NewGuid().ToString("N") + ".json";

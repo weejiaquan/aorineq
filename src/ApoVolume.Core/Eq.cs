@@ -1,11 +1,14 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace ApoVolume.Core;
 
 /// <summary>Filter shapes in Equalizer APO's parametric-filter vocabulary. Serialized tokens:
 /// PK, LSC, HSC, NO, LPQ, HPQ (canonical forms carrying an explicit Q; the Q-less aliases
-/// LS/HS/LP/HP/PEQ are accepted on parse).</summary>
+/// LS/HS/LP/HP/PEQ are accepted on parse). Persisted to settings.json by name (readable, and
+/// an unknown name fails the whole load safely instead of aliasing to a random filter type).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<EqBandType>))]
 public enum EqBandType
 {
     Peak,
@@ -147,11 +150,17 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
         if (fc is null)
             return null; // Fc is required for every supported type
         double defaultQ = type == EqBandType.Notch ? DefaultNotchQ : DefaultQ;
-        return new EqBand(type.Value,
-            Math.Clamp(fc.Value, MinFc, MaxFc),
-            Math.Clamp(gain ?? 0, -MaxGainDb, MaxGainDb),
-            Math.Clamp(q ?? defaultQ, MinQ, MaxQ));
+        return Clamp(new EqBand(type.Value, fc.Value, gain ?? 0, q ?? defaultQ));
     }
+
+    /// <summary>Clamps a band's parameters into the supported ranges — the shared boundary
+    /// guard for parsed files and persisted settings (both are external input).</summary>
+    public static EqBand Clamp(EqBand band) => band with
+    {
+        Fc = Math.Clamp(double.IsFinite(band.Fc) ? band.Fc : 1000, MinFc, MaxFc),
+        GainDb = Math.Clamp(double.IsFinite(band.GainDb) ? band.GainDb : 0, -MaxGainDb, MaxGainDb),
+        Q = Math.Clamp(double.IsFinite(band.Q) ? band.Q : DefaultQ, MinQ, MaxQ),
+    };
 
     private static double? ReadNumber(string token) =>
         double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
