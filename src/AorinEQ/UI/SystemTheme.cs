@@ -1,77 +1,57 @@
-using System;
+using AorinEQ.Core;
 using Microsoft.Win32;
 
 namespace AorinEQ.UI;
 
-/// <summary>Reads the Windows 11 apps theme (light/dark) and DWM accent color from the registry
-/// for the Fluent OSD style. Both reads are cheap enough to redo on every <see
-/// cref="OsdWindow.ShowVolume"/> call (no change watcher needed) and are fully exception-guarded:
-/// a missing key/value, wrong value type, or any registry failure resolves to the documented
-/// default instead of throwing.</summary>
+/// <summary>Reads the Windows personalization values the app draws with — the apps theme, the
+/// shell theme, and the DWM accent colour — and hands them to <see cref="AppThemePolicy"/>, which
+/// owns what they MEAN.
+///
+/// This half is deliberately dumb: open the key, fetch the value, return <c>null</c> if anything at
+/// all goes wrong (missing key, missing value, wrong value type, access denied). Every fallback
+/// decision lives in the policy, where it is tested. Both reads are cheap enough to redo on every
+/// <see cref="OsdWindow.ShowVolume"/> call.
+///
+/// This is the app's ONLY reader of the Windows theme: the tray glyph, the Fluent OSD style and
+/// <see cref="AppTheme"/> (the Fluent window chrome) all come through here, so the process never
+/// disagrees with itself about whether Windows is dark.</summary>
 public static class SystemTheme
 {
     private const string PersonalizeKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize";
     private const string DwmKeyPath = @"Software\Microsoft\Windows\DWM";
-    private static readonly System.Windows.Media.Color DefaultAccent =
-        System.Windows.Media.Color.FromArgb(0xFF, 0x00, 0x67, 0xC0);
 
-    /// <summary>True when Windows apps use the light theme. Reads HKCU\...\Personalize's
-    /// <c>AppsUseLightTheme</c> DWORD (1 = light, 0 = dark); defaults to <c>true</c> if the
-    /// key/value is missing, isn't an int, or the registry read fails for any reason.</summary>
-    public static bool AppsUseLightTheme()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath);
-            return key?.GetValue("AppsUseLightTheme") is int value ? value != 0 : true;
-        }
-        catch (Exception)
-        {
-            return true;
-        }
-    }
+    /// <summary>True when Windows apps use the light theme.</summary>
+    public static bool AppsUseLightTheme() =>
+        AppThemePolicy.IsLight(ReadDword(PersonalizeKeyPath, "AppsUseLightTheme"));
 
     /// <summary>True when the Windows shell — taskbar, notification area, Start — uses the light
-    /// theme. Reads the same Personalize key's <c>SystemUsesLightTheme</c> DWORD (1 = light, 0 =
-    /// dark). Windows lets the shell and the apps themes differ, and the tray glyph is drawn onto
-    /// the taskbar, so this is the one that decides whether it is white or near-black. Falls back
-    /// to <see cref="AppsUseLightTheme"/> when the value is missing or unreadable — the two match
-    /// on every default Windows configuration, which beats guessing a fixed side.</summary>
-    public static bool SystemUsesLightTheme()
-    {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath);
-            if (key?.GetValue("SystemUsesLightTheme") is int value) return value != 0;
-        }
-        catch (Exception)
-        {
-            // fall through to the apps theme
-        }
-        return AppsUseLightTheme();
-    }
+    /// theme. Windows lets it differ from the apps theme, and the tray glyph is drawn onto the
+    /// taskbar, so this is the one that decides whether it is white or near-black.</summary>
+    public static bool SystemUsesLightTheme() =>
+        AppThemePolicy.IsShellLight(
+            ReadDword(PersonalizeKeyPath, "SystemUsesLightTheme"),
+            ReadDword(PersonalizeKeyPath, "AppsUseLightTheme"));
 
-    /// <summary>The current Windows accent color. Reads HKCU\Software\Microsoft\Windows\DWM's
-    /// <c>AccentColor</c> DWORD, stored in ABGR byte order (highest byte alpha, then blue, green,
-    /// red); defaults to <c>#FF0067C0</c> if the key/value is missing, isn't an int, or the
-    /// registry read fails for any reason.</summary>
+    /// <summary>The current Windows accent colour, as a WPF colour for the brushes the OSD and the
+    /// window chrome build from it.</summary>
     public static System.Windows.Media.Color Accent()
     {
+        var color = AppThemePolicy.AccentFromAbgr(ReadDword(DwmKeyPath, "AccentColor"));
+        return System.Windows.Media.Color.FromArgb(color.A, color.R, color.G, color.B);
+    }
+
+    /// <summary>The raw DWORD, or <c>null</c> when it is missing, is not an int, or the registry
+    /// read fails for any reason — the theme must never be able to throw out of a paint path.</summary>
+    private static int? ReadDword(string keyPath, string valueName)
+    {
         try
         {
-            using var key = Registry.CurrentUser.OpenSubKey(DwmKeyPath);
-            if (key?.GetValue("AccentColor") is not int raw) return DefaultAccent;
-
-            uint abgr = unchecked((uint)raw);
-            byte a = (byte)(abgr >> 24);
-            byte b = (byte)(abgr >> 16);
-            byte g = (byte)(abgr >> 8);
-            byte r = (byte)abgr;
-            return System.Windows.Media.Color.FromArgb(a, r, g, b);
+            using var key = Registry.CurrentUser.OpenSubKey(keyPath);
+            return key?.GetValue(valueName) as int?;
         }
         catch (Exception)
         {
-            return DefaultAccent;
+            return null;
         }
     }
 }

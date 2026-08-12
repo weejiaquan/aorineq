@@ -18,6 +18,7 @@ public partial class App : System.Windows.Application
     private bool _ownsMutex;
     private EventWaitHandle? _showEvent;
     private KeyboardHook? _hook;
+    private AppTheme? _appTheme;
     private ApoWriter? _writer;
     private EndpointVolume? _endpointVolume;
     private TrayIcon? _tray;
@@ -79,6 +80,11 @@ public partial class App : System.Windows.Application
             Shutdown();
             return;
         }
+
+        // Before ANY window is constructed, so none is ever built against the wrong palette — the
+        // onboarding wizard below can be the first thing on screen. Also the app's only theme
+        // watcher; see AppTheme's remarks for why WPF-UI's own is deliberately unused.
+        _appTheme = new AppTheme();
 
         // ONE-TIME v3.0.0 rename migration, before ANYTHING reads per-user state: the folder the
         // settings path below points at only holds this machine's history once the old
@@ -2005,6 +2011,10 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _hook?.Dispose();
+        // Unsubscribed early and for the same reason as the tray's: both listen on SystemEvents,
+        // which raises on a system thread, and a theme change arriving mid-teardown must not find
+        // a dispatcher that has begun shutting down.
+        _appTheme?.Dispose();
         _tray?.Dispose();
         _writer?.Dispose();
         _endpointVolume?.Dispose();
