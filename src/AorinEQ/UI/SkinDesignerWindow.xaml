@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:core="clr-namespace:AorinEQ.Core;assembly=AorinEQ.Core"
         Title="AorinEQ skin designer" Icon="/AorinEQ.ico" Width="880" Height="640"
         MinWidth="720" MinHeight="520"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True"
@@ -126,9 +127,14 @@
                      it; PreviewMouseWheel is handled so the wheel scrolls the panel from anywhere
                      in it (see OnOptionsWheel). Focusable=False keeps the viewer itself out of the
                      tab order, so Tab walks control to control and the viewer brings each into
-                     view as it goes. -->
+                     view as it goes.
+
+                     The padding is 14 because the scrollbar MEASURES 14 wide. At the 10 it shipped
+                     with in v3.1.2 the bar covered the rightmost 4px of every full-width control in
+                     the panel — a hit test over that strip returned PART_VerticalScrollBar, not the
+                     text box under it. Change this only against a fresh measurement of the bar. -->
                 <ScrollViewer x:Name="OptionsScroll" Grid.Column="1" Margin="12,0,0,0"
-                              Padding="0,0,10,0" Focusable="False"
+                              Padding="0,0,14,0" Focusable="False"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               PreviewMouseWheel="OnOptionsWheel">
                     <!-- One vertical rhythm throughout: 18 above a section heading, 6 under it,
@@ -333,13 +339,60 @@
                                 TickFrequency="0.05" IsSnapToTickEnabled="True"
                                 ValueChanged="OnControlChanged" />
 
+                        <!-- Authorship / gallery metadata. All optional: a skin with none of it
+                             behaves and saves exactly as it did before 3.2. Same rhythm as the
+                             sections above — 18 above the heading, 6 under it, a 4px caption over
+                             each control, 10 between rows. -->
+                        <TextBlock Text="Details" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <TextBlock Text="Optional. Shown in the skin picker, and used by the skin gallery when you share this skin."
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Title &#8212; the name to show, if not the folder name" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox x:Name="TitleBox" MaxLength="{x:Static core:SkinMeta.MaxTitleLength}"
+                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Author &#8212; who gets the credit" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox x:Name="AuthorBox" MaxLength="{x:Static core:SkinMeta.MaxAuthorLength}"
+                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Description" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox x:Name="DescriptionBox" MaxLength="{x:Static core:SkinMeta.MaxDescriptionLength}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56" MaxHeight="120"
+                                 VerticalScrollBarVisibility="Auto"
+                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Version &#8212; yours for this skin, not AorinEQ's" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox x:Name="VersionBox" MaxLength="{x:Static core:SkinMeta.MaxVersionLength}"
+                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Tags &#8212; comma separated" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox x:Name="TagsBox" TextChanged="OnControlChanged" Margin="0,0,0,10" />
+
+                        <TextBlock Text="Source URL &#8212; https only" FontSize="11" Margin="0,0,0,4" />
+                        <TextBox x:Name="SourceUrlBox" MaxLength="{x:Static core:SkinMeta.MaxSourceUrlLength}"
+                                 TextChanged="OnControlChanged" />
+                        <TextBlock x:Name="MetaErrorText" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
+
+                        <TextBlock Text="Share" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <!-- Text set from SkinShare.HostingHint in the constructor, so the wording
+                             the clipboard message uses and the wording shown here cannot drift. -->
+                        <TextBlock x:Name="ShareHintText" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+                        <Button x:Name="ShareButton" Content="Share&#8230;" Padding="10,4" Click="OnShare"
+                                ToolTip="Export the zip and copy an aorineq:// install link to the clipboard" />
+
                         <Button x:Name="TestButton" Content="Test on desktop" Padding="10,4"
                                 Margin="0,18,0,0" Click="OnTestOnDesktop" />
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
 
-            <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            <!-- Wraps: the status line carries whole sentences (what was exported, what was copied
+                 to the clipboard and what to do with it), and an unwrapped TextBlock silently
+                 CLIPS the tail rather than ellipsizing it — the reader can't even tell there was
+                 more. The row is Auto-height, so wrapping costs the preview nothing. -->
+            <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" FontSize="11"
+                       TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                        Text="Pick two images (or an existing skin) to start. Change the name before saving to create a copy." />
         </Grid>
     </Grid>

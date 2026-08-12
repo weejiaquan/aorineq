@@ -7,6 +7,8 @@ namespace AorinEQ.Core;
 /// paths) cannot escape the destination folder by construction.</summary>
 public static class SkinArchive
 {
+    /// <summary>The files that MAKE a skin, and the only ones an import ever writes to disk.
+    /// <see cref="SkinPreview.FileName"/> is deliberately absent: see <see cref="Import"/>.</summary>
     private static readonly string[] AllowedFiles =
         { "empty.png", "empty.gif", "full.png", "full.gif", "muted.png", "muted.gif", "skin.json" };
 
@@ -17,7 +19,16 @@ public static class SkinArchive
     /// <summary>Suggested skin name for a zip: its filename without extension.</summary>
     public static string DefaultName(string zipPath) => Path.GetFileNameWithoutExtension(zipPath);
 
-    /// <summary>Zips a valid skin folder's files (whitelist, archive root, no folder prefix).
+    /// <summary>Zips a valid skin folder's files (whitelist, archive root, no folder prefix), plus
+    /// a freshly generated <see cref="SkinPreview.FileName"/> — the image a gallery lists the skin
+    /// by. The preview is composed HERE, from the artwork being shared, and written to a temp file
+    /// rather than into the skin folder: the user's skins folder holds skins, not thumbnails, and
+    /// nothing on disk can pre-empt what the zip claims the skin looks like.
+    ///
+    /// Preview generation is BEST EFFORT. A skin whose headers are valid but whose pixels won't
+    /// decode (a truncated download) still exports, just without a thumbnail — losing the listing
+    /// image is a far smaller harm than refusing to let someone share their skin.
+    ///
     /// Refuses to export a skin the loader rejects — nobody should share a broken skin.</summary>
     public static void Export(string skinFolder, string zipPath)
     {
@@ -25,8 +36,23 @@ public static class SkinArchive
         if (!info.IsValid)
             throw new InvalidOperationException($"Cannot export an invalid skin: {info.Error}");
 
+        // Two variables on purpose: the scratch file is deleted in the finally whether or not
+        // generation got far enough to produce a usable one.
+        var scratchPreview = Path.Combine(Path.GetTempPath(),
+            "aorineq-preview-" + Guid.NewGuid().ToString("N") + ".png");
+        string? previewPath = null;
         try
         {
+            try
+            {
+                SkinPreview.Write(info, scratchPreview);
+                previewPath = scratchPreview;
+            }
+            catch (InvalidOperationException)
+            {
+                previewPath = null; // undecodable artwork: ship the skin, skip the thumbnail
+            }
+
             File.Delete(zipPath); // ZipArchiveMode.Create requires a fresh file
             using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
             foreach (var fileName in AllowedFiles)
@@ -35,10 +61,18 @@ public static class SkinArchive
                 if (File.Exists(source))
                     archive.CreateEntryFromFile(source, fileName);
             }
+            if (previewPath is not null)
+                archive.CreateEntryFromFile(previewPath, SkinPreview.FileName);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"Failed to export skin: {ex.Message}", ex);
+        }
+        finally
+        {
+            try { File.Delete(scratchPreview); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 
@@ -48,7 +82,15 @@ public static class SkinArchive
     /// is STAGED: the zip extracts into a scratch folder, validates there, and only then replaces
     /// the target — a failed import never touches an existing skin, and a successful overwrite is
     /// exactly the zip's contents (no stale files from the previous skin surviving to hybridize
-    /// it via the loader's png-over-gif precedence). Returns the folder written.</summary>
+    /// it via the loader's png-over-gif precedence).
+    ///
+    /// A bundled <see cref="SkinPreview.FileName"/> is IGNORED like any other unlisted file. It is
+    /// an arbitrary image chosen by whoever built the zip — nothing ties it to the artwork inside —
+    /// so trusting it would let a shared skin show the user one thing and install another. The
+    /// gallery's listing image is the zip's business; the installed skin's look is the artwork's.
+    /// Exporting again composes a fresh one from the pixels actually installed.
+    ///
+    /// Returns the folder written.</summary>
     public static string Import(string zipPath, string skinsRoot, string name)
     {
         var nameError = SkinWriter.ValidateName(name);

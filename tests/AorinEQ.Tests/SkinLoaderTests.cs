@@ -597,4 +597,172 @@ public class SkinLoaderTests : IDisposable
 
         Assert.Empty(results);
     }
+
+    // ---------------- authorship / gallery metadata (v3.2.0) ----------------
+
+    private string MetaSkinFolder(string name, string json)
+    {
+        var folder = NewSkinFolder(name);
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), json);
+        return folder;
+    }
+
+    [Fact]
+    public void Load_without_skin_json_has_no_metadata()
+    {
+        var folder = NewSkinFolder("credit-less");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        WritePng(Path.Combine(folder, "full.png"), 300, 100);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"meta: {info.Meta} empty={info.Meta.IsEmpty}");
+        Assert.True(info.IsValid);
+        Assert.Same(SkinMeta.None, info.Meta); // one representation of "no metadata"
+        Assert.True(info.Meta.IsEmpty);
+    }
+
+    [Fact]
+    public void Load_pre_3_2_skin_json_still_has_no_metadata()
+    {
+        var folder = MetaSkinFolder("legacy",
+            "{ \"percentText\": { \"show\": true, \"x\": 5, \"y\": 6 }, \"scale\": 1.5 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"legacy skin: valid={info.IsValid} scale={info.Scale} metaEmpty={info.Meta.IsEmpty}");
+        Assert.True(info.IsValid);
+        Assert.Equal(1.5, info.Scale);
+        Assert.Equal(new SkinText(true, 5, 6), info.Text);
+        Assert.True(info.Meta.IsEmpty);
+    }
+
+    [Fact]
+    public void Load_parses_every_metadata_field()
+    {
+        var folder = MetaSkinFolder("credited", """
+            {
+              "title": "Neon Bar",
+              "author": "Ada Lovelace",
+              "description": "A glowing bar for dark desktops.",
+              "version": "1.2",
+              "tags": ["neon", "bar", "dark"],
+              "sourceUrl": "https://example.com/skins/neon-bar"
+            }
+            """);
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"meta: {info.Meta}");
+        Assert.True(info.IsValid);
+        Assert.Equal("Neon Bar", info.Meta.Title);
+        Assert.Equal("Ada Lovelace", info.Meta.Author);
+        Assert.Equal("A glowing bar for dark desktops.", info.Meta.Description);
+        Assert.Equal("1.2", info.Meta.Version);
+        Assert.Equal(new[] { "neon", "bar", "dark" }, info.Meta.Tags);
+        Assert.Equal("https://example.com/skins/neon-bar", info.Meta.SourceUrl);
+    }
+
+    [Fact]
+    public void Load_metadata_is_case_insensitive_like_the_rest_of_skin_json()
+    {
+        var folder = MetaSkinFolder("cased", "{ \"Title\": \"Neon\", \"AUTHOR\": \"Ada\" }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"meta: title={info.Meta.Title} author={info.Meta.Author}");
+        Assert.Equal("Neon", info.Meta.Title);
+        Assert.Equal("Ada", info.Meta.Author);
+    }
+
+    [Fact]
+    public void Load_trims_and_caps_oversized_metadata()
+    {
+        var longTitle = new string('T', SkinMeta.MaxTitleLength + 300);
+        var folder = MetaSkinFolder("oversized",
+            $"{{ \"title\": \"  {longTitle}  \", \"author\": \"   Ada   \" }}");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"title length {info.Meta.Title!.Length}, author '{info.Meta.Author}'");
+        Assert.True(info.IsValid);
+        Assert.Equal(SkinMeta.MaxTitleLength, info.Meta.Title!.Length);
+        Assert.Equal("Ada", info.Meta.Author);
+    }
+
+    [Theory]
+    [InlineData("\"title\": 42")]                       // number where a string belongs
+    [InlineData("\"title\": true")]
+    [InlineData("\"title\": null")]
+    [InlineData("\"title\": { \"nested\": 1 }")]
+    [InlineData("\"title\": [\"a\"]")]
+    [InlineData("\"tags\": \"neon,bar\"")]              // string where an array belongs
+    [InlineData("\"tags\": 7")]
+    [InlineData("\"tags\": { \"a\": 1 }")]
+    [InlineData("\"sourceUrl\": 12345")]
+    [InlineData("\"description\": []")]
+    public void Load_ignores_malformed_metadata_instead_of_failing_the_skin(string badField)
+    {
+        // A skin with a nonsense credit field must still RENDER. Rejecting the whole skin would
+        // make one bad key in a downloaded skin.json cost the user their artwork.
+        var folder = MetaSkinFolder("malformed-" + Math.Abs(badField.GetHashCode()),
+            "{ " + badField + ", \"scale\": 1.5 }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"'{badField}' -> valid={info.IsValid} err={info.Error ?? "<none>"} meta={info.Meta}");
+        Assert.True(info.IsValid);
+        Assert.Equal(1.5, info.Scale);   // the rest of the file is still honoured
+        Assert.True(info.Meta.IsEmpty);
+    }
+
+    [Fact]
+    public void Load_keeps_the_usable_tags_out_of_a_mixed_array()
+    {
+        var folder = MetaSkinFolder("mixed-tags",
+            "{ \"tags\": [\"neon\", 42, null, \"  bar  \", { \"a\": 1 }, \"neon\"] }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine("tags: " + string.Join("|", info.Meta.Tags));
+        Assert.Equal(new[] { "neon", "bar" }, info.Meta.Tags);
+    }
+
+    [Theory]
+    [InlineData("http://example.com/skins/neon")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("file:///C:/windows/system32")]
+    [InlineData("https://user:secret@example.com/x")]
+    [InlineData("nonsense")]
+    public void Load_ignores_a_source_url_that_is_not_plain_https(string url)
+    {
+        var folder = MetaSkinFolder("badurl-" + Math.Abs(url.GetHashCode()),
+            "{ \"sourceUrl\": " + System.Text.Json.JsonSerializer.Serialize(url) + ", \"author\": \"Ada\" }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"'{url}' -> kept={info.Meta.SourceUrl ?? "<dropped>"}");
+        Assert.True(info.IsValid);
+        Assert.Null(info.Meta.SourceUrl);
+        Assert.Equal("Ada", info.Meta.Author); // dropping the URL must not drop the rest
+    }
+
+    [Fact]
+    public void Load_strips_a_bidi_override_from_an_author_credit()
+    {
+        var folder = MetaSkinFolder("spoofed", "{ \"author\": \"Ada\\u202Egnp.exe\" }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"author: '{info.Meta.Author}'");
+        Assert.Equal("Adagnp.exe", info.Meta.Author);
+        Assert.DoesNotContain('\u202E', info.Meta.Author!);
+    }
+
+    [Fact]
+    public void Load_of_a_broken_skin_still_reports_empty_metadata_rather_than_null()
+    {
+        var folder = NewSkinFolder("no-full-layer");
+        WritePng(Path.Combine(folder, "empty.png"), 300, 100);
+        File.WriteAllText(Path.Combine(folder, "skin.json"), "{ \"author\": \"Ada\" }");
+
+        var info = SkinLoader.Load(folder);
+        _out.WriteLine($"invalid skin: err={info.Error} meta={info.Meta}");
+        Assert.False(info.IsValid);
+        Assert.NotNull(info.Meta); // never null — the picker shows credits for broken skins too
+        Assert.Equal("Ada", info.Meta.Author);
+    }
 }

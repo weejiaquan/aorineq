@@ -259,4 +259,184 @@ public class SkinArchiveTests : IDisposable
     {
         Assert.Equal("cool-skin", SkinArchive.DefaultName(@"C:\Downloads\cool-skin.zip"));
     }
+
+    // ---------------- metadata + preview.png (v3.2.0) ----------------
+
+    /// <summary>A skin whose layers are REAL decodable images, so exporting it can actually
+    /// generate a preview.</summary>
+    private string MakeRenderableSkinFolder(string name, string? json = null)
+    {
+        var folder = Path.Combine(_dir, name);
+        Directory.CreateDirectory(folder);
+        RealPngs.WriteSolid(Path.Combine(folder, "empty.png"), 300, 100, System.Drawing.Color.Red);
+        RealPngs.WriteSolid(Path.Combine(folder, "full.png"), 300, 100, System.Drawing.Color.Lime);
+        if (json is not null)
+            File.WriteAllText(Path.Combine(folder, "skin.json"), json);
+        return folder;
+    }
+
+    private static string[] EntryNames(string zip)
+    {
+        using var archive = ZipFile.OpenRead(zip);
+        return archive.Entries.Select(e => e.FullName).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+    }
+
+    [Fact]
+    public void Export_includes_a_generated_preview_png()
+    {
+        var skin = MakeRenderableSkinFolder("previewed");
+        var zip = Path.Combine(_dir, "previewed.zip");
+
+        SkinArchive.Export(skin, zip);
+
+        var names = EntryNames(zip);
+        _out.WriteLine("entries: " + string.Join(", ", names));
+        Assert.Contains(SkinPreview.FileName, names);
+
+        // The entry is the real composed image at the skin's logical size, not a placeholder.
+        using var archive = ZipFile.OpenRead(zip);
+        using var entryStream = archive.GetEntry(SkinPreview.FileName)!.Open();
+        using var buffer = new MemoryStream();
+        entryStream.CopyTo(buffer);
+        buffer.Position = 0;
+        using var image = System.Drawing.Image.FromStream(buffer);
+        _out.WriteLine($"preview entry: {image.Width}x{image.Height}, {buffer.Length} bytes");
+        Assert.Equal(300, image.Width);
+        Assert.Equal(100, image.Height);
+    }
+
+    [Fact]
+    public void Export_does_not_leave_a_preview_in_the_skin_folder()
+    {
+        // The preview belongs to the ZIP, not to the user's skins folder.
+        var skin = MakeRenderableSkinFolder("clean-folder");
+        SkinArchive.Export(skin, Path.Combine(_dir, "clean-folder.zip"));
+
+        var files = Directory.GetFiles(skin).Select(Path.GetFileName).OrderBy(f => f).ToArray();
+        _out.WriteLine("skin folder after export: " + string.Join(", ", files));
+        Assert.Equal(new[] { "empty.png", "full.png" }, files);
+    }
+
+    [Fact]
+    public void Export_still_succeeds_when_the_artwork_cannot_be_decoded()
+    {
+        // Header-only PNGs: a valid skin as far as the loader is concerned, undecodable in fact.
+        // Losing the thumbnail is acceptable; refusing to share the skin is not.
+        var skin = Path.Combine(_dir, "undecodable");
+        Directory.CreateDirectory(skin);
+        TestPngs.WriteHeaderOnly(Path.Combine(skin, "empty.png"), 300, 100);
+        TestPngs.WriteHeaderOnly(Path.Combine(skin, "full.png"), 300, 100);
+        var zip = Path.Combine(_dir, "undecodable.zip");
+
+        SkinArchive.Export(skin, zip);
+
+        var names = EntryNames(zip);
+        _out.WriteLine("entries: " + string.Join(", ", names));
+        Assert.Equal(new[] { "empty.png", "full.png" }, names);
+        Assert.True(SkinLoader.Load(SkinArchive.Import(zip, _root, "undecodable-in")).IsValid);
+    }
+
+    [Fact]
+    public void Import_never_writes_a_bundled_preview_to_disk()
+    {
+        // A shared zip is attacker-controlled. Its preview.png is a claim about the skin, not the
+        // skin — the gallery renders it, this app must not keep it and must never let it decide
+        // what the user thinks they installed.
+        var skin = MakeRenderableSkinFolder("hostile-src");
+        var zip = Path.Combine(_dir, "hostile.zip");
+        var hostilePreview = Path.Combine(_dir, "hostile-preview.png");
+        RealPngs.WriteSolid(hostilePreview, 4000, 4000, System.Drawing.Color.Magenta);
+        using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+        {
+            archive.CreateEntryFromFile(Path.Combine(skin, "empty.png"), "empty.png");
+            archive.CreateEntryFromFile(Path.Combine(skin, "full.png"), "full.png");
+            archive.CreateEntryFromFile(hostilePreview, SkinPreview.FileName);
+            archive.CreateEntryFromFile(hostilePreview, "nested/" + SkinPreview.FileName);
+            archive.CreateEntryFromFile(hostilePreview, "PREVIEW.PNG");
+        }
+
+        var imported = SkinArchive.Import(zip, _root, "hostile-in");
+
+        var files = Directory.GetFiles(imported).Select(Path.GetFileName).OrderBy(f => f).ToArray();
+        _out.WriteLine("installed files: " + string.Join(", ", files));
+        Assert.Equal(new[] { "empty.png", "full.png" }, files);
+        Assert.False(File.Exists(Path.Combine(imported, SkinPreview.FileName)));
+        Assert.True(SkinLoader.Load(imported).IsValid);
+    }
+
+    [Fact]
+    public void A_re_export_regenerates_the_preview_from_the_installed_artwork()
+    {
+        // Round trip: whatever preview a zip claimed, the one WE ship is composed from the pixels
+        // that actually got installed.
+        var skin = MakeRenderableSkinFolder("regen-src");
+        var firstZip = Path.Combine(_dir, "regen-1.zip");
+        SkinArchive.Export(skin, firstZip);
+        var imported = SkinArchive.Import(firstZip, _root, "regen-in");
+
+        var secondZip = Path.Combine(_dir, "regen-2.zip");
+        SkinArchive.Export(imported, secondZip);
+
+        static byte[] PreviewBytes(string zip)
+        {
+            using var archive = ZipFile.OpenRead(zip);
+            using var stream = archive.GetEntry(SkinPreview.FileName)!.Open();
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            return buffer.ToArray();
+        }
+
+        var a = PreviewBytes(firstZip);
+        var b = PreviewBytes(secondZip);
+        _out.WriteLine($"preview bytes: first {a.Length}, re-export {b.Length}");
+        Assert.Equal(a, b); // same artwork in, same thumbnail out
+    }
+
+    [Fact]
+    public void Export_then_import_carries_the_authorship_metadata()
+    {
+        var meta = SkinMeta.Create("Neon Bar", "Ada Lovelace", "A glowing bar.", "1.2",
+            new[] { "neon", "bar" }, "https://example.com/skins/neon");
+        var src = Path.Combine(_dir, "meta-src");
+        Directory.CreateDirectory(src);
+        RealPngs.WriteSolid(Path.Combine(src, "empty.png"), 300, 100, System.Drawing.Color.Red);
+        RealPngs.WriteSolid(Path.Combine(src, "full.png"), 300, 100, System.Drawing.Color.Lime);
+        var authored = SkinWriter.Save(_dir, "meta-authored",
+            Path.Combine(src, "empty.png"), Path.Combine(src, "full.png"),
+            new SkinConfig(new SkinText(true, 10, 5), 1.5, Meta: meta));
+        var zip = Path.Combine(_dir, "meta.zip");
+
+        SkinArchive.Export(authored, zip);
+        var imported = SkinArchive.Import(zip, _root, "meta-in");
+
+        var info = SkinLoader.Load(imported);
+        _out.WriteLine($"imported: valid={info.IsValid} meta={info.Meta} scale={info.Scale}");
+        Assert.True(info.IsValid);
+        Assert.Equal(meta, info.Meta);
+        Assert.Equal(1.5, info.Scale);
+        Assert.Equal(new SkinText(true, 10, 5), info.Text);
+        Assert.Equal("Neon Bar — by Ada Lovelace", info.DisplayLabel);
+    }
+
+    [Fact]
+    public void Import_of_a_zip_with_hostile_metadata_normalizes_it()
+    {
+        // skin.json travels verbatim inside the zip, so the loader is the only thing standing
+        // between an attacker's credit line and the picker that displays it.
+        var skin = MakeRenderableSkinFolder("hostile-meta-src", """
+            {
+              "author": "Ada\u202Egnp.exe",
+              "sourceUrl": "javascript:alert(1)",
+              "tags": ["ok", 42, "ok"]
+            }
+            """);
+        var zip = Path.Combine(_dir, "hostile-meta.zip");
+        SkinArchive.Export(skin, zip);
+
+        var info = SkinLoader.Load(SkinArchive.Import(zip, _root, "hostile-meta-in"));
+        _out.WriteLine($"imported meta: author='{info.Meta.Author}' url={info.Meta.SourceUrl ?? "<dropped>"} tags={string.Join("|", info.Meta.Tags)}");
+        Assert.Equal("Adagnp.exe", info.Meta.Author);
+        Assert.Null(info.Meta.SourceUrl);
+        Assert.Equal(new[] { "ok" }, info.Meta.Tags);
+    }
 }

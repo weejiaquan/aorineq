@@ -316,7 +316,11 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// selection by name when it's still present. Invalid skins stay in the list, shown disabled
     /// with their error as a tooltip, so a broken skin doesn't just silently disappear. The
     /// SelectionChanged handler is detached during the rebuild so clearing/repopulating the list
-    /// can't emit a transient "no skin selected" change.</summary>
+    /// can't emit a transient "no skin selected" change.
+    ///
+    /// Each row is labelled with the skin's CREDIT (title and author when it has them, the folder
+    /// name otherwise) while the Tag stays the folder name — the Tag is what selection, settings
+    /// and every lookup use, so a display name can never become an identity.</summary>
     private void PopulateSkins(string currentSkinName)
     {
         SkinCombo.SelectionChanged -= OnSkinChanged;
@@ -325,8 +329,13 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             SkinCombo.Items.Clear();
             foreach (var skin in SkinLoader.Scan(ApoPaths.GetSkinsRoot()))
             {
-                var item = new ComboBoxItem { Content = skin.Name, Tag = skin.Name, IsEnabled = skin.IsValid };
-                if (!skin.IsValid) item.ToolTip = skin.Error;
+                var item = new ComboBoxItem
+                {
+                    Content = skin.DisplayLabel,
+                    Tag = skin.Name,
+                    IsEnabled = skin.IsValid,
+                    ToolTip = SkinTooltip(skin),
+                };
                 SkinCombo.Items.Add(item);
             }
             SelectByTag(SkinCombo, currentSkinName);
@@ -335,6 +344,39 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         {
             SkinCombo.SelectionChanged += OnSkinChanged;
         }
+        UpdateSkinCredit();
+    }
+
+    /// <summary>Everything about a skin that doesn't fit the one-line label: its folder (which the
+    /// label hides when the skin has a title), its description, tags and source, and — for a skin
+    /// that won't load — why.</summary>
+    private static string SkinTooltip(SkinInfo skin)
+    {
+        var lines = new List<string> { "Folder: " + skin.Name };
+        if (skin.Meta.Description is { } description) lines.Add(description);
+        if (skin.Meta.Version is { } version) lines.Add("Version " + version);
+        if (skin.Meta.Tags.Count > 0) lines.Add("Tags: " + SkinMeta.FormatTags(skin.Meta.Tags));
+        if (skin.Meta.SourceUrl is { } source) lines.Add(source);
+        if (skin.Error is { } error) lines.Add(error);
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>Shows who made the selected skin, under the picker. Collapsed when the skin has no
+    /// credits at all — every skin authored before 3.2 — so nothing appears that says nothing.</summary>
+    private void UpdateSkinCredit()
+    {
+        var name = SelectedTag(SkinCombo);
+        var meta = name is null
+            ? SkinMeta.None
+            : SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), name)).Meta;
+
+        var parts = new List<string>();
+        if (meta.Title is { } title) parts.Add(title);
+        if (meta.Author is { } author) parts.Add("by " + author);
+        if (meta.Version is { } version) parts.Add("v" + version);
+
+        SkinCreditText.Text = string.Join(" · ", parts);
+        SkinCreditText.Visibility = parts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>Selects the ComboBoxItem whose Tag matches, or leaves nothing selected if the
@@ -396,7 +438,11 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         RaiseOsdSettingsChanged();
     }
 
-    private void OnSkinChanged(object sender, SelectionChangedEventArgs e) => RaiseOsdSettingsChanged();
+    private void OnSkinChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateSkinCredit();
+        RaiseOsdSettingsChanged();
+    }
 
     private void OnOpenSkinsFolder(object sender, RoutedEventArgs e)
     {

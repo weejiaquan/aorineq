@@ -35,8 +35,12 @@ public static class FileNames
     /// a preset named with one can display as something else entirely — in a confirm dialog, in
     /// the editor, in Explorer. C1 controls are refused for the same reason C0 already is
     /// (<see cref="Path.GetInvalidFileNameChars"/> covers 0–31 but not 128–159). Zero-width
-    /// joiners and the like are NOT in here: they are how emoji names are spelled.</summary>
-    private static bool IsDeceptive(char c) =>
+    /// joiners and the like are NOT in here: they are how emoji names are spelled.
+    ///
+    /// Public because the hazard is DISPLAY, not file systems: <see cref="SkinMeta"/> strips the
+    /// same characters out of authored skin credits, which are shown in the picker and on a
+    /// gallery page. One list, so the two can't drift.</summary>
+    public static bool IsDeceptive(char c) =>
         char.IsControl(c)
         || c is (char)0x200E or (char)0x200F         // LRM, RLM
         || c is >= (char)0x202A and <= (char)0x202E  // LRE, RLE, PDF, LRO, RLO
