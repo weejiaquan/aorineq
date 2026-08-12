@@ -216,4 +216,43 @@ public class TrayIconRendererTests
         Assert.Equal(second, Opaque(24.5f));
         Assert.Equal(third, Opaque(28f));
     }
+
+    /// <summary>The renderer passes mute through, not just the arc count: at full volume, muted,
+    /// the icon the shell gets carries the cross and none of the outer arc.</summary>
+    [Fact]
+    public void IconCarriesTheMuteCross()
+    {
+        using var renderer = new TrayIconRenderer();
+        var icon = renderer.Get(100, muted: true, lightTaskbar: false, sizePx: 256);
+        using var bmp = icon.ToBitmap();
+
+        const float U = 256 / 32f;
+        bool Opaque(float designX, float designY) =>
+            bmp.GetPixel((int)(designX * U), (int)(designY * U)).A > 128;
+
+        Assert.True(Opaque(6.5f, 16f), "speaker body missing from the icon");
+        Assert.True(Opaque(23f, 16f), "mute cross missing from the icon");
+        Assert.False(Opaque(28f, 16f), "the outer arc is drawn on a muted icon");
+    }
+
+    /// <summary>The renderer picks the glyph colour from the taskbar theme it is handed. Asserted
+    /// through the icon, so a renderer that drew the right shape in the wrong colour — invisible
+    /// against the user's taskbar — is caught.</summary>
+    [Theory]
+    [InlineData(false, true)]  // dark taskbar -> light glyph
+    [InlineData(true, false)]  // light taskbar -> dark glyph
+    public void IconCarriesTheThemeColour(bool lightTaskbar, bool expectLightGlyph)
+    {
+        using var renderer = new TrayIconRenderer();
+        var icon = renderer.Get(100, muted: false, lightTaskbar: lightTaskbar, sizePx: 256);
+        using var bmp = icon.ToBitmap();
+
+        var pixel = bmp.GetPixel((int)(6.5f * 256 / 32f), 128);
+        double luminance = (0.2126 * pixel.R) + (0.7152 * pixel.G) + (0.0722 * pixel.B);
+        _out.WriteLine($"lightTaskbar={lightTaskbar}: icon body pixel {pixel}, luminance {luminance:F1}");
+
+        Assert.Equal(255, pixel.A);
+        if (expectLightGlyph) Assert.True(luminance > 200, $"glyph too dark for a dark taskbar ({luminance:F1})");
+        else Assert.True(luminance < 60, $"glyph too light for a light taskbar ({luminance:F1})");
+    }
 }
