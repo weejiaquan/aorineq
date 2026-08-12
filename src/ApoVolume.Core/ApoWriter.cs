@@ -39,7 +39,11 @@ public sealed class ApoWriter : IDisposable
     private readonly object _retryLock = new();
     private readonly Timer _retryTimer;
     private EqConfigModel? _latestModel;
-    private EqConfigModel? _writtenModel;
+    // Request stamps, both under _retryLock: _requestSeq counts WriteConfig calls, _writtenSeq
+    // records the newest stamp that actually reached disk. _writtenSeq < _requestSeq is exactly
+    // "the state the user asked for is not on the file yet", which is what the retry recovers.
+    private long _requestSeq;
+    private long _writtenSeq;
     private int _retryAttempt;
     private FileSystemWatcher? _watcher;
     private int _writeCount;
@@ -156,23 +160,37 @@ public sealed class ApoWriter : IDisposable
         lock (_retryLock)
         {
             _latestModel = model;
+            // Every request writes, even one that renders identically: an apo-volume.txt
+            // clobbered by another tool must still be repaired by the next render.
+            _requestSeq++;
             _retryAttempt = 0; // a fresh request gets the full retry budget
         }
         _coalescer.Post(WriteLatest);
     }
 
-    /// <summary>Writes whatever state was requested LAST, never the payload a retry was
-    /// scheduled for — a retry that fires after newer edits must land the newest state, and
-    /// coalescing must never resurrect an intermediate one. Runs only on the coalescer, so
-    /// retries and fresh writes are serialized like every other write.</summary>
     private void WriteLatest()
     {
-        EqConfigModel? model;
+        if (!TryWriteLatest())
+            ScheduleRetry();
+    }
+
+    /// <summary>Writes whatever state was requested LAST, never the payload a retry was
+    /// scheduled for — a retry that fires after newer edits must land the newest state, and
+    /// coalescing must never resurrect an intermediate one. Runs only on the coalescer (or on
+    /// the shutdown drain, once the coalescer is gone), so writes never overlap.</summary>
+    /// <returns>true once the last requested state is on disk — including when it already was,
+    /// so a retry that outlives the failure it was armed for writes nothing at all; false when
+    /// the attempt failed and the state still needs one.</returns>
+    private bool TryWriteLatest()
+    {
+        EqConfigModel model;
+        long seq;
         lock (_retryLock)
         {
+            if (_latestModel is null || _writtenSeq >= _requestSeq)
+                return true;
             model = _latestModel;
-            if (model is null || ReferenceEquals(model, _writtenModel))
-                return; // a retry whose state already landed: never write the same state twice
+            seq = _requestSeq;
         }
         var temp = VolumeFilePath + ".tmp";
         try
@@ -183,16 +201,17 @@ public sealed class ApoWriter : IDisposable
             _consecutiveFailures = 0;
             lock (_retryLock)
             {
-                _writtenModel = model;
+                if (seq > _writtenSeq)
+                    _writtenSeq = seq; // a newer request that arrived mid-write keeps its own write
                 _retryAttempt = 0;
                 _retryTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan); // nothing left to recover
             }
-            return;
+            return true;
         }
         catch (IOException) { TryDeleteTemp(temp); }                // transient share violation/AV lock
         catch (UnauthorizedAccessException) { TryDeleteTemp(temp); } // a reader holds the name: the rename is denied
         OnWriteFailed();
-        ScheduleRetry();
+        return false;
     }
 
     /// <summary>Arms the next attempt on the doubling backoff ladder. Timer-driven, so nothing
@@ -216,6 +235,21 @@ public sealed class ApoWriter : IDisposable
         if (_disposed)
             return;
         _coalescer.Post(WriteLatest); // back through the coalescer: never two writes at once
+    }
+
+    /// <summary>Runs the ladder synchronously at shutdown. The async retry needs a live timer
+    /// and a live process, and neither survives <see cref="Dispose"/> — so the state the user
+    /// asked for last gets its attempts here instead, on the same bounded schedule. Costs
+    /// nothing on the normal path (the first call returns immediately once the state has
+    /// landed) and at most ~0.8 s when the file is genuinely locked as the app exits.</summary>
+    private void DrainRetriesBeforeShutdown()
+    {
+        for (int attempt = 0; !TryWriteLatest(); attempt++)
+        {
+            if (attempt >= MaxWriteRetries)
+                return; // budget spent; WriteFailing has already surfaced this
+            Thread.Sleep(FirstRetryDelayMs << attempt);
+        }
     }
 
     private static void TryDeleteTemp(string temp)
@@ -293,8 +327,11 @@ public sealed class ApoWriter : IDisposable
         _watcher?.Dispose();
         lock (_includeLock) { } // wait out any in-flight EnsureInclude
         // Coalescer first: its Dispose flushes the trailing write, and _disposed already stops
-        // that attempt from arming a retry — so the timer is idle by the time it is disposed.
+        // that attempt from arming an async retry. The drain then runs the ladder inline, so a
+        // write that fails on the way out is still recovered; the timer goes last, because the
+        // drain's own successful write disarms it.
         _coalescer.Dispose();
+        DrainRetriesBeforeShutdown();
         lock (_retryLock) { _retryTimer.Dispose(); }
     }
 }
