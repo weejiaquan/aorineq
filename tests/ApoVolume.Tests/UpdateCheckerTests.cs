@@ -187,6 +187,49 @@ public class UpdateCheckerTests
         Assert.Equal(UpdateStatus.Error, result.Status);
     }
 
+    [Fact]
+    public async Task FetchSha256Async_reads_the_published_digest_format()
+    {
+        var hex = "f82b23b87de02c5b5d58d57915030ca434b760a06be2c9611e735fad58851587";
+        var (listener, url, serve) = ServeText(hex + " *ApoVolume.exe\n");
+        var sha = await UpdateChecker.FetchSha256Async(url);
+        await serve;
+        _out.WriteLine("fetched: " + sha);
+        Assert.Equal(hex, sha);
+        listener.Stop();
+    }
+
+    [Fact]
+    public async Task FetchSha256Async_returns_null_on_http_failure_or_garbage()
+    {
+        var (badListener, badUrl, badServe) = ServeStatus(404);
+        Assert.Null(await UpdateChecker.FetchSha256Async(badUrl));
+        await badServe;
+        badListener.Stop();
+
+        var (garbageListener, garbageUrl, garbageServe) = ServeText("<html>not a digest</html>");
+        Assert.Null(await UpdateChecker.FetchSha256Async(garbageUrl));
+        await garbageServe;
+        garbageListener.Stop();
+
+        Assert.Null(await UpdateChecker.FetchSha256Async("http://example.com/x.sha256")); // non-loopback http
+    }
+
+    private static (HttpListener Listener, string Url, Task Serve) ServeText(string text)
+    {
+        var (listener, url) = NewListener();
+        var serve = Task.Run(async () =>
+        {
+            var ctx = await listener.GetContextAsync();
+            var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+            ctx.Response.ContentType = "text/plain";
+            ctx.Response.ContentLength64 = bytes.Length;
+            await ctx.Response.OutputStream.WriteAsync(bytes);
+            ctx.Response.Close();
+        });
+        return (listener, url, serve);
+    }
+
     private static (HttpListener Listener, string Url, Task Serve) ServeJson(string json)
     {
         var (listener, url) = NewListener();

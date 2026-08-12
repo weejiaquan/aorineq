@@ -46,6 +46,11 @@
                                Text="Run as administrator (required for volume keys to work while elevated games are focused)" />
                 </CheckBox>
                 <TextBlock x:Name="ElevationStateText" Margin="24,0,0,0" FontSize="11" Foreground="Gray" />
+                <CheckBox x:Name="ProtocolLinksBox" Margin="0,10,0,2"
+                          Checked="OnProtocolLinksChanged" Unchecked="OnProtocolLinksChanged">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Enable apo-volume:// links (install shared skins straight from websites — always asks first)" />
+                </CheckBox>
 
                 <Separator Margin="0,16" />
 
@@ -57,6 +62,18 @@
                     <Button x:Name="SetupGuideButton" Content="Setup guide…"
                             Click="OnOpenSetupGuide" Padding="8,2" />
                 </StackPanel>
+
+                <Separator Margin="0,16" />
+
+                <TextBlock Text="Updates" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <CheckBox x:Name="AutoUpdateBox" Content="Keep apo-volume up to date automatically"
+                          Margin="0,4,0,6" Checked="OnAutoUpdateChanged" Unchecked="OnAutoUpdateChanged" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Button x:Name="CheckUpdatesButton" Content="Check now"
+                            Click="OnCheckUpdates" Padding="8,2" />
+                </StackPanel>
+                <TextBlock x:Name="UpdateStatusText" FontSize="11" Foreground="Gray"
+                           TextWrapping="Wrap" Margin="0,0,0,2" />
 
                 <Separator Margin="0,16" />
 

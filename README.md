@@ -155,6 +155,35 @@ APNG is not supported (WPF has no decoder for it); use a sprite sheet for full-a
 Skins travel as plain zip files: **Export…** in the skin designer produces one, and
 **Import skin…** (Settings) or **Import…** (designer) installs one — the skin's name is taken
 from the zip filename. Only the known skin files are ever extracted from a zip.
+
+#### `apo-volume://` install links (for websites and forums)
+
+Sites sharing skins can offer a one-click install link. The URL contract:
+
+```
+apo-volume://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha256=<hex>
+```
+
+- `url` — **required.** Direct `https` link to the skin zip (percent-encode it when embedding
+  in the link). Plain `http`, `file`, credentials in the URL, and zips over 20 MB are rejected.
+- `name` — optional. Skin (folder) name to install as; defaults to the zip's filename stem.
+  Follows the same rules as names in the skin designer.
+- `sha256` — optional but recommended. Hex SHA-256 of the zip; the download is rejected if the
+  bytes don't match.
+
+Clicking a link never installs anything by itself: apo-volume always shows a confirmation
+dialog naming the skin and the host first, with **Install & Use** / **Install only** /
+**Cancel**. Malformed links produce only a tray balloon. The scheme is registered per-user at
+startup and can be turned off with Settings → **Enable apo-volume:// links**. Actions other
+than `install-skin` are reserved for future versions.
+
+Example (HTML):
+
+```html
+<a href="apo-volume://install-skin?url=https%3A%2F%2Fexample.com%2Fskins%2Fneon-bar.zip&sha256=…">
+  Install the neon-bar skin
+</a>
+```
   An invalid (unparseable) `skin.json` fails the whole skin, which then falls back per
   [Fallback behavior](#fallback-behavior) below.
 
@@ -211,6 +240,16 @@ a log file if skins fail to load.
 
 0% = mute (−120 dB) · 1% = −50 dB · 100% = 0 dB, linear in dB (≈0.5 dB per %).
 Keys step 2% per press. Never exceeds 0 dB, so no digital clipping.
+
+## Auto-update
+
+apo-volume keeps itself up to date from this repo's GitHub Releases (checked at startup and
+every 24 hours). Updates are verified — the release's `ApoVolume.exe.sha256` must match the
+downloaded exe — and applied in place: the running exe is renamed to `ApoVolume.exe.old`, the
+new build takes its path, and the app restarts itself (when running as administrator it
+finishes on the next start instead, to avoid a surprise UAC prompt). If the exe's folder isn't
+writable, a tray balloon links to the release page instead. Opt out at first run or via
+Settings → **Keep apo-volume up to date automatically**; **Check now** checks on demand.
 
 ## Notes
 

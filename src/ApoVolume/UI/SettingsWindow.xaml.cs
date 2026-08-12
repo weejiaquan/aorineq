@@ -18,6 +18,18 @@ public partial class SettingsWindow : Window
     public event Action<bool>? AutostartChanged;
     public event Action<bool>? RunAsAdminChanged;
 
+    /// <summary>Raised when the "Enable apo-volume:// links" checkbox changes. App
+    /// registers/unregisters the URL scheme and persists.</summary>
+    public event Action<bool>? ProtocolLinksChanged;
+
+    /// <summary>Raised when the auto-update checkbox changes. App persists and
+    /// starts/stops the periodic check.</summary>
+    public event Action<bool>? AutoUpdateChanged;
+
+    /// <summary>Raised by the "Check now" button. App runs an interactive update check and
+    /// reports back via <see cref="SetUpdateStatus"/>.</summary>
+    public event Action? CheckUpdatesRequested;
+
     /// <summary>Raised with the chosen mode ("system" or "eapo") when the user switches the
     /// Volume control radios. App applies the transition live and persists.</summary>
     public event Action<string>? VolumeModeChanged;
@@ -51,6 +63,8 @@ public partial class SettingsWindow : Window
                 ? "Not elevated in this session — restart the app (or approve the prompt) to apply."
                 : "Currently running without elevation.";
         VersionText.Text = "apo-volume " + version;
+        ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
+        AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
         ApplyOsdSettings(settings);
         ApplyVolumeMode(settings);
@@ -108,6 +122,8 @@ public partial class SettingsWindow : Window
         ElevationStateText.Text = isElevated ? "Currently running elevated."
             : runAsAdmin ? "Not elevated in this session — restart the app (or approve the prompt) to apply."
             : "Currently running without elevation.";
+        ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
+        AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
         ApplyOsdSettings(settings);
         ApplyVolumeMode(settings);
@@ -201,6 +217,22 @@ public partial class SettingsWindow : Window
     {
         if (!_initializing) RunAsAdminChanged?.Invoke(RunAsAdminBox.IsChecked == true);
     }
+
+    private void OnProtocolLinksChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing) ProtocolLinksChanged?.Invoke(ProtocolLinksBox.IsChecked == true);
+    }
+
+    private void OnAutoUpdateChanged(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing) AutoUpdateChanged?.Invoke(AutoUpdateBox.IsChecked == true);
+    }
+
+    private void OnCheckUpdates(object sender, RoutedEventArgs e) => CheckUpdatesRequested?.Invoke();
+
+    /// <summary>Updates the "current vX / latest vY" line under the Check now button. Called by
+    /// App whenever a check starts or finishes (manual or background).</summary>
+    public void SetUpdateStatus(string text) => UpdateStatusText.Text = text;
 
     // Checked-only (never Unchecked): each user switch fires exactly once, for the new radio.
     private void OnVolumeModeChanged(object sender, RoutedEventArgs e)

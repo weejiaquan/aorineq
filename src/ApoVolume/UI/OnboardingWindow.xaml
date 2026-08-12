@@ -23,6 +23,8 @@
                                Text="Volume keys write Equalizer APO's preamp; Windows volume stays parked. Attenuation happens inside the APO chain before your EQ — for setups where the Windows volume path is broken or you want pre-DAC level control. Requires Equalizer APO." />
                 </StackPanel>
             </RadioButton>
+            <CheckBox x:Name="AutoUpdateBox" IsChecked="True" Margin="0,14,0,0"
+                      Content="Keep apo-volume up to date automatically" />
         </StackPanel>
         <TextBlock x:Name="GuidanceText" TextWrapping="Wrap" Margin="0,0,0,10"
                    FontWeight="SemiBold" Visibility="Collapsed" />
