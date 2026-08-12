@@ -230,7 +230,7 @@ public class EqShareTests
         Assert.Equal(EqPreset.MaxQ, band.Q);
     }
 
-    /// <summary>The payload format is a published contract (README → "The `data` payload
+    /// <summary>The payload format is a published contract (docs/reference.md → "The `data` payload
     /// format"), so third-party sites encode against it. This pins the worked example in the
     /// docs to the real encoder and decoder, in both directions — a format change that forgets
     /// the documentation fails here.</summary>

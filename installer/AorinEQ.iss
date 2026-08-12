@@ -149,7 +149,7 @@ FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%n[
   wrong advice for the very common case where it points at a portable copy that is still working,
   and proving which copy it names means reading UTF-16 XML back out of a redirected schtasks call.
   A task left naming a deleted exe is inert - Task Scheduler logs a failed start and stops there -
-  and turning "Start with Windows" off before uninstalling removes it properly. The README says so. }
+  and turning "Start with Windows" off before uninstalling removes it properly. docs/reference.md says so. }
 
 { Ownership, not mention. Both writers put the exe path FIRST and QUOTED - Autostart.Enable writes
   "<exe>" and ProtocolRegistration writes "<exe>" "%1" - so the test is a PREFIX test. A substring

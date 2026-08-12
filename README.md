@@ -1,388 +1,179 @@
-<img width="329" height="77" alt="Screenshot 2026-07-21 015704" src="https://github.com/user-attachments/assets/a0461ee7-8981-4633-9e07-9892f67d0496" />
+<p align="center">
+  <img src="docs/media/logo.png" alt="AorinEQ" width="130">
+</p>
 
-# AorinEQ
+<h1 align="center">AorinEQ</h1>
 
-Native Windows tray volume control for USB DACs that ignore Windows volume (e.g. HiBy FC5),
-implemented as an [Equalizer APO](https://equalizerapo.com) preamp controller.
+<h4 align="center">Working volume keys, a skin you draw yourself, and a real parametric EQ — one small tray app for Windows.</h4>
 
-## Why
+<p align="center">
+  <a href="https://github.com/weejiaquan/aorineq/releases/latest">
+    <img src="https://img.shields.io/github/v/release/weejiaquan/aorineq?style=flat-square&label=release&color=6f5bd6" alt="Latest release">
+  </a>
+  <a href="https://github.com/weejiaquan/aorineq/releases">
+    <img src="https://img.shields.io/github/downloads/weejiaquan/aorineq/total?style=flat-square&color=6f5bd6" alt="Downloads">
+  </a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-6f5bd6?style=flat-square" alt="Windows 10 or 11">
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-6f5bd6?style=flat-square" alt="MIT license">
+  </a>
+  <a href="https://aorineq-web.vercel.app">
+    <img src="https://img.shields.io/badge/skins%20%26%20docs-aorineq.app-6f5bd6?style=flat-square" alt="Website">
+  </a>
+</p>
 
-Some USB DACs advertise USB hardware volume but ignore the host's volume commands, leaving
-the Windows volume slider dead — the slider moves, nothing changes. AorinEQ intercepts
-your volume keys and applies a Windows-style 0–100% volume as digital attenuation in the
-Equalizer APO chain, before audio ever reaches the DAC. You get working volume keys, an
-on-screen flyout, and a tray slider again. Works alongside
-[Peace](https://sourceforge.net/projects/peace-equalizer-apo-extension/) (EQ stays in
-Peace, volume lives here).
+<p align="center">
+  <a href="#key-features">Key Features</a> •
+  <a href="#how-to-use">How To Use</a> •
+  <a href="#download">Download</a> •
+  <a href="#docs">Docs</a> •
+  <a href="#credits">Credits</a> •
+  <a href="#license">License</a>
+</p>
 
-Known affected hardware: HiBy FC5 (all firmware versions as of mid-2026). Any DAC with the
-same symptom — per-app volume works, master volume does nothing — should benefit.
+<p align="center">
+  <img src="docs/media/osd-demo.gif" alt="A skinned AorinEQ on-screen display filling, emptying and muting as the volume changes" width="758">
+</p>
+
+## Key Features
+
+* **Two volume modes**
+  - *Replace Windows volume* — the keys drive the real Windows level, you just get a nicer OSD.
+  - *Equalizer APO preamp* — digital attenuation before the audio reaches the device, for USB
+    DACs that ignore Windows volume entirely (the slider moves, nothing changes).
+* **A volume per playback device** — follows the Windows default device, remembers where you left
+  each one, and switches silently.
+* **A fully skinnable OSD** — PNG, GIF or sprite-sheet artwork, an optional muted layer, per-pixel
+  click-through, and click / drag / scroll on the artwork to set the level.
+* **Percent text you actually style** — font, size, colour, bold, outline, shadow, and left /
+  centre / right alignment, anywhere on the image.
+* **Per-skin fill range** — point 0 % and 100 % at the bar inside a wide decorative image, so the
+  fill and the clicks land on the right pixels.
+* **A skin designer** — build one without hand-editing a thing: pick the layers, scrub the fill,
+  drag the number, test it on your desktop, export a zip.
+* **Parametric EQ** — a draggable curve over a live post-EQ spectrum, up to 64 bands, six filter
+  types, auto-preamp, per-band typed columns, bulk paste-as-text, and output meters with clip
+  detection.
+* **Global and per-device EQ** — one chain per playback device, plus a global one on top.
+* **Simple or Advanced** — three sliders when that is all you want, the whole editor when it
+  isn't. Same bands underneath.
+* **Presets and AutoEq** — presets are plain Equalizer APO `.txt` files, and AutoEq profiles
+  import byte-for-byte, straight from its published index.
+* **`aorineq://` links** — one click installs a skin or applies an EQ preset from a web page,
+  always behind a dialog that shows you what it is first.
+* **Auto-update** — checks GitHub Releases, verifies the SHA-256, swaps itself in place.
+* **Windows 11 Fluent UI** — Mica, rounded corners, follows your light/dark theme, and a tray
+  icon drawn at runtime that tracks your volume.
+
+<p align="center">
+  <img src="docs/media/eq-editor.gif" alt="Dragging a band node in the AorinEQ equalizer while the curve and the live spectrum follow" width="900">
+  <br>
+  <em>Drag a node; the curve, the band strip and the config file follow.</em>
+</p>
+
+<p align="center">
+  <img src="docs/media/skin-designer.gif" alt="The AorinEQ skin designer scrubbing the fill preview and showing the percent-text options" width="880">
+  <br>
+  <em>The skin designer: scrub the fill, preview mute, style the number.</em>
+</p>
+
+## How To Use
+
+1. **Install and run it.** On first launch AorinEQ asks which volume mode you want, and — if you
+   pick the Equalizer APO one and don't have it yet — walks you through installing
+   [Equalizer APO](https://equalizerapo.com) from its own home.
+2. **Press a volume key.** Volume Up / Down / Mute now belong to AorinEQ, 2 % a press. The OSD
+   appears; you can click, drag and scroll it too.
+3. **Make it yours.** Tray → *Settings…* for the style, position and behaviour, or
+   *Skin designer…* to draw your own. Grab one from the
+   [skin gallery](https://aorineq-web.vercel.app/gallery) to start from.
+4. **Open the equalizer.** Tray → *Open equalizer…*. Start in Simple mode, or go Advanced and
+   drag the curve. Import an [AutoEq](https://github.com/jaakkopasanen/AutoEq) profile for your
+   headphones in two clicks.
+
+> **Using an Equalizer APO preamp for volume?** Set your DAC's physical volume to your maximum
+> comfortable loudness once — from then on the keyboard works digitally below that ceiling.
 
 ## Download
 
-From the [latest release](../../releases/latest), either:
+**[⬇ AorinEQ-Setup.exe](https://github.com/weejiaquan/aorineq/releases/latest/download/AorinEQ-Setup.exe)** — recommended.
 
-- **`AorinEQ-Setup.exe`** — the installer. Installs for the current user only, into
-  `%LOCALAPPDATA%\Programs\AorinEQ`, so there is **no UAC prompt** and it appears in the Start
-  Menu and in Apps & Features like any other app. It does *not* add itself to Windows startup —
-  that stays a Settings toggle (see below) — and it does not touch your Equalizer APO config.
-- **`AorinEQ.exe`** — the portable single file. Run it from anywhere; nothing is installed.
+Installs for the current user into `%LOCALAPPDATA%\Programs\AorinEQ`, so there is **no UAC
+prompt**, and it shows up in the Start Menu and in Apps & Features like any other app. It does not
+add itself to Windows startup (that stays a Settings toggle) and it does not touch your Equalizer
+APO config.
 
-Both are the same self-contained build: no .NET install required. Each ships with a
-`.sha256` sidecar you can check with `Get-FileHash`. In-app updates work either way, because
-both locations are writable without elevation.
+**[⬇ AorinEQ.exe](https://github.com/weejiaquan/aorineq/releases/latest/download/AorinEQ.exe)** — portable.
 
-Or build from source: .NET 8 SDK, then `powershell -File publish.ps1` (output in `publish\`).
-That builds all four release files; the installer step needs
-[Inno Setup 6](https://jrsoftware.org/isinfo.php)
-(`winget install --id JRSoftware.InnoSetup`).
+The same build as a single file. Run it from anywhere; nothing is installed. In-app updates work
+either way, because both locations are writable without elevation.
 
-Uninstalling asks whether to keep `%APPDATA%\AorinEQ` — your skins, EQ presets and settings —
-and keeps it unless you say otherwise. If you had "Start with Windows" on *together with* "Run as
-administrator", turn it off before you uninstall: that combination uses a scheduled task, and
-Windows only lets an elevated program remove one, which the uninstaller deliberately never is.
-A leftover task is harmless — it just fails to start a program that is gone — and you can delete
-it in Task Scheduler.
+<details>
+<summary><b>Windows will warn you — here's how to check it yourself</b></summary>
 
-## Requirements
+<br>
 
-- Windows 10/11
-- [Equalizer APO](https://equalizerapo.com) installed on your DAC's playback device
-  (run its Configurator and tick your DAC, then reboot — that part is Equalizer APO's
-  standard setup, not ours)
+AorinEQ isn't code-signed (a certificate costs more than this project makes, which is nothing), so
+SmartScreen shows **"Windows protected your PC"**. That is Windows saying *this file is not
+common yet*, not that it found anything. You can run it anyway with **More info → Run anyway**, or
+verify the bytes first — every release ships a `.sha256` sidecar:
 
-## Install
-
-1. Run `AorinEQ.exe` (or the Start Menu entry, if you used the installer). On first run it
-   creates `aorineq.txt` in the APO config folder
-   and adds `Include: aorineq.txt` to `config.txt` (elevating once only if needed).
-2. Set your DAC's physical volume to your maximum comfortable loudness — once. From now on
-   the keyboard controls loudness digitally below that ceiling.
-3. Tray menu → Settings… → "Start with Windows" to run at boot.
-
-## Usage
-
-- **Volume Up / Volume Down / Mute keys** (keyboard media keys or USB volume knobs) — 2% per
-  press, instant, no debounce even when held.
-- **Tray icon**: left-click opens a draggable slider (scroll wheel works too); menu has
-  Mute, Settings… (hosts OSD style, position, and animation options), Exit.
-- Quitting the app restores normal (for these DACs: dead) Windows volume-key handling.
-
-## Volume keys in games (run as administrator)
-
-Windows does not deliver keystrokes to normal apps while an elevated (admin)
-window — many games and anticheats — has focus, so volume keys appear dead
-in-game. Fix: Settings → "Run as administrator". AorinEQ relaunches
-elevated (one UAC prompt), and "Start with Windows" automatically switches
-from the registry Run key to a scheduled task so elevated autostart stays
-silent at boot.
-
-Known limitation: on laptops, Windows' scheduled-task defaults prevent the
-elevated autostart task from starting on battery power (desktop setups are
-unaffected). A fix is planned; until then, plug in before rebooting or start
-the app manually.
-
-## First-run setup
-
-AorinEQ needs [Equalizer APO](https://equalizerapo.com) (free, open-source, GPLv2). If it
-isn't installed, AorinEQ opens a **setup guide** on first run: it downloads the official
-installer for you, starts it, and tells you exactly what to do in the one step that needs you —
-ticking your speakers/headphones in Equalizer APO's Configurator. Afterwards it verifies the
-install against your current playback device and offers a one-click **audio restart** (a reboot
-substitute). The guide can be reopened anytime from Settings → **Setup guide…**, which also
-shows a live status line and an **Open Configurator** shortcut for enabling other devices.
-AorinEQ never bundles Equalizer APO — the installer always comes from its official home.
-
-## OSD styles and skins
-
-AorinEQ displays volume changes as a floating on-screen indicator (OSD). Four display styles
-are available via Settings → Display:
-
-- **Dark pill** — Default. Dark rounded rectangle with white text percentage, positioned top-right
-  by default.
-- **Windows 11** — Follows your system theme and accent color. Rounded rectangle matching Windows
-  design language.
-- **Minimal bar** — Horizontal or vertical bar showing fill level only, no text.
-- **Custom skin** — Load a folder-based skin from `%APPDATA%\AorinEQ\skins\`.
-
-### Position and appearance settings
-
-All styles (including custom skins) support:
-
-- **Position anchor** — 8 positions: the four corners plus the four edge midpoints
-  (top-left, top-center, top-right, left-center, right-center, bottom-left, bottom-center,
-  bottom-right). Dead-center is intentionally not offered.
-- **Offset X, Y** — Pixel adjustments from the anchor (useful for multi-monitor or edge spacing).
-- **Hide delay** — Seconds until OSD fades automatically (0.5 to 5 seconds).
-- **Animation** — Toggle on/off. When on, fade-in and fade-out transitions apply.
-- **Animation duration** — Speed of fade transitions (100 ms to 1000 ms).
-- **Volume step** — Keys increment by 1%, 2%, or 5% per press.
-
-### Custom skin format
-
-Create a folder at `%APPDATA%\AorinEQ\skins\<your-skin-name>\` containing:
-
-- **empty.png** — Image representing 0% volume. Any size and shape (e.g. a cat, bar, circle).
-- **full.png** — Image representing 100% volume. Must be identical dimensions to empty.png.
-- **skin.json** (optional) — JSON configuration file. Field names are case-insensitive.
-  Supported fields:
-  ```json
-  {
-    "percentText": {
-      "show": true,   // whether to display the percentage number
-      "x": 10,        // pixel offset of text from left edge
-      "y": 5,         // pixel offset of text from top edge
-      "color": "#FFFFFFFF",     // text color (#AARRGGBB or #RRGGBB); default white
-      "fontFamily": "Segoe UI", // any installed font
-      "fontSize": 14,           // clamped 4–200
-      "bold": true,
-      "outlineColor": "#FF000000", // omit for no outline
-      "outlineWidth": 2,           // clamped 0–20
-      "shadowColor": "#80000000",  // omit for no shadow
-      "shadowBlur": 4,             // clamped 0–50
-      "shadowDepth": 2             // clamped 0–50
-    },
-    "scale": 1.5,       // zoom multiplier (1.0 = original size, clamped to 0.25–4.0)
-    "fps": 12,          // sprite-sheet playback rate (default 10, clamped to 1–60)
-    "emptyFrames": 1,   // sprite-sheet frame count for empty.png (default 1)
-    "fullFrames": 8,    // sprite-sheet frame count for full.png (default 1)
-    "fillStartX": 120,  // image-pixel x where 0% sits (default 0) — for bars that occupy
-    "fillEndX": 680     // only part of a wider image; default is the image width
-  }
-  ```
-  Omitting `percentText` hides the percentage number. Omitting `scale` defaults to `1.0`.
-
-### Animated skins
-
-Each layer can animate, three ways — all behave identically once loaded:
-
-- **GIF** — name the file `empty.gif`/`full.gif` instead of `.png` (a `.png` with the same
-  name wins if both exist). Frame timing comes from the GIF itself. Note GIF transparency is
-  1-bit: hard edges, no soft shadows.
-- **Sprite-sheet PNG** — stack the frames vertically in one PNG (equal heights) and declare
-  `emptyFrames`/`fullFrames` + `fps` in skin.json. Full 8-bit alpha.
-- **PNG frame sequence** — in the skin designer, click **Frames…** and multi-select your
-  exported frames (e.g. Photoshop's *Export Layers to Files*); the sheet is assembled for you.
-
-Layers animate independently and loop; a static layer plus an animated one is fine. The two
-layers' *frame* sizes must match, and everything else (fill clip, mute, click-through and
-hit-testing, the percent number) works exactly as for static skins — the clickable shape is the
-union of every frame's opaque pixels. Animation only runs while the OSD is on screen.
-APNG is not supported (WPF has no decoder for it); use a sprite sheet for full-alpha animation.
-
-### Sharing skins
-
-Skins travel as plain zip files: **Export…** in the skin designer produces one, and
-**Import skin…** (Settings) or **Import…** (designer) installs one — the skin's name is taken
-from the zip filename. Only the known skin files are ever extracted from a zip.
-
-#### `aorineq://` install links (for websites and forums)
-
-Sites sharing skins can offer a one-click install link. The URL contract:
-
-```
-aorineq://install-skin?url=<https URL to the skin zip>&name=<skin name>&sha256=<hex>
+```powershell
+(Get-FileHash .\AorinEQ-Setup.exe).Hash -eq
+  (irm https://github.com/weejiaquan/aorineq/releases/latest/download/AorinEQ-Setup.exe.sha256).Split(' ')[0]
 ```
 
-- `url` — **required.** Direct `https` link to the skin zip (percent-encode it when embedding
-  in the link). Plain `http`, `file`, credentials in the URL, and zips over 20 MB are rejected.
-- `name` — optional. Skin (folder) name to install as; defaults to the zip's filename stem.
-  Follows the same rules as names in the skin designer.
-- `sha256` — optional but recommended. Hex SHA-256 of the zip; the download is rejected if the
-  bytes don't match.
+`True` means the file is exactly what was published. The portable exe has its own
+[`AorinEQ.exe.sha256`](https://github.com/weejiaquan/aorineq/releases/latest/download/AorinEQ.exe.sha256).
 
-Clicking a link never installs anything by itself: AorinEQ always shows a confirmation
-dialog naming the skin and the host first, with **Install & Use** / **Install only** /
-**Cancel**. Malformed links produce only a tray balloon. The scheme is registered per-user at
-startup and can be turned off with Settings → **Enable aorineq:// links**. EQ presets have
-their own actions — see [`aorineq://` EQ links](#aorineq-eq-links).
+</details>
 
-`apo-volume://` — the scheme this app used before v3.0.0 — stays registered as an alias and
-resolves identically, so links written against the old name keep working. Write new links with
-`aorineq://`.
+<details>
+<summary><b>Build it from source instead</b></summary>
 
-Example (HTML):
+<br>
 
-```html
-<a href="aorineq://install-skin?url=https%3A%2F%2Fexample.com%2Fskins%2Fneon-bar.zip&sha256=…">
-  Install the neon-bar skin
-</a>
-```
-  An invalid (unparseable) `skin.json` fails the whole skin, which then falls back per
-  [Fallback behavior](#fallback-behavior) below.
+Needs the .NET 8 SDK, and [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install --id JRSoftware.InnoSetup`) for the installer step:
 
-### Skin designer
-
-Settings → OSD → **Skin designer…** opens a studio for building skins without hand-editing
-files: pick the two PNGs, scrub a fill slider to preview any volume level, drag the percent
-number where you want it (or hide it), set the scale, and save under a name — the skin appears
-in the picker immediately, and if you edited the skin currently on screen the live OSD reloads
-on save. **Test on desktop** shows the draft as a real OSD window at your configured position:
-clicking, dragging and scrolling it behave exactly like the real thing and drive the designer's
-fill slider. Editing an existing skin: pick it in the designer's dropdown; change the name
-before saving to create a copy instead.
-
-### How fill works
-
-The OSD fills from left to right as volume increases: full.png is revealed via a rectangular
-clip whose width is proportional to volume — at 50%, the left half of full.png is visible; at
-100%, all of it. This clip always follows the x-axis, regardless of the artwork's shape (a
-circular skin fills left-to-right, not radially like a pie chart). Transparent pixels in the
-images are click-through (clicks and drags pass through to whatever is beneath the OSD).
-Opaque pixels respond to clicks and drags to set volume — see below.
-
-The whole bar is clickable, not just the current fill: the clickable/draggable shape is the
-union of empty.png's and full.png's opaque pixels, independent of the current volume level.
-Clicking anywhere on that shape jumps the volume straight to that position, like a normal
-slider — it does not nudge the fill incrementally.
-
-When the bar occupies only part of a wider decorative image, set `fillStartX`/`fillEndX` (or
-drag the two colored range handles in the skin designer): 0% and 100% then map exactly onto
-the bar's pixel edges, both for the fill and for clicks — clicks in the decorative margins
-clamp to 0/100. Keep `full.png`'s lit pixels inside that range; static decoration belongs in
-`empty.png`.
-
-Skins render in Windows' display-scaled units, the same as the rest of the UI: on a 150%-scaled
-display, a skin whose PNGs are 300px wide renders at 450 physical pixels. There is no
-pixel-perfect (unscaled) rendering mode yet; it's on the roadmap.
-
-### Skin shape examples
-
-Skins are not limited to bars. Examples:
-- **Bar** — Classic horizontal or vertical progress bar.
-- **Cat** — A cat outline in empty.png, filled with color in full.png, lighting up as volume rises.
-- **Custom art** — Any PNG shape; the fill always follows the x-axis regardless of shape (see
-  "How fill works" above — there is no radial/pie-chart fill mode).
-
-### Fallback behavior
-
-If a custom skin folder is invalid or missing required images, AorinEQ falls back to the
-Dark pill style and displays a warning in the system tray. Check `%APPDATA%\AorinEQ\` for
-a log file if skins fail to load.
-
-## Equalizer
-
-Tray → **Open equalizer…** (or Settings → Equalizer) opens a parametric EQ that writes real
-Equalizer APO filters. Each scope — **Global**, plus one tab per playback device — has its own
-chain, and the device chains apply on top of the global one.
-
-The editor has two faces, switched in its header and remembered:
-
-- **Simple** — Bass / Mid / Treble sliders (±12 dB), the preset picker, EQ on/off, Flatten,
-  auto-preamp and the level meters. The response curve is shown read-only.
-- **Advanced** — the full editor: a draggable curve, a per-band strip with type/frequency/gain/Q,
-  Edit-as-text, preset management, AutoEq import and a live post-EQ spectrum.
-
-Both edit the **same** bands. The Simple sliders own three reserved filters (low shelf 100 Hz,
-peak 1 kHz, high shelf 8 kHz, all Q 0.7) at the end of the scope's chain; switching to Advanced
-just reveals them as ordinary bands. If the scope already has other bands — an AutoEq import,
-say — Simple mode adjusts on top of them and says so; it never discards or reorders them. New
-installs start in Simple; if you already have bands configured, you keep Advanced.
-
-Presets are plain Equalizer APO ParametricEQ `.txt` files in
-`%APPDATA%\AorinEQ\presets`, so they interchange directly with AutoEq, Peace and anything
-else that speaks that format.
-
-### `aorineq://` EQ links
-
-A site, a forum post or a chat message can hand someone a tuning with one click. Nothing is ever
-downloaded, applied or saved without a confirmation dialog that shows the source, which scope it
-will land in, the band count, the preamp, and the **response curve itself**. For a hosted preset
-the file is only fetched when you press **Preview** (which just draws it) or one of the two
-accept buttons — a link on its own never makes AorinEQ touch the network.
-
-**A preset inside the link** (no hosting needed) — this is what the editor's **Copy share link**
-button produces:
-
-```
-aorineq://apply-preset?type=eq&data=<base64url payload>&name=<preset name>&scope=device|global
+```powershell
+git clone https://github.com/weejiaquan/aorineq.git
+cd aorineq
+powershell -File publish.ps1     # all four release files land in publish\
 ```
 
-**A hosted preset file:**
+Runs on Windows 10/11 x64. Releases are self-contained: no .NET runtime needed to use them.
 
-```
-aorineq://apply-preset?type=eq&url=<https URL to a ParametricEQ .txt>&name=<preset name>&scope=device|global&sha256=<hex>
-```
+</details>
 
-- `type` — **required**, currently `eq`. Other values report "needs a newer version".
-- `data` / `url` — **exactly one.** `data` carries the preset itself (see the format below);
-  `url` must be `https`, without credentials, and at most 1 MB of text that parses fully as
-  Equalizer APO filter lines. A link carrying both is rejected.
-- `name` — optional. Preset (file) name to save as; defaults to the URL's filename stem, or
-  "Shared preset" for a `data` link. Same rules as preset names in the editor.
-- `scope` — optional, `device` (default, the device you are listening on) or `global`. If there
-  is no active playback device, a `device` link lands on the global chain and the dialog says so.
-- `sha256` — optional, hosted links only. Hex SHA-256 of the file; a mismatch is rejected.
-  Meaningless (and refused) on `data` links, which carry no separate file to verify.
+## Docs
 
-Whole links are capped at 4000 characters — comfortable for a 24-band chain, and the editor
-tells you if a chain is too big to share this way (host it and use `url` instead).
+- **[Skin gallery](https://aorineq-web.vercel.app/gallery)** — browse skins, install with one
+  click.
+- **[Link builder](https://aorineq-web.vercel.app/tools/skin-link)** and
+  **[EQ preset links](https://aorineq-web.vercel.app/tools/eq-preset)** — share what you made.
+- **[aorineq-web.vercel.app/docs](https://aorineq-web.vercel.app/docs)** — install guide, skin
+  format, and the `aorineq://` contract.
+- **[docs/reference.md](docs/reference.md)** — the full manual in this repo: volume modes, the
+  whole `skin.json` schema, the equalizer, the link contract and its share-payload format, and
+  every file AorinEQ touches.
 
-#### The `data` payload format
+Found a bug, or want something? [Open an issue](https://github.com/weejiaquan/aorineq/issues).
 
-The payload is UTF-8 text, base64url-encoded (`-`/`_`, padding stripped):
+## Credits
 
-```
-v1|<preamp dB>|<TYPE>,<Fc Hz>,<gain dB>,<Q>;<TYPE>,<Fc Hz>,<gain dB>,<Q>;…
-```
-
-`TYPE` is an Equalizer APO filter token: `PK`, `LSC`, `HSC`, `NO`, `LPQ`, `HPQ`. Numbers are
-invariant (`.` decimal separator); gain is written for every band and ignored for the types that
-have none. Up to 64 bands. For example, `v1|-6.1|LSC,105,-1.4,0.7;PK,3200,2.6,1.8` encodes a
-preamp of −6.1 dB and two filters, and becomes
-`djF8LTYuMXxMU0MsMTA1LC0xLjQsMC43O1BLLDMyMDAsMi42LDEuOA`.
-
-Anything that doesn't decode cleanly — wrong alphabet, invalid UTF-8, an unknown version, a bad
-number, too many bands — is rejected as a malformed link; values that parse but are out of range
-are clamped to the editor's own limits.
-
-### Other deep links
-
-```
-aorineq://autoeq?model=<headphone model>          opens AutoEq import, pre-searched
-aorineq://open?page=eq|settings|designer|skins    opens that window
-```
-
-`autoeq` only fills in the search box — you still pick the profile and press Import. `open`
-changes nothing, so it asks nothing. An unknown `page` reports "needs a newer version".
-
-Example (HTML):
-
-```html
-<a href="aorineq://apply-preset?type=eq&url=https%3A%2F%2Fexample.com%2Fpresets%2FHD650.txt&name=HD650&sha256=…">
-  Apply the HD 650 correction
-</a>
-<a href="aorineq://autoeq?model=Sennheiser%20HD%20650">Find it on AutoEq</a>
-```
-
-Control links (`set-volume`, `mute`) are deliberately **not** implemented: any page could use
-them to nuisance-toggle your audio, and a confirmation dialog would make them pointless.
-
-## Volume model
-
-0% = mute (−120 dB) · 1% = −50 dB · 100% = 0 dB, linear in dB (≈0.5 dB per %).
-Keys step 2% per press. Never exceeds 0 dB, so no digital clipping.
-
-## Auto-update
-
-AorinEQ keeps itself up to date from this repo's GitHub Releases (checked at startup and
-every 24 hours). Updates are verified — the release's `AorinEQ.exe.sha256` must match the
-downloaded exe — and applied in place: the running exe is renamed to `AorinEQ.exe.old`, the
-new build takes its path, and the app restarts itself (when running as administrator it
-finishes on the next start instead, to avoid a surprise UAC prompt). If the exe's folder isn't
-writable, a tray balloon links to the release page instead. Opt out at first run or via
-Settings → **Keep AorinEQ up to date automatically**; **Check now** checks on demand.
-
-## Notes
-
-- Exclusive-mode audio (ASIO / WASAPI exclusive) bypasses Equalizer APO and is unaffected.
-- Keys are intercepted system-wide while the app runs; quitting restores normal handling.
-- Peace's own pre-amp slider stacks additively with AorinEQ's preamp (both `Preamp:` lines
-  apply) — keep Peace's pre-amp at 0 dB.
-- If Peace rewrites `config.txt`, AorinEQ automatically restores its include line.
-- If `aorineq.txt` becomes unwritable (e.g. after an Equalizer APO reinstall), a tray
-  balloon warns you instead of failing silently.
+- **[Equalizer APO](https://equalizerapo.com)** by jthedering — the audio engine everything here
+  writes to. AorinEQ never bundles it; the setup guide downloads it from its own home.
+- **[WPF-UI](https://github.com/lepoco/wpfui)** by lepo.co — the Fluent controls this app is
+  built out of.
+- **[AutoEq](https://github.com/jaakkopasanen/AutoEq)** by Jaakko Pasanen — the headphone
+  correction profiles the importer searches.
 
 ## License
 
 [MIT](LICENSE)
+
+---
+
+> [aorineq-web.vercel.app](https://aorineq-web.vercel.app) &nbsp;&middot;&nbsp;
+> GitHub [@weejiaquan](https://github.com/weejiaquan)

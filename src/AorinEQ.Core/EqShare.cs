@@ -8,7 +8,7 @@ namespace AorinEQ.Core;
 /// hosted anywhere — paste it in a forum or a chat, the recipient clicks, the confirm dialog
 /// opens.
 ///
-/// The plain text behind the base64url is a documented contract (README) so other sites can
+/// The plain text behind the base64url is a documented contract (docs/reference.md) so other sites can
 /// generate links:
 /// <code>v1|&lt;preamp dB&gt;|&lt;TYPE&gt;,&lt;Fc Hz&gt;,&lt;gain dB&gt;,&lt;Q&gt;;…</code>
 /// with the same filter tokens Equalizer APO uses (PK, LSC, HSC, NO, LPQ, HPQ) and invariant
