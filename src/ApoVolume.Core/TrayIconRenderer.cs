@@ -21,8 +21,11 @@ namespace ApoVolume.Core;
 /// <c>NotifyIcon.Icon</c>, whose setter compares by reference, so an unchanged look doesn't even
 /// reach the shell.
 ///
-/// The cache is bounded by construction: four arc levels plus muted, two themes, and however many
-/// small-icon sizes the session sees (one, unless the DPI changes).
+/// The cache holds ten entries per icon size — four arc levels plus muted, in two themes — and a
+/// session sees one size unless the display scaling changes. Entries for a superseded size are
+/// deliberately NOT evicted: eviction would destroy handles between the shell being handed a new
+/// icon and having drawn it, which is the one way to turn this cache back into the v2.0.1 bug. Ten
+/// icon handles per size the machine has ever reported is not a leak worth that risk.
 ///
 /// UI thread only, like the <c>NotifyIcon</c> it feeds — the tray marshals system-event callbacks
 /// onto the dispatcher rather than this type taking a lock it would otherwise never contend.</summary>
