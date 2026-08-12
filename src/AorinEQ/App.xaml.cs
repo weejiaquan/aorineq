@@ -1500,6 +1500,9 @@ public partial class App : System.Windows.Application
         var writer = new ApoWriter(configDir);
         try
         {
+            // Before the probe below touches aorineq.txt into existence: an empty file at the new
+            // name would make the migration skip carrying the legacy render across.
+            TryMigrateLegacyApoFiles(writer);
             EnsureWritableOrElevate(writer);
         }
         catch
@@ -1540,6 +1543,7 @@ public partial class App : System.Windows.Application
             var writer = new ApoWriter(configDir);
             try
             {
+                TryMigrateLegacyApoFiles(writer); // before the touch below invents an empty file
                 File.AppendAllText(writer.VolumeFilePath, ""); // create-or-touch; throws if unwritable
                 writer.EnsureInclude();
             }
@@ -1814,6 +1818,21 @@ public partial class App : System.Windows.Application
         });
     }
 
+    /// <summary>ONE-TIME v3.0.0 rename migration of the managed EAPO file and config.txt's Include
+    /// line, best effort. A config folder that isn't writable yet simply gets it from the elevated
+    /// <c>--setup</c> pass below — which runs the same migration with full rights — or from the
+    /// next start. Never blocks startup over a rename.</summary>
+    private static void TryMigrateLegacyApoFiles(ApoWriter writer)
+    {
+        try
+        {
+            writer.MigrateLegacyInclude();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     /// <summary>Normal runs must be able to write aorineq.txt and config.txt. If not, self-elevate once.</summary>
     // Note: if this method itself runs elevated (e.g. a normal-mode session started via "Run as
     // administrator" rather than the RunAsAdmin/ScheduledTask path), the probe below trivially
@@ -1854,17 +1873,22 @@ public partial class App : System.Windows.Application
         // ACE — it inherits from the directory, so only a directory grant survives that pattern.
         GrantUsersModifyOnDirectory(configDir);
 
-        var volumePath = Path.Combine(configDir, ApoWriter.VolumeFileName);
-        if (!File.Exists(volumePath))
-            File.WriteAllText(volumePath, ApoWriter.FormatPreamp(0) + Environment.NewLine);
-        GrantUsersModify(volumePath);
-
         using var w = new ApoWriter(configDir);
         // Created empty (if absent) before the ACL grant so EnsureInclude below — and every later
         // non-elevated write — happens against a file Users can already modify.
         if (!File.Exists(w.ConfigTxtPath))
             File.WriteAllText(w.ConfigTxtPath, "");
         GrantUsersModify(w.ConfigTxtPath);
+
+        // ONE-TIME v3.0.0 rename, with the rights a non-elevated session may have lacked — and
+        // ahead of the volume file being created below, which would otherwise stand in for the
+        // legacy render this carries across.
+        w.MigrateLegacyInclude();
+
+        var volumePath = Path.Combine(configDir, ApoWriter.VolumeFileName);
+        if (!File.Exists(volumePath))
+            File.WriteAllText(volumePath, ApoWriter.FormatPreamp(0) + Environment.NewLine);
+        GrantUsersModify(volumePath);
         w.EnsureInclude();
     }
 
