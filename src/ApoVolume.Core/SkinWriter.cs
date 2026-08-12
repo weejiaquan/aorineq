@@ -20,31 +20,9 @@ public static class SkinWriter
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private static readonly string[] ReservedNames =
-    {
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    };
-
     /// <summary>Returns a user-readable error for an invalid skin (folder) name, or null when valid.
     /// The name is used verbatim (trimmed) as a directory name under the skins root.</summary>
-    public static string? ValidateName(string name)
-    {
-        var trimmed = name.Trim();
-        if (trimmed.Length == 0)
-            return "Skin name cannot be empty.";
-        if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            return "Skin name contains characters not allowed in folder names.";
-        if (trimmed.EndsWith('.'))
-            return "Skin name cannot end with a dot.";
-        // Windows reserves device names both bare and with any extension (NUL, NUL.txt, COM1.png),
-        // so the check runs against the stem before the first dot.
-        var stem = trimmed.Split('.')[0];
-        if (Array.Exists(ReservedNames, r => r.Equals(stem, StringComparison.OrdinalIgnoreCase)))
-            return $"'{trimmed}' is a reserved Windows device name.";
-        return null;
-    }
+    public static string? ValidateName(string name) => FileNames.Validate(name, "Skin name");
 
     /// <summary>Creates or overwrites <c>skinsRoot\name</c>: copies each source image to
     /// empty/full/muted keeping the SOURCE's extension (.png or .gif) and deletes the stale

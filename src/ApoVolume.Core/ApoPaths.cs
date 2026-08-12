@@ -31,4 +31,14 @@ public static class ApoPaths
         Directory.CreateDirectory(root);
         return root;
     }
+
+    /// <summary>Resolves (and creates, if missing) the per-user EQ presets root:
+    /// %APPDATA%\apo-volume\presets.</summary>
+    public static string GetPresetsRoot()
+    {
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "apo-volume", "presets");
+        Directory.CreateDirectory(root);
+        return root;
+    }
 }
