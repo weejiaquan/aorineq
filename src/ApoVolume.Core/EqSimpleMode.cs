@@ -14,9 +14,10 @@ public static class EqEditorModes
     public static string Normalize(string? mode) =>
         mode is Simple or Advanced ? mode : Unset;
 
-    /// <summary>The face to open with. A stored choice always wins. Otherwise: anyone who
-    /// already has bands configured was using the full editor before this existed and keeps it;
-    /// a first-time EQ user gets the three sliders.</summary>
+    /// <summary>The face to open with. A stored choice always wins — and the editor stores the
+    /// resolved choice the first time it opens, so this only ever guesses once. Otherwise:
+    /// anyone who already has bands configured was using the full editor before this existed and
+    /// keeps it; a first-time EQ user gets the three sliders.</summary>
     public static string Resolve(Settings settings)
     {
         var stored = Normalize(settings.EqEditorMode);
@@ -37,10 +38,15 @@ public readonly record struct MacroGains(double BassDb, double MidDb, double Tre
 /// END of a scope's chain; anything in front of them is somebody else's (an AutoEq import, a
 /// hand-built chain) and is never touched.
 ///
-/// The trio is identified by its reserved SHAPE and position, not by a marker: apo-volume.txt
-/// stays pure Equalizer APO syntax, with no comments this app would have to defend. The cost is
-/// that editing a macro band in Advanced mode turns it into an ordinary band — which is exactly
-/// the honest outcome, since it no longer is what the slider claims to control.</summary>
+/// Ownership is recorded in the app's OWN store — <see cref="EqScopeSetting.MacroBands"/> in
+/// settings.json — and passed in here as <c>owned</c>. apo-volume.txt stays pure Equalizer APO
+/// syntax, with no marker comments this app would have to defend, AND a chain that merely
+/// happens to end in those three shapes is never repurposed: without the flag the bands are
+/// somebody else's and Simple mode adds its own trio after them.
+///
+/// The shape is still checked alongside the flag, because a scope the user edited in Advanced
+/// mode may no longer contain what the sliders claim to control — in which case the trio stops
+/// being the sliders' and becomes ordinary bands, which is the honest outcome.</summary>
 public static class EqSimpleMode
 {
     /// <summary>Slider travel. Wide enough to be worth a slider, narrow enough that a first-time
@@ -48,8 +54,8 @@ public static class EqSimpleMode
     public const double MaxGainDb = 12;
 
     /// <summary>The reserved shapes, in slider order (bass, mid, treble), at 0 dB. Every value
-    /// is exactly representable in the ParametricEQ text format, so a chain still detects after
-    /// a round trip through apo-volume.txt.</summary>
+    /// is exactly representable in the ParametricEQ text format, so an owned chain still detects
+    /// after a round trip through apo-volume.txt.</summary>
     public static readonly IReadOnlyList<EqBand> Shapes = new[]
     {
         new EqBand(EqBandType.LowShelf, 100, 0, 0.7),
@@ -57,45 +63,52 @@ public static class EqSimpleMode
         new EqBand(EqBandType.HighShelf, 8000, 0, 0.7),
     };
 
-    /// <summary>Reads the macro gains off a chain that ends in the reserved trio.</summary>
-    public static bool TryRead(IReadOnlyList<EqBand> bands, out MacroGains gains)
+    /// <summary>Whether the sliders currently control the tail of this chain: the scope must be
+    /// flagged as owning a macro trio AND still end in one.</summary>
+    public static bool OwnsMacroBands(IReadOnlyList<EqBand> bands, bool owned) =>
+        owned && EndsWithMacroTrio(bands);
+
+    /// <summary>Reads the macro gains off a chain the sliders own.</summary>
+    public static bool TryRead(IReadOnlyList<EqBand> bands, bool owned, out MacroGains gains)
     {
         gains = default;
-        if (!EndsWithMacroTrio(bands))
+        if (!OwnsMacroBands(bands, owned))
             return false;
         int start = bands.Count - Shapes.Count;
         gains = new MacroGains(bands[start].GainDb, bands[start + 1].GainDb, bands[start + 2].GainDb);
         return true;
     }
 
-    /// <summary>The macro gains, or all-flat when this chain has no macro trio yet — what Simple
-    /// mode shows on its sliders the first time it opens on a scope.</summary>
-    public static MacroGains ReadOrZero(IReadOnlyList<EqBand> bands) =>
-        TryRead(bands, out var gains) ? gains : new MacroGains(0, 0, 0);
+    /// <summary>The macro gains, or all-flat when the sliders don't own a trio here yet — what
+    /// Simple mode shows the first time it opens on a scope.</summary>
+    public static MacroGains ReadOrZero(IReadOnlyList<EqBand> bands, bool owned) =>
+        TryRead(bands, owned, out var gains) ? gains : new MacroGains(0, 0, 0);
 
-    /// <summary>Everything in the chain that isn't the macro trio — the bands Simple mode leaves
-    /// alone and tells the user about.</summary>
-    public static IReadOnlyList<EqBand> ForeignBands(IReadOnlyList<EqBand> bands) =>
-        EndsWithMacroTrio(bands)
+    /// <summary>Everything in the chain that isn't the sliders' own trio — the bands Simple mode
+    /// leaves alone and tells the user about.</summary>
+    public static IReadOnlyList<EqBand> ForeignBands(IReadOnlyList<EqBand> bands, bool owned) =>
+        OwnsMacroBands(bands, owned)
             ? bands.Take(bands.Count - Shapes.Count).ToArray()
             : bands.ToArray();
 
-    public static bool HasForeignBands(IReadOnlyList<EqBand> bands) => ForeignBands(bands).Count > 0;
+    public static bool HasForeignBands(IReadOnlyList<EqBand> bands, bool owned) =>
+        ForeignBands(bands, owned).Count > 0;
 
-    /// <summary>Whether the macro trio fits: it always does once the chain already ends in it,
+    /// <summary>Whether the macro trio fits: it always does once the sliders already own one,
     /// and otherwise only if three more bands stay inside <see cref="EqPreset.MaxBands"/>.</summary>
-    public static bool HasRoom(IReadOnlyList<EqBand> bands) =>
-        ForeignBands(bands).Count + Shapes.Count <= EqPreset.MaxBands;
+    public static bool HasRoom(IReadOnlyList<EqBand> bands, bool owned) =>
+        ForeignBands(bands, owned).Count + Shapes.Count <= EqPreset.MaxBands;
 
-    /// <summary>The chain with the macro trio set to <paramref name="gains"/>: foreign bands
-    /// first, exactly as they were, then the three reserved bands. Idempotent, so dragging a
-    /// slider replaces gains instead of stacking bands. A chain with no room for the trio is
-    /// returned untouched — nothing is ever dropped to make space.</summary>
-    public static IReadOnlyList<EqBand> Apply(IReadOnlyList<EqBand> bands, MacroGains gains)
+    /// <summary>The chain with the sliders' trio set to <paramref name="gains"/>: foreign bands
+    /// first, exactly as they were, then the three reserved bands. Idempotent once owned, so
+    /// dragging a slider replaces gains instead of stacking bands. A chain with no room for the
+    /// trio is returned untouched — nothing is ever dropped to make space. The caller records
+    /// ownership (<see cref="EqScopeSetting.MacroBands"/>) when this succeeds.</summary>
+    public static IReadOnlyList<EqBand> Apply(IReadOnlyList<EqBand> bands, bool owned, MacroGains gains)
     {
-        if (!HasRoom(bands))
+        if (!HasRoom(bands, owned))
             return bands.ToArray();
-        var result = new List<EqBand>(ForeignBands(bands));
+        var result = new List<EqBand>(ForeignBands(bands, owned));
         double[] values = { gains.BassDb, gains.MidDb, gains.TrebleDb };
         for (int i = 0; i < Shapes.Count; i++)
             result.Add(Shapes[i] with { GainDb = ClampGain(values[i]) });

@@ -1023,67 +1023,29 @@ public partial class App : System.Windows.Application
     /// megabyte is room for anything legitimate and far below what could hurt.</summary>
     private const long MaxPresetTextBytes = 1024 * 1024;
 
-    /// <summary>An <c>apply-preset&amp;type=eq</c> link: resolve the preset (inline payload, or a
-    /// gated https download that must parse as a whole ParametricEQ block), then confirm — the
-    /// dialog shows the source, the band count, the preamp, the target scope and the response
-    /// CURVE, so the user sees the tuning before accepting it.
+    /// <summary>An <c>apply-preset&amp;type=eq</c> link: confirm first, then apply. The dialog is
+    /// the trust boundary — it shows the source, the target scope and, once the preset is in
+    /// hand, the band count, the preamp and the response CURVE, so the user sees the tuning
+    /// before accepting it.
     ///
-    /// For a hosted link the fetch necessarily happens before the dialog, because the curve and
-    /// the band count ARE the content. The transport is gated exactly like every other download
-    /// (https-only with per-hop revalidation, size cap, optional sha256 pin) and the file is
-    /// parsed, never executed; the boundary that matters — nothing is applied or written without
-    /// a click — is unchanged.</summary>
+    /// An inline (data=) preset is already decoded. A HOSTED preset is fetched by the dialog, and
+    /// only when the user clicks (Preview, or one of the two accept buttons): a page that fires
+    /// links must not be able to make this app hit URLs of its choosing. The transport is gated
+    /// exactly like every other download (https-only with per-hop revalidation, size cap,
+    /// optional sha256 pin) and the file is parsed, never executed.</summary>
     private async Task HandleEqPresetLinkAsync(ProtocolLink link)
     {
-        EqPreset preset;
-        string source;
-        if (link.Preset is { } inline)
-        {
-            preset = inline;
-            source = EqPresetLinkDialog.SharedLinkSource;
-        }
-        else
-        {
-            var staging = Path.Combine(Path.GetTempPath(),
-                "apo-preset-" + Guid.NewGuid().ToString("N") + ".txt");
-            try
-            {
-                await GatedDownload.DownloadAsync(link.Url!, staging, MaxPresetTextBytes,
-                    GatedDownload.NoMagic, link.Sha256);
-                var text = await File.ReadAllTextAsync(staging);
-                // Strict: the whole block parses or nothing is applied.
-                if (!EqPreset.TryParse(link.Name, text, out preset, out var parseError))
-                {
-                    _tray?.ShowWarning($"That preset link didn't contain a usable "
-                        + $"Equalizer APO preset. {parseError}");
-                    return;
-                }
-                if (preset.Bands.Count == 0)
-                {
-                    _tray?.ShowWarning("That preset link contains no filters.");
-                    return;
-                }
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or IOException
-                or UnauthorizedAccessException)
-            {
-                _tray?.ShowWarning($"Preset download failed: {ex.Message}");
-                return;
-            }
-            finally
-            {
-                try { File.Delete(staging); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
-            source = new Uri(link.Url!).Host;
-        }
-
+        var source = link.Preset is null
+            ? new Uri(link.Url!).Host
+            : EqPresetLinkDialog.SharedLinkSource;
         var (deviceId, scopeDescription) = ResolveEqLinkScope(link.Scope);
         bool overwrites = PresetStore.List(ApoPaths.GetPresetsRoot())
             .Contains(link.Name, StringComparer.OrdinalIgnoreCase);
-        var choice = EqPresetLinkDialog.Confirm(preset, source, scopeDescription, overwrites);
-        if (choice == EqPresetLinkChoice.Cancel)
+
+        var result = EqPresetLinkDialog.Confirm(link.Name, source, scopeDescription, overwrites,
+            link.Preset,
+            link.Preset is null ? () => DownloadEqPresetAsync(link) : null);
+        if (result.Choice == EqPresetLinkChoice.Cancel || result.Preset is not { } preset)
             return;
 
         try
@@ -1096,7 +1058,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (choice == EqPresetLinkChoice.ApplyAndSave)
+        if (result.Choice == EqPresetLinkChoice.ApplyAndSave)
         {
             var current = deviceId is null
                 ? _settings.GlobalEq
@@ -1110,6 +1072,40 @@ public partial class App : System.Windows.Application
         {
             _eqEditor?.RefreshFromApp();
             _tray?.ShowInfo($"EQ preset '{link.Name}' saved.");
+        }
+    }
+
+    /// <summary>Fetches and strictly parses a hosted ParametricEQ preset. Called by the confirm
+    /// dialog, only after the user clicks. Every failure — transport, size, checksum, or text
+    /// that isn't a whole Equalizer APO block — surfaces as an
+    /// <see cref="InvalidOperationException"/> the dialog shows inline; the staging file never
+    /// outlives the call.</summary>
+    private static async Task<EqPreset> DownloadEqPresetAsync(ProtocolLink link)
+    {
+        var staging = Path.Combine(Path.GetTempPath(),
+            "apo-preset-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await GatedDownload.DownloadAsync(link.Url!, staging, MaxPresetTextBytes,
+                GatedDownload.NoMagic, link.Sha256);
+            var text = await File.ReadAllTextAsync(staging);
+            // Strict: the whole block parses or nothing is applied.
+            if (!EqPreset.TryParse(link.Name, text, out var preset, out var parseError))
+                throw new InvalidOperationException(
+                    $"That link didn't contain a usable Equalizer APO preset. {parseError}");
+            if (preset.Bands.Count == 0)
+                throw new InvalidOperationException("That link contains no filters.");
+            return preset;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"Preset download failed: {ex.Message}", ex);
+        }
+        finally
+        {
+            try { File.Delete(staging); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 

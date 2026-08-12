@@ -90,4 +90,38 @@ public class PresetStoreTests : IDisposable
         Assert.NotNull(error);
         Assert.Contains("too long", error!);
     }
+
+    [Fact]
+    public void A_preset_named_before_the_length_cap_stays_loadable_and_deletable()
+    {
+        // The cap is a policy for names we ACCEPT. Applying it to names already on disk would
+        // make anything saved before it shipped unselectable in the editor and impossible to
+        // delete from the app — the file would just sit there, listed but inert.
+        var longName = new string('n', FileNames.MaxLength + 20);
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(Path.Combine(_root, longName + ".txt"),
+            "Filter 1: ON PK Fc 1000 Hz Gain 3.0 dB Q 1.00");
+
+        Assert.Contains(longName, PresetStore.List(_root));
+        var loaded = PresetStore.Load(_root, longName);
+        _out.WriteLine($"{longName.Length}-char name -> loaded {loaded?.Bands.Count} bands");
+        Assert.NotNull(loaded);
+        Assert.Single(loaded!.Bands);
+        Assert.True(PresetStore.Delete(_root, longName));
+        Assert.Empty(PresetStore.List(_root));
+    }
+
+    [Theory]
+    [InlineData("..")]
+    [InlineData("a/b")]
+    [InlineData("NUL")]
+    [InlineData("")]
+    public void Path_unsafe_names_are_still_refused_by_every_entry_point(string name)
+    {
+        // Relaxing the LENGTH check on the read paths must not relax traversal safety.
+        Assert.False(FileNames.IsPathSafe(name));
+        Assert.Null(PresetStore.Load(_root, name));
+        Assert.False(PresetStore.Delete(_root, name));
+        Assert.Throws<ArgumentException>(() => PresetStore.Save(_root, name, "x"));
+    }
 }

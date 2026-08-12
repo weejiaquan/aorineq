@@ -20,10 +20,15 @@ public sealed record DeviceVolumeSetting(int Percent, bool Muted);
 /// <summary>One EQ scope's persisted assignment: the active preset's name ("" = none,
 /// "(custom)" when edited after load), its clipping-prevention preamp, the scope's on/off
 /// bypass, and the live band chain itself (persisted directly so custom edits survive a
-/// restart without requiring a saved preset file).</summary>
+/// restart without requiring a saved preset file).
+///
+/// <paramref name="MacroBands"/> records that the last three bands are Simple mode's
+/// bass/mid/treble controls. It lives here — the app's own store — rather than as a marker in
+/// apo-volume.txt, which stays pure Equalizer APO syntax. Without it a chain that merely happens
+/// to end in those three shapes would be repurposed by the sliders.</summary>
 public sealed record EqScopeSetting(
     string PresetName = "", double PresetPreampDb = 0, bool Enabled = true,
-    IReadOnlyList<EqBand>? Bands = null);
+    IReadOnlyList<EqBand>? Bands = null, bool MacroBands = false);
 
 /// <summary>Persisted app state. Autostart lives in the registry, not here.</summary>
 public sealed record Settings(

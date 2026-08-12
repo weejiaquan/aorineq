@@ -32,7 +32,9 @@ public static class PresetStore
     /// tolerant <see cref="EqPreset.Parse"/> never fails on content).</summary>
     public static EqPreset? Load(string root, string name)
     {
-        if (ValidateName(name) is not null)
+        // Path safety, not the full naming policy: a preset file already on disk must stay
+        // loadable even if its name is longer than we would accept today.
+        if (!FileNames.IsPathSafe(name))
             return null;
         var path = Path.Combine(root, name.Trim() + ".txt");
         try
@@ -61,7 +63,7 @@ public static class PresetStore
     /// <summary>Deletes the named preset; false when it didn't exist or couldn't be removed.</summary>
     public static bool Delete(string root, string name)
     {
-        if (ValidateName(name) is not null)
+        if (!FileNames.IsPathSafe(name)) // as Load: an existing file stays removable
             return false;
         var path = Path.Combine(root, name.Trim() + ".txt");
         try
