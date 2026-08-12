@@ -1291,7 +1291,8 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var staging = Path.Combine(Path.GetTempPath(), "apo-update-" + Guid.NewGuid().ToString("N") + ".exe");
+        var staging = Path.Combine(Path.GetTempPath(), "aorineq-update-" + Guid.NewGuid().ToString("N") + ".exe");
+        string installedExePath;
         try
         {
             var sha = await UpdateChecker.FetchSha256Async(release.Sha256Url!);
@@ -1299,7 +1300,9 @@ public partial class App : System.Windows.Application
                 throw new InvalidOperationException("couldn't verify the release checksum.");
             await GatedDownload.DownloadAsync(release.ExeUrl!, staging, UpdateApplier.MaxExeBytes,
                 GatedDownload.ExeMagic, sha);
-            UpdateApplier.Apply(ExePath, staging);
+            // Usually our own path; different only on the update that carries v3.0.0's rename,
+            // which is why the relaunch below uses what Apply reports rather than ExePath.
+            installedExePath = UpdateApplier.Apply(ExePath, staging);
         }
         catch (InvalidOperationException ex)
         {
@@ -1334,10 +1337,11 @@ public partial class App : System.Windows.Application
         System.Diagnostics.Process? proc;
         try
         {
-            proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(ExePath, "--updated")
-            {
-                UseShellExecute = true,
-            });
+            proc = System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(installedExePath, "--updated")
+                {
+                    UseShellExecute = true,
+                });
         }
         catch (System.ComponentModel.Win32Exception)
         {
