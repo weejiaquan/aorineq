@@ -52,7 +52,17 @@
                 <Border BorderBrush="#40808080" BorderThickness="1">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                         <!-- Checkerboard sits behind the artwork so transparency is visible. -->
-                        <Grid x:Name="PreviewHost" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                        <!-- UseLayoutRounding/SnapsToDevicePixels are turned OFF for the whole
+                             preview subtree, and must stay off. FluentWindow switches both ON at
+                             the window, and they inherit: with rounding on, a skin whose scaled
+                             size lands on a half pixel (seia-bar-shadow is 525 x 262.5 at scale
+                             0.35) is snapped, and the preview stops being a pixel-exact model of
+                             the OSD. SkinOsdWindow is deliberately NOT a FluentWindow, so it has
+                             no rounding — matching it here is what keeps "what you see in the
+                             designer is what the OSD draws" true, including where the v1.7.1
+                             aliased fill-boundary clip falls. -->
+                        <Grid x:Name="PreviewHost" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24"
+                              UseLayoutRounding="False" SnapsToDevicePixels="False">
                             <Grid.Background>
                                 <DrawingBrush TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
                                     <DrawingBrush.Drawing>
