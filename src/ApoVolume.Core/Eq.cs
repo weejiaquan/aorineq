@@ -97,24 +97,38 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
                     preamp = Math.Clamp(p, MinPreampDb, MaxPreampDb);
                 continue;
             }
-            if (TryParseFilterLine(line) is { } band)
+            if (ParseFilterLine(line).Band is { } band)
                 bands.Add(band);
         }
         return new EqPreset(name, preamp, bands);
     }
 
-    private static EqBand? TryParseFilterLine(string line)
+    /// <summary>Outcome of one filter line: a band, a skip (disabled filter), or an error
+    /// explaining what is wrong — the tolerant <see cref="Parse"/> ignores the error, the
+    /// strict <see cref="TryParse"/> surfaces it. One implementation, two policies.</summary>
+    private readonly record struct FilterLineResult(EqBand? Band, string? Error);
+
+    private static FilterLineResult ParseFilterLine(string line)
     {
         if (!line.StartsWith("Filter", StringComparison.OrdinalIgnoreCase))
-            return null;
+            return new FilterLineResult(null, "expected a 'Filter …' or 'Preamp: …' line.");
         int colon = line.IndexOf(':');
         if (colon < 0)
-            return null;
+            return new FilterLineResult(null, "missing ':' after the filter number.");
         var tokens = line[(colon + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (tokens.Length < 2)
-            return null;
+        if (tokens.Length == 0)
+            return new FilterLineResult(null, "expected 'ON <type> Fc <freq> Hz …' after the colon.");
+        // A disabled filter is valid syntax that shapes nothing. Checked BEFORE the parameter
+        // count, because a disabled line legitimately carries nothing else ("Filter 3: None").
         if (!tokens[0].Equals("ON", StringComparison.OrdinalIgnoreCase))
-            return null; // OFF (or malformed) — a disabled filter must not shape the chain
+        {
+            return tokens[0].Equals("OFF", StringComparison.OrdinalIgnoreCase)
+                || tokens[0].Equals("None", StringComparison.OrdinalIgnoreCase)
+                ? new FilterLineResult(null, null)
+                : new FilterLineResult(null, $"expected ON, OFF or None, found '{tokens[0]}'.");
+        }
+        if (tokens.Length < 2)
+            return new FilterLineResult(null, "expected a filter type after ON.");
         EqBandType? type = tokens[1].ToUpperInvariant() switch
         {
             "PK" or "PEQ" => EqBandType.Peak,
@@ -126,7 +140,8 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
             _ => null,
         };
         if (type is null)
-            return null;
+            return new FilterLineResult(null,
+                $"unsupported filter type '{tokens[1]}' (supported: PK, LSC, HSC, NO, LPQ, HPQ).");
 
         double? fc = null, gain = null, q = null, bwOct = null;
         for (int i = 2; i < tokens.Length - 1; i++)
@@ -149,7 +164,7 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
             }
         }
         if (fc is null)
-            return null; // Fc is required for every supported type
+            return new FilterLineResult(null, "missing 'Fc <frequency> Hz'.");
         if (q is null && bwOct is { } bw && bw > 0)
         {
             // Full RBJ bandwidth-to-Q: 1/Q = 2·sinh(ln2/2 · BW · ω0/sin ω0). The ω0/sin ω0
@@ -158,7 +173,72 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
             q = 1.0 / (2.0 * Math.Sinh(Math.Log(2) / 2.0 * bw * w0 / Math.Sin(w0)));
         }
         double defaultQ = type == EqBandType.Notch ? DefaultNotchQ : DefaultQ;
-        return Clamp(new EqBand(type.Value, fc.Value, gain ?? 0, q ?? defaultQ));
+        return new FilterLineResult(
+            Clamp(new EqBand(type.Value, fc.Value, gain ?? 0, q ?? defaultQ)), null);
+    }
+
+    /// <summary>Strict counterpart of <see cref="Parse"/> for hand-typed/pasted text (the
+    /// editor's "Edit as text" dialog): the SAME line parser, but the first unusable line
+    /// fails the whole parse with a 1-based line number and reason, so nothing is ever
+    /// partially applied. Blank lines, '#' comments, CRLF and disabled (OFF/None) filters are
+    /// accepted exactly as the tolerant path accepts them.</summary>
+    public static bool TryParse(string name, string text, out EqPreset preset, out string? error)
+    {
+        double preamp = 0;
+        var bands = new List<EqBand>();
+        var lines = text.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+                continue;
+            if (line.StartsWith("Preamp:", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryReadNumberAfter(line, "Preamp:", out double p))
+                {
+                    preset = new EqPreset(name, 0, Array.Empty<EqBand>());
+                    error = $"Line {i + 1}: expected a number after 'Preamp:'.";
+                    return false;
+                }
+                preamp = Math.Clamp(p, MinPreampDb, MaxPreampDb);
+                continue;
+            }
+            var result = ParseFilterLine(line);
+            if (result.Error is { } lineError)
+            {
+                preset = new EqPreset(name, 0, Array.Empty<EqBand>());
+                error = $"Line {i + 1}: {lineError}";
+                return false;
+            }
+            if (result.Band is { } band)
+                bands.Add(band);
+        }
+        preset = new EqPreset(name, preamp, bands);
+        error = null;
+        return true;
+    }
+
+    /// <summary>Every band with its gain zeroed, keeping type/Fc/Q and band count — the
+    /// editor's Flatten action (a flat response that keeps the chain's shape for re-editing).</summary>
+    public static IReadOnlyList<EqBand> Flatten(IReadOnlyList<EqBand> bands) =>
+        bands.Select(b => b with { GainDb = 0 }).ToArray();
+
+    /// <summary>Upper bound on bands in one scope. There is no musical reason for a specific
+    /// number — this only stops a runaway paste from building a chain that would bog down the
+    /// response redraw (and that Equalizer APO would have to evaluate per sample).</summary>
+    public const int MaxBands = 64;
+
+    /// <summary>What a new band starts as when the editor's "+" appends one.</summary>
+    public static EqBand NewBand() => new(EqBandType.Peak, 1000, 0, 1.41);
+
+    /// <summary>Appends <paramref name="band"/> unless the scope is already at
+    /// <see cref="MaxBands"/>. False (with the list untouched) when the cap is reached.</summary>
+    public static bool TryAppend(IList<EqBand> bands, EqBand band)
+    {
+        if (bands.Count >= MaxBands)
+            return false;
+        bands.Add(Clamp(band));
+        return true;
     }
 
     /// <summary>Clamps a band's parameters into the supported ranges — the shared boundary
@@ -184,5 +264,51 @@ public sealed record EqPreset(string Name, double PreampDb, IReadOnlyList<EqBand
             return false;
         value = v;
         return true;
+    }
+}
+
+/// <summary>The editable numeric fields of a band, for <see cref="EqFieldInput.Apply"/>.</summary>
+public enum EqBandField
+{
+    Fc,
+    GainDb,
+    Q,
+}
+
+/// <summary>What happened to a typed field value.</summary>
+public enum EqFieldOutcome
+{
+    /// <summary>Taken as typed.</summary>
+    Applied,
+    /// <summary>Parsed, but outside the supported range and pulled to the nearest limit.</summary>
+    Clamped,
+    /// <summary>Not a number at all — the previous value was kept.</summary>
+    Reverted,
+}
+
+/// <summary>Applies text typed into a band's numeric field, with one shared policy for every
+/// entry point in the editor (the numeric side panel and the per-band strip): unparseable
+/// input keeps the previous value, and a parseable but out-of-range value is pulled to the
+/// model's own limits rather than silently accepted. Callers show the outcome as an inline
+/// cue, so nothing changes behind the user's back.</summary>
+public static class EqFieldInput
+{
+    public static EqBand Apply(EqBand band, EqBandField field, string text, out EqFieldOutcome outcome)
+    {
+        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+            || !double.IsFinite(value))
+        {
+            outcome = EqFieldOutcome.Reverted;
+            return band;
+        }
+        var updated = field switch
+        {
+            EqBandField.Fc => band with { Fc = value },
+            EqBandField.GainDb => band with { GainDb = value },
+            _ => band with { Q = value },
+        };
+        var clamped = EqPreset.Clamp(updated);
+        outcome = clamped == updated ? EqFieldOutcome.Applied : EqFieldOutcome.Clamped;
+        return clamped;
     }
 }

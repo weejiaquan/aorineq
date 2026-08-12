@@ -10,6 +10,7 @@ using ApoVolume.Core;
 using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
 using Button = System.Windows.Controls.Button;
+using ComboBox = System.Windows.Controls.ComboBox;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
 using MessageBox = System.Windows.MessageBox;
 using Orientation = System.Windows.Controls.Orientation;
@@ -92,6 +93,15 @@ public partial class EqEditorWindow : Window
     {
         public override string ToString() => Label;
     }
+
+    /// <summary>One band's column in the strip. Held so value updates (e.g. from dragging the
+    /// node on the plot) can write into the existing boxes instead of rebuilding the strip —
+    /// rebuilding on every mouse-move would be visibly slow at 24+ bands and would destroy
+    /// the focus/caret of whatever the user is typing in.</summary>
+    private sealed record BandColumn(
+        Border Frame, ComboBox Type, TextBox Fc, TextBox Gain, TextBox Q, TextBlock Index);
+
+    private readonly List<BandColumn> _columns = new();
 
     public EqEditorWindow(Func<Settings> getSettings, Func<string?> getActiveDeviceId,
         Func<string?, double?> getVolumeDbFor)
@@ -182,8 +192,10 @@ public partial class EqEditorWindow : Window
         _syncing = true;
         EqEnabledCheck.IsChecked = _eqEnabled;
         _syncing = false;
+        StripHintText.Text = "";
         SyncPresetCombo();
         SyncBandPanel();
+        RebuildBandStrip();
         RedrawAll();
     }
 
@@ -193,8 +205,10 @@ public partial class EqEditorWindow : Window
     private void PushScope() => ScopeChanged?.Invoke(_scopeDeviceId, CurrentScope());
 
     /// <summary>Every band mutation goes through here: custom-marks the preset name,
-    /// pushes to the app, and redraws.</summary>
-    private void OnBandsEdited()
+    /// pushes to the app, and redraws. <paramref name="countChanged"/> rebuilds the band strip
+    /// (bands added/removed); otherwise the existing columns are just refreshed in place, so a
+    /// drag doesn't tear down the controls the user may be typing in.</summary>
+    private void OnBandsEdited(bool countChanged = false)
     {
         if (_presetName.Length > 0 && _presetName != "(custom)")
             _presetName = "(custom)";
@@ -202,6 +216,10 @@ public partial class EqEditorWindow : Window
         PushScope();
         RedrawCurves();
         SyncBandPanel();
+        if (countChanged)
+            RebuildBandStrip();
+        else
+            RefreshBandStripValues();
     }
 
     // ---- Preset bar ----
@@ -402,6 +420,260 @@ public partial class EqEditorWindow : Window
         return prompt.ShowDialog() == true ? box.Text : null;
     }
 
+    // ---- Band strip (Peace-style: one typable column per band, arbitrary count) ----
+
+    /// <summary>Rebuilds every column. Called when the band COUNT changes or a scope loads —
+    /// value-only changes go through <see cref="RefreshBandStripValues"/>.</summary>
+    private void RebuildBandStrip()
+    {
+        BandStrip.Children.Clear();
+        _columns.Clear();
+        for (int i = 0; i < _bands.Count; i++)
+            BandStrip.Children.Add(BuildColumn(i));
+        RefreshBandStripValues();
+        UpdateStripChrome();
+    }
+
+    private Border BuildColumn(int index)
+    {
+        var stack = new StackPanel { Width = 84, Margin = new Thickness(3, 0, 3, 0) };
+
+        var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 3) };
+        var indexLabel = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(0x99, 0x99, 0xA5)),
+            FontSize = 10, VerticalAlignment = VerticalAlignment.Center,
+        };
+        DockPanel.SetDock(indexLabel, Dock.Left);
+        header.Children.Add(indexLabel);
+        var remove = new Button
+        {
+            Content = "✕", FontSize = 10, Width = 18, Height = 18, Padding = new Thickness(0),
+            Tag = index, ToolTip = "Remove this band",
+        };
+        remove.Click += (_, _) => RemoveBandAt(index);
+        DockPanel.SetDock(remove, Dock.Right);
+        header.Children.Add(remove);
+        stack.Children.Add(header);
+
+        var typeCombo = new ComboBox { ItemsSource = Enum.GetValues<EqBandType>(), FontSize = 11, Tag = index };
+        typeCombo.SelectionChanged += OnStripTypeChanged;
+        stack.Children.Add(typeCombo);
+
+        stack.Children.Add(StripLabel("Hz"));
+        var fc = StripBox(index, EqBandField.Fc);
+        stack.Children.Add(fc);
+        stack.Children.Add(StripLabel("dB"));
+        var gain = StripBox(index, EqBandField.GainDb);
+        stack.Children.Add(gain);
+        stack.Children.Add(StripLabel("Q"));
+        var q = StripBox(index, EqBandField.Q);
+        stack.Children.Add(q);
+
+        var frame = new Border
+        {
+            BorderThickness = new Thickness(1.5),
+            BorderBrush = System.Windows.Media.Brushes.Transparent,
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(3),
+            Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x28)),
+            Child = stack,
+            Tag = index,
+        };
+        // Clicking anywhere in the column selects that band (two-way sync with the plot node).
+        frame.PreviewMouseLeftButtonDown += (_, _) => SelectBand(index);
+        _columns.Add(new BandColumn(frame, typeCombo, fc, gain, q, indexLabel));
+        return frame;
+    }
+
+    private static TextBlock StripLabel(string text) => new()
+    {
+        Text = text, FontSize = 9.5,
+        Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x85)),
+        Margin = new Thickness(0, 3, 0, 1),
+    };
+
+    /// <summary>A directly typable field: select-all + type works, Tab moves on, Enter
+    /// commits, and focus loss commits too.</summary>
+    private TextBox StripBox(int index, EqBandField field)
+    {
+        var box = new TextBox { FontSize = 11.5, Tag = (index, field) };
+        box.GotKeyboardFocus += (_, _) => { SelectBand(index); box.SelectAll(); };
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                CommitStripBox(box);
+                e.Handled = true;
+            }
+        };
+        box.LostFocus += (_, _) => CommitStripBox(box);
+        return box;
+    }
+
+    private void CommitStripBox(TextBox box)
+    {
+        if (_syncing || box.Tag is not ValueTuple<int, EqBandField> tag)
+            return;
+        var (index, field) = tag;
+        if (index < 0 || index >= _bands.Count)
+            return;
+        var updated = EqFieldInput.Apply(_bands[index], field, box.Text, out var outcome);
+        ShowStripOutcome(outcome, field);
+        if (updated == _bands[index])
+        {
+            RefreshBandStripValues(); // revert/no-op: put the stored value back in the box
+            return;
+        }
+        _bands[index] = updated;
+        OnBandsEdited();
+    }
+
+    /// <summary>The inline cue for a typed value that wasn't taken literally. Clears on the
+    /// next accepted edit, so it never lingers as noise.</summary>
+    private void ShowStripOutcome(EqFieldOutcome outcome, EqBandField field) =>
+        StripHintText.Text = outcome switch
+        {
+            EqFieldOutcome.Reverted => $"{FieldName(field)}: not a number — kept the previous value.",
+            EqFieldOutcome.Clamped => $"{FieldName(field)} was outside the supported range — clamped.",
+            _ => "",
+        };
+
+    private static string FieldName(EqBandField field) => field switch
+    {
+        EqBandField.Fc => "Frequency",
+        EqBandField.GainDb => "Gain",
+        _ => "Q",
+    };
+
+    private void OnStripTypeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncing || sender is not ComboBox combo || combo.Tag is not int index
+            || combo.SelectedItem is not EqBandType type || index >= _bands.Count)
+            return;
+        SelectBand(index);
+        ApplyBandType(index, type);
+    }
+
+    /// <summary>Writes current band values into the existing columns (no control rebuild) and
+    /// refreshes selection highlighting — the path used while dragging a node on the plot.</summary>
+    private void RefreshBandStripValues()
+    {
+        if (_columns.Count != _bands.Count)
+        {
+            RebuildBandStrip();
+            return;
+        }
+        _syncing = true;
+        for (int i = 0; i < _bands.Count; i++)
+        {
+            var band = _bands[i];
+            var column = _columns[i];
+            column.Index.Text = (i + 1).ToString(CultureInfo.InvariantCulture);
+            column.Type.SelectedItem = band.Type;
+            // Don't fight the user's caret: skip the box currently being typed in.
+            if (!column.Fc.IsKeyboardFocusWithin)
+                column.Fc.Text = band.Fc.ToString("0.##", CultureInfo.InvariantCulture);
+            if (!column.Gain.IsKeyboardFocusWithin)
+                column.Gain.Text = band.GainDb.ToString("0.0", CultureInfo.InvariantCulture);
+            if (!column.Q.IsKeyboardFocusWithin)
+                column.Q.Text = band.Q.ToString("0.00", CultureInfo.InvariantCulture);
+            column.Gain.IsEnabled = band.HasGain; // gainless types have no Gain token at all
+            column.Frame.BorderBrush = i == _selectedBand
+                ? new SolidColorBrush(Color.FromRgb(0xFF, 0xC8, 0x5A))
+                : System.Windows.Media.Brushes.Transparent;
+        }
+        _syncing = false;
+        UpdateStripChrome();
+    }
+
+    private void UpdateStripChrome()
+    {
+        bool atCap = _bands.Count >= EqPreset.MaxBands;
+        AddBandButton.IsEnabled = !atCap;
+        AddBandButton.ToolTip = atCap
+            ? $"Band limit reached ({EqPreset.MaxBands} per scope)."
+            : "Add a band (then type its frequency)";
+        BandCountText.Text = $"{_bands.Count}/{EqPreset.MaxBands}";
+    }
+
+    /// <summary>Selects a band from either surface (strip column or plot node) and syncs the
+    /// other one — the two views always highlight the same band.</summary>
+    private void SelectBand(int index)
+    {
+        if (index < 0 || index >= _bands.Count || index == _selectedBand)
+            return;
+        _selectedBand = index;
+        RedrawCurves();
+        SyncBandPanel();
+        RefreshBandStripValues();
+    }
+
+    private void OnAddBand(object sender, RoutedEventArgs e)
+    {
+        if (!EqPreset.TryAppend(_bands, EqPreset.NewBand()))
+        {
+            StripHintText.Text = $"Band limit reached ({EqPreset.MaxBands} per scope).";
+            return;
+        }
+        StripHintText.Text = "";
+        _selectedBand = _bands.Count - 1;
+        OnBandsEdited(countChanged: true);
+        // Focus the new column's frequency box so the user can type straight away.
+        var column = _columns[^1];
+        column.Fc.Focus();
+        column.Fc.SelectAll();
+        BandStrip.UpdateLayout();
+        column.Frame.BringIntoView();
+    }
+
+    private void RemoveBandAt(int index)
+    {
+        if (index < 0 || index >= _bands.Count)
+            return;
+        _bands.RemoveAt(index);
+        _selectedBand = Math.Min(_selectedBand, _bands.Count - 1);
+        StripHintText.Text = "";
+        OnBandsEdited(countChanged: true);
+    }
+
+    // ---- Toolbar: bulk text, flatten, clear ----
+
+    private void OnEditAsText(object sender, RoutedEventArgs e)
+    {
+        var dialog = new EqTextDialog(new EqPreset(_presetName, _presetPreampDb, _bands.ToArray()))
+        {
+            Owner = this,
+        };
+        if (dialog.ShowDialog() != true || dialog.Result is not { } parsed)
+            return;
+        // Replaces the scope wholesale — the dialog guarantees the text parsed cleanly first.
+        _bands = parsed.Bands.ToList();
+        _presetPreampDb = parsed.PreampDb;
+        _selectedBand = _bands.Count > 0 ? 0 : -1;
+        StripHintText.Text = "";
+        OnBandsEdited(countChanged: true);
+    }
+
+    private void OnFlatten(object sender, RoutedEventArgs e)
+    {
+        // Gains to 0 and the scope's preset preamp to 0, keeping every band's type/Fc/Q so the
+        // chain can be re-shaped from a flat baseline. No confirm: reloading a preset restores.
+        _bands = EqPreset.Flatten(_bands).ToList();
+        _presetPreampDb = 0;
+        StripHintText.Text = "";
+        OnBandsEdited();
+    }
+
+    private void OnClearBands(object sender, RoutedEventArgs e)
+    {
+        _bands.Clear();
+        _selectedBand = -1;
+        _presetPreampDb = 0;
+        StripHintText.Text = "";
+        OnBandsEdited(countChanged: true);
+    }
+
     // ---- Numeric side panel ----
 
     private void SyncBandPanel()
@@ -444,13 +716,21 @@ public partial class EqEditorWindow : Window
     {
         if (_syncing || _selectedBand < 0 || BandTypeCombo.SelectedItem is not EqBandType type)
             return;
-        var band = _bands[_selectedBand];
+        ApplyBandType(_selectedBand, type);
+    }
+
+    /// <summary>Type change from either surface (side panel combo or a strip column).</summary>
+    private void ApplyBandType(int index, EqBandType type)
+    {
+        var band = _bands[index];
+        if (band.Type == type)
+            return;
         // Gainless types zero the gain; Q jumps to the type's conventional default when
         // coming from a very different shape (a notch's Q 30 makes no sense on a shelf).
         double q = type == EqBandType.Notch ? EqPreset.DefaultNotchQ
             : band.Type == EqBandType.Notch ? EqPreset.DefaultQ
             : band.Q;
-        _bands[_selectedBand] = EqPreset.Clamp(band with
+        _bands[index] = EqPreset.Clamp(band with
         {
             Type = type,
             GainDb = type is EqBandType.Peak or EqBandType.LowShelf or EqBandType.HighShelf ? band.GainDb : 0,
@@ -465,15 +745,29 @@ public partial class EqEditorWindow : Window
             OnBandBoxCommit(sender, e);
     }
 
+    /// <summary>Commits the numeric side panel through the SAME typed-field policy as the band
+    /// strip (<see cref="EqFieldInput"/>): unparseable text reverts, out-of-range clamps, and
+    /// either way the user gets an inline cue.</summary>
     private void OnBandBoxCommit(object sender, RoutedEventArgs e)
     {
         if (_syncing || _selectedBand < 0)
             return;
         var band = _bands[_selectedBand];
-        double fc = ParseOr(FcBox.Text, band.Fc);
-        double gain = ParseOr(GainBox.Text, band.GainDb);
-        double q = ParseOr(QBox.Text, band.Q);
-        var updated = EqPreset.Clamp(band with { Fc = fc, GainDb = gain, Q = q });
+        var updated = EqFieldInput.Apply(band, EqBandField.Fc, FcBox.Text, out var fcOutcome);
+        updated = EqFieldInput.Apply(updated, EqBandField.GainDb, GainBox.Text, out var gainOutcome);
+        updated = EqFieldInput.Apply(updated, EqBandField.Q, QBox.Text, out var qOutcome);
+
+        // Report the first field that wasn't taken literally (gainless types have no gain box
+        // in play, so its outcome is ignored there).
+        if (fcOutcome != EqFieldOutcome.Applied)
+            ShowStripOutcome(fcOutcome, EqBandField.Fc);
+        else if (band.HasGain && gainOutcome != EqFieldOutcome.Applied)
+            ShowStripOutcome(gainOutcome, EqBandField.GainDb);
+        else if (qOutcome != EqFieldOutcome.Applied)
+            ShowStripOutcome(qOutcome, EqBandField.Q);
+        else
+            StripHintText.Text = "";
+
         if (updated == band)
         {
             SyncBandPanel(); // normalize the text back
@@ -482,10 +776,6 @@ public partial class EqEditorWindow : Window
         _bands[_selectedBand] = updated;
         OnBandsEdited();
     }
-
-    private static double ParseOr(string text, double fallback) =>
-        double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
-        && double.IsFinite(v) ? v : fallback;
 
     private void OnRemoveBand(object sender, RoutedEventArgs e) => RemoveSelectedBand();
 
@@ -506,14 +796,7 @@ public partial class EqEditorWindow : Window
         }
     }
 
-    private void RemoveSelectedBand()
-    {
-        if (_selectedBand < 0 || _selectedBand >= _bands.Count)
-            return;
-        _bands.RemoveAt(_selectedBand);
-        _selectedBand = Math.Min(_selectedBand, _bands.Count - 1);
-        OnBandsEdited();
-    }
+    private void RemoveSelectedBand() => RemoveBandAt(_selectedBand);
 
     // ---- Plot: coordinate mapping ----
 
@@ -579,7 +862,9 @@ public partial class EqEditorWindow : Window
                 X1 = 0, X2 = Plot.ActualWidth, Y1 = y, Y2 = y,
                 Stroke = db == 0 ? zeroBrush : lineBrush, StrokeThickness = db == 0 ? 1.4 : 1,
             });
-            if (db != 0)
+            // Skipped near the bottom edge, where the dB label would sit on top of the
+            // frequency labels drawn along the axis.
+            if (db != 0 && y < Plot.ActualHeight - 22)
                 AddGridElement(Label($"{db:+0;-0} dB", 4, y - 15, textBrush));
         }
     }
@@ -697,10 +982,15 @@ public partial class EqEditorWindow : Window
             else
             {
                 var pos = e.GetPosition(Plot);
-                _bands.Add(EqPreset.Clamp(new EqBand(EqBandType.Peak,
-                    FreqFromX(pos.X), Math.Round(DbFromY(pos.Y), 1), 1.0)));
+                if (!EqPreset.TryAppend(_bands, new EqBand(EqBandType.Peak,
+                        FreqFromX(pos.X), Math.Round(DbFromY(pos.Y), 1), 1.0)))
+                {
+                    StripHintText.Text = $"Band limit reached ({EqPreset.MaxBands} per scope).";
+                    e.Handled = true;
+                    return;
+                }
                 _selectedBand = _bands.Count - 1;
-                OnBandsEdited();
+                OnBandsEdited(countChanged: true);
             }
             e.Handled = true;
             return;
@@ -712,6 +1002,7 @@ public partial class EqEditorWindow : Window
             Plot.CaptureMouse();
             RedrawCurves();
             SyncBandPanel();
+            RefreshBandStripValues(); // selecting a node highlights its column
         }
     }
 
@@ -774,6 +1065,7 @@ public partial class EqEditorWindow : Window
         _selectedBand = index;
         RedrawCurves();
         SyncBandPanel();
+        RefreshBandStripValues();
         var menu = new ContextMenu();
         foreach (var type in Enum.GetValues<EqBandType>())
         {
