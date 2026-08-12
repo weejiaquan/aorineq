@@ -1,7 +1,7 @@
 namespace ApoVolume.Core;
 
 /// <summary>Outcome of parsing an apo-volume:// link. <see cref="Malformed"/> covers anything
-/// that fails strict validation ("Invalid apo-volume link" balloon); <see cref="UnknownAction"/>
+/// that fails strict validation ("Invalid ApoVolume link" balloon); <see cref="UnknownAction"/>
 /// is a syntactically fine link for an action this version doesn't know ("needs a newer
 /// version" balloon).</summary>
 public enum ProtocolParseStatus { Ok, Malformed, UnknownAction }

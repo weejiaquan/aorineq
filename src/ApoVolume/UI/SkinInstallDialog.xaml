@@ -1,7 +1,7 @@
 <Window x:Class="ApoVolume.UI.SkinInstallDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="apo-volume" Width="440" SizeToContent="Height"
+        Title="ApoVolume" Icon="/ApoVolume.ico" Width="440" SizeToContent="Height"
         ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
         ShowInTaskbar="True" Topmost="True">
     <StackPanel Margin="20">

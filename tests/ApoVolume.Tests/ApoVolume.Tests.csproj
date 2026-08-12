@@ -21,7 +21,23 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- AppIconTests loads the shipped .ico through the two frameworks that do so at runtime:
+         WIC/WPF for the windows' Icon, System.Drawing for the tray's HICON. Referencing the
+         assemblies directly rather than via UseWPF/UseWindowsForms keeps this project's
+         implicit usings (and so every other test file) untouched. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\ApoVolume.Core\ApoVolume.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The very file the app ships as its ApplicationIcon and WPF resource, so AppIconTests
+         checks the shipped asset rather than a copy that could drift. -->
+    <None Include="..\..\src\ApoVolume\ApoVolume.ico" Link="ApoVolume.ico"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -65,7 +65,7 @@ public partial class SettingsWindow : Window
             : runAsAdmin
                 ? "Not elevated in this session — restart the app (or approve the prompt) to apply."
                 : "Currently running without elevation.";
-        VersionText.Text = "apo-volume " + version;
+        VersionText.Text = "ApoVolume " + version;
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
@@ -285,14 +285,14 @@ public partial class SettingsWindow : Window
             {
                 System.Windows.MessageBox.Show(
                     $"The zip filename can't be used as the skin name: {nameError}",
-                    "apo-volume", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             if (Directory.Exists(Path.Combine(ApoPaths.GetSkinsRoot(), name)))
             {
                 var choice = System.Windows.MessageBox.Show(
                     $"A skin named '{name}' already exists. Overwrite it?",
-                    "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    "ApoVolume", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (choice != MessageBoxResult.Yes) return;
             }
             SkinArchive.Import(dialog.FileName, ApoPaths.GetSkinsRoot(), name);
@@ -302,7 +302,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            System.Windows.MessageBox.Show(ex.Message, "apo-volume", MessageBoxButton.OK, MessageBoxImage.Warning);
+            System.Windows.MessageBox.Show(ex.Message, "ApoVolume", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

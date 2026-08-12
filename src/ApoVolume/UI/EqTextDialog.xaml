@@ -1,7 +1,7 @@
 <Window x:Class="ApoVolume.UI.EqTextDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Edit as text — apo-volume" Width="620" Height="520"
+        Title="Edit as text — ApoVolume" Icon="/ApoVolume.ico" Width="620" Height="520"
         MinWidth="460" MinHeight="360" WindowStartupLocation="CenterOwner">
     <Grid Margin="14">
         <Grid.RowDefinitions>

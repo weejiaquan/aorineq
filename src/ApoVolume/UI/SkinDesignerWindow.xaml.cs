@@ -858,7 +858,7 @@ public partial class SkinDesignerWindow : Window
         {
             var choice = System.Windows.MessageBox.Show(
                 $"A skin named '{name}' already exists. Overwrite it?",
-                "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                "ApoVolume", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (choice != MessageBoxResult.Yes) return;
         }
 
@@ -914,7 +914,7 @@ public partial class SkinDesignerWindow : Window
             {
                 var choice = System.Windows.MessageBox.Show(
                     $"A skin named '{name}' already exists. Overwrite it?",
-                    "apo-volume", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    "ApoVolume", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (choice != MessageBoxResult.Yes) return;
             }
             SkinArchive.Import(dialog.FileName, ApoPaths.GetSkinsRoot(), name);
