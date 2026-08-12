@@ -6,8 +6,19 @@ namespace AorinEQ.Core;
 /// Percent maps 1:1 to the Windows slider scale (scalar × 100 — no taper math). Every set passes
 /// this instance's own event-context GUID, and notifications carrying that context are swallowed,
 /// so <see cref="Changed"/> only fires for EXTERNAL changes (another app, the Windows mixer, a
-/// device switch). <see cref="Changed"/> is raised on a COM callback thread — UI callers must
+/// device switch). <see cref="Changed"/> is raised on a background thread — UI callers must
 /// marshal (same contract as KeyboardHook's events).
+///
+/// THE COM CALLBACKS ONLY CAPTURE AND HAND OFF (v3.4.1). MMDevAPI delivers its notifications on a
+/// thread it owns, and a blocking call back into MMDevAPI from inside one does not return: the
+/// dispatch thread stays stuck there for the life of the process and NOTHING IS EVER DELIVERED
+/// AGAIN. Until v3.4.1 this class did its re-activation work (unregister, release, activate,
+/// register, read) inline in <see cref="NotificationClient.OnDefaultDeviceChanged"/>, so the very
+/// first default-device change deadlocked that thread — the app saw exactly one device change per
+/// session and then silently stopped following the user's output, and Dispose hung behind the same
+/// lock. Both callbacks now do the minimum the callback thread is allowed to do (read a struct that
+/// is only valid for the duration of the call, compare a GUID) and post the rest to
+/// <see cref="_notifications"/>. Nothing in this class may call MMDevAPI from a callback thread.
 ///
 /// Error contract: never throws to callers. Device loss / audio service down make methods return
 /// false/null, and the next call lazily retries activation (a default-device change also forces
@@ -16,28 +27,43 @@ public sealed class EndpointVolume : IDisposable
 {
     private const int ClsCtxAll = 0x17; // CLSCTX_ALL
 
+    /// <summary>How long <see cref="Dispose"/> waits for the instance lock before giving up on the
+    /// COM teardown. Only reachable if a notification action is wedged inside a COM call that
+    /// cannot be cancelled; the process is on its way out and must not hang for it.</summary>
+    private static readonly TimeSpan DisposeLockTimeout = TimeSpan.FromSeconds(2);
+
     private readonly object _lock = new();
     private readonly Guid _eventContext = Guid.NewGuid();
     private readonly VolumeCallback _volumeCallback;
     private readonly NotificationClient _notificationClient;
+    /// <summary>Everything the COM callbacks would otherwise have done inline, run in arrival
+    /// order on one thread that is ours, not MMDevAPI's.</summary>
+    private readonly SerialWorkQueue _notifications = new("AorinEQ endpoint notifications");
     private AudioEndpoint.IMMDeviceEnumerator? _enumerator;
     private IAudioEndpointVolume? _volume;
     /// <summary>Endpoint id the currently activated <see cref="_volume"/> belongs to — stamped
     /// onto every <see cref="Changed"/> so consumers can drop notifications from a device that
     /// is no longer theirs.</summary>
     private volatile string? _volumeDeviceId;
-    private bool _disposed;
+    private volatile bool _disposed;
+    /// <summary>Makes <see cref="Dispose"/> single-entry: the teardown below is no longer wholly
+    /// under <see cref="_lock"/>, so two concurrent callers could otherwise both run it.</summary>
+    private int _disposeGate;
 
     /// <summary>(endpoint id, percent 0-100, muted) after an external change or a
-    /// default-device switch. Raised on a COM callback thread, never for this instance's own
-    /// sets. The endpoint id identifies WHICH device the notification came from — a
+    /// default-device switch. Raised on the notification worker thread, never for this instance's
+    /// own sets. The endpoint id identifies WHICH device the notification came from — a
     /// notification from the previous default device can still be in flight when the switch
     /// happens, and applying it to the new device's state would corrupt it.</summary>
     public event Action<string?, int, bool>? Changed;
 
     /// <summary>The default render endpoint changed (raised BEFORE the accompanying
-    /// <see cref="Changed"/>, on a COM callback thread). Both volume modes use this to swap
-    /// the active per-device state; the EQ window uses it to re-attach its loopback capture.</summary>
+    /// <see cref="Changed"/>, on the notification worker thread). Both volume modes use this to
+    /// swap the active per-device state; the EQ window uses it to re-attach its loopback capture.
+    ///
+    /// Ordering is guaranteed by the worker being serial and FIFO: both events for one switch are
+    /// raised by the same queued action, and a volume notification that arrived before the switch
+    /// is raised before it.</summary>
     public event Action? DefaultDeviceChanged;
 
     public EndpointVolume()
@@ -139,10 +165,21 @@ public sealed class EndpointVolume : IDisposable
 
     public void Dispose()
     {
-        lock (_lock)
+        // Order matters. _disposed first so a notification already on the worker bails instead of
+        // re-activating something we are about to release; then the queue, which discards what has
+        // not started and waits (bounded) for what has, so the COM teardown below is not racing an
+        // action still using these objects.
+        if (Interlocked.Exchange(ref _disposeGate, 1) != 0) return;
+        _disposed = true;
+        _notifications.Dispose();
+
+        // Bounded: the only way the lock is still held here is an action wedged inside a COM call
+        // that cannot be cancelled, and shutdown must not hang behind it. Skipping the teardown
+        // then leaks a registration into a process that is exiting anyway — the trade this
+        // release exists to avoid is the opposite one, a Dispose that never returns.
+        if (!Monitor.TryEnter(_lock, DisposeLockTimeout)) return;
+        try
         {
-            if (_disposed) return;
-            _disposed = true;
             ReleaseVolumeLocked();
             if (_enumerator is not null)
             {
@@ -155,6 +192,10 @@ public sealed class EndpointVolume : IDisposable
                 Marshal.ReleaseComObject(_enumerator);
                 _enumerator = null;
             }
+        }
+        finally
+        {
+            Monitor.Exit(_lock);
         }
     }
 
@@ -265,8 +306,10 @@ public sealed class EndpointVolume : IDisposable
         _volume = null;
     }
 
-    /// <summary>COM callback thread: an endpoint volume/mute notification arrived. Swallows the
-    /// echo of this instance's own sets (matching event context); everything else is external.</summary>
+    /// <summary>COM CALLBACK THREAD — capture only. <paramref name="data"/> points at memory that
+    /// is valid only for the duration of this call, so the struct is read here; the event is raised
+    /// on the worker. Swallows the echo of this instance's own sets (matching event context);
+    /// everything else is external. No MMDevAPI call may appear in this method.</summary>
     private void OnVolumeNotification(IntPtr data)
     {
         if (data == IntPtr.Zero || _disposed) return;
@@ -280,17 +323,30 @@ public sealed class EndpointVolume : IDisposable
             return;
         }
         if (notification.EventContext == _eventContext) return;
-        Changed?.Invoke(_volumeDeviceId, ScalarToPercent(notification.MasterVolume), notification.Muted != 0);
+        // Stamped with the endpoint that was activated when the notification arrived, not with
+        // whatever is current by the time the worker gets to it.
+        string? deviceId = _volumeDeviceId;
+        int percent = ScalarToPercent(notification.MasterVolume);
+        bool muted = notification.Muted != 0;
+        _notifications.Post(() => Changed?.Invoke(deviceId, percent, muted));
     }
 
-    /// <summary>COM callback thread: the default render endpoint changed. Re-activates on the
-    /// new endpoint and reports its current state as an external change.</summary>
+    /// <summary>COM CALLBACK THREAD — hand off and return. Every line of the actual work is in
+    /// <see cref="HandleDefaultRenderDeviceChanged"/>, because all of it calls MMDevAPI.</summary>
     private void OnDefaultRenderDeviceChanged()
+    {
+        if (_disposed) return;
+        _notifications.Post(HandleDefaultRenderDeviceChanged);
+    }
+
+    /// <summary>Worker thread: re-activate on the new endpoint and report its current state as an
+    /// external change. Safe to call MMDevAPI from here — this is not a callback thread.</summary>
+    private void HandleDefaultRenderDeviceChanged()
     {
         lock (_lock)
         {
             if (_disposed) return;
-            ReleaseVolumeLocked(); // the next GetVolume() activates the new endpoint
+            ReleaseVolumeLocked(); // the TryRead below activates the new endpoint
         }
         DefaultDeviceChanged?.Invoke();
         // TryRead re-activates on the NEW endpoint first, so _volumeDeviceId names it.

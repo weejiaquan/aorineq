@@ -1253,16 +1253,8 @@ public partial class App : System.Windows.Application
     /// <see cref="SetupEapoHealthMonitor"/>'s shutdown note.</summary>
     private void RequestHealthCheck()
     {
-        if (!_healthEventsSubscribed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-            return;
-        try
-        {
-            Dispatcher.BeginInvoke(new Action(() => CheckEapoHealth(force: false)));
-        }
-        catch (InvalidOperationException)
-        {
-            // The dispatcher began shutting down between the check and the post.
-        }
+        if (!_healthEventsSubscribed) return;
+        PostToDispatcher(() => CheckEapoHealth(force: false));
     }
 
     /// <summary>One health reading and everything that follows from it: repair what can be
@@ -1602,8 +1594,31 @@ public partial class App : System.Windows.Application
     {
         if (_endpointVolume is not null) return;
         _endpointVolume = new EndpointVolume();
-        _endpointVolume.Changed += (id, p, m) => Dispatcher.BeginInvoke(() => OnEndpointVolumeChanged(id, p, m));
-        _endpointVolume.DefaultDeviceChanged += () => Dispatcher.BeginInvoke(OnDefaultDeviceChanged);
+        // Both arrive on EndpointVolume's notification worker, never on this thread and never on
+        // MMDevAPI's own callback thread — see the class remarks. Marshalling onto a dispatcher
+        // that has begun shutting down is what took this process down in v2.1.2, hence the same
+        // guard the SystemEvents handlers use.
+        _endpointVolume.Changed += (id, p, m) => PostToDispatcher(() => OnEndpointVolumeChanged(id, p, m));
+        _endpointVolume.DefaultDeviceChanged += () => PostToDispatcher(OnDefaultDeviceChanged);
+    }
+
+    /// <summary>Hops a background-thread trigger onto the UI thread, or drops it when the
+    /// dispatcher is going away. Every path from a thread we do not own — SystemEvents, and the
+    /// endpoint notification worker — goes through here: a BeginInvoke onto a dying dispatcher
+    /// took this process down in v2.1.2, and the check alone is not enough because shutdown can
+    /// begin between it and the post.</summary>
+    private void PostToDispatcher(Action work)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+            return;
+        try
+        {
+            Dispatcher.BeginInvoke(work);
+        }
+        catch (InvalidOperationException)
+        {
+            // The dispatcher began shutting down between the check and the post.
+        }
     }
 
     /// <summary>The Windows default render device changed: swap the active per-device state

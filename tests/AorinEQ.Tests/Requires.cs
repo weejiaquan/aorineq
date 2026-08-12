@@ -26,4 +26,12 @@ public static class Requires
     /// <summary>Equalizer APO installed, i.e. HKLM\SOFTWARE\EqualizerAPO and its config
     /// directory.</summary>
     public const string EqualizerApo = "EqualizerApo";
+
+    /// <summary>TWO OR MORE active render endpoints, because the test switches the machine's
+    /// default playback device back and forth and asserts on what Windows delivers. With one
+    /// endpoint there is no switch to make and nothing to observe.
+    ///
+    /// These tests move the real default device (restoring it afterwards) — the same trade the
+    /// rest of the audio tests make when they move the real volume.</summary>
+    public const string MultipleRenderEndpoints = "MultipleRenderEndpoints";
 }
