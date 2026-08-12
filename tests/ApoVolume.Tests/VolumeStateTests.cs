@@ -28,6 +28,17 @@ public class VolumeStateTests
     }
 
     [Fact]
+    public void Static_ToDb_matches_instance_CurrentDb()
+    {
+        foreach (var percent in new[] { 0, 1, 40, 50, 100 })
+        {
+            Assert.Equal(new VolumeState(percent).CurrentDb, VolumeState.ToDb(percent, muted: false));
+            Assert.Equal(-120.0, VolumeState.ToDb(percent, muted: true));
+        }
+        _out.WriteLine($"ToDb(40,false)={VolumeState.ToDb(40, false)}");
+    }
+
+    [Fact]
     public void Up_and_Down_step_by_2_and_clamp()
     {
         var s = new VolumeState(99);
