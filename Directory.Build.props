@@ -20,7 +20,7 @@
        and publish.ps1 refuses to publish if the two disagree. That property is deliberate and this
        change does not touch it: the chain is csproj version -> built exe -> installer. -->
   <PropertyGroup>
-    <Version>3.3.0</Version>
+    <Version>3.4.0</Version>
   </PropertyGroup>
 
 </Project>

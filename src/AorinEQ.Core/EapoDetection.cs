@@ -49,17 +49,45 @@ public static class EapoDetection
         return File.Exists(path) ? path : null;
     }
 
-    /// <summary>Whether EAPO records an install on the given endpoint GUID — the
-    /// <c>HKLM\SOFTWARE\EqualizerAPO\Child APOs\{guid}</c> subkey EAPO's own Configurator
-    /// writes when a device is ticked.</summary>
+    /// <summary>Whether Equalizer APO will actually process this endpoint. BOTH halves have to
+    /// hold, and they fail independently:
+    ///
+    /// <list type="bullet">
+    /// <item>Equalizer APO's own record for the device —
+    /// <c>HKLM\SOFTWARE\EqualizerAPO\Child APOs\{guid}</c>, written by its Configurator when a
+    /// device is ticked;</item>
+    /// <item>the device's own property store naming Equalizer APO's APOs
+    /// (see <see cref="EapoEndpoint.IsApoAttached"/>).</item>
+    /// </list>
+    ///
+    /// Checking only the first — which this returned until v3.4.0 — misses the failure this whole
+    /// release exists for: a Windows update that replaces the audio driver resets the ENDPOINT's
+    /// property store and leaves Equalizer APO's record untouched, so the device looks registered
+    /// while nothing is processing. The second half is the one the audio engine actually reads.</summary>
     public static bool IsActiveOnEndpoint(string? endpointGuid)
+    {
+        if (string.IsNullOrEmpty(endpointGuid))
+            return false;
+        if (!HasChildApoRecord(endpointGuid))
+            return false;
+        if (GetInstallPath() is not { } install)
+            return false;
+        return EapoEndpoint.ResolveClsids(install) is { } clsids
+            && EapoEndpoint.IsApoAttached(endpointGuid, clsids);
+    }
+
+    /// <summary>Equalizer APO's own bookkeeping for a device, on its own. Separate from
+    /// <see cref="IsActiveOnEndpoint"/> because a repair has to be able to tell the two halves
+    /// apart: a record with no attachment is the driver-reset case, and an attachment with no
+    /// record is a half-finished repair.</summary>
+    public static bool HasChildApoRecord(string? endpointGuid)
     {
         if (string.IsNullOrEmpty(endpointGuid))
             return false;
         try
         {
             using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            using var key = baseKey.OpenSubKey(@"SOFTWARE\EqualizerAPO\Child APOs\" + endpointGuid);
+            using var key = baseKey.OpenSubKey(EapoEndpoint.ChildApoRoot + "\\" + endpointGuid);
             return key is not null;
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or IOException
