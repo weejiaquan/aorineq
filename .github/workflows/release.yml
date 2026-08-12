@@ -1,0 +1,163 @@
+# Cuts a GitHub release from a v* tag: the four assets, built and verified on a clean runner.
+#
+#   AorinEQ.exe               the portable, self-contained single file
+#   AorinEQ.exe.sha256        its digest, in the format the shipped updater parses
+#   AorinEQ-Setup.exe         the Inno Setup installer that carries that exact exe
+#   AorinEQ-Setup.exe.sha256  its digest, same format
+#
+# THOSE FOUR NAMES ARE A CONTRACT, not a convention. UpdateChecker matches release assets by EXACT
+# NAME and requires both AorinEQ.exe and AorinEQ.exe.sha256 to be present or it reports "no update";
+# the website's latest/download links point at the same names. Renaming one breaks the in-app
+# updater and the download page silently - no error anywhere, just users who stop updating. So the
+# names are asserted below, against the assets GitHub actually stored.
+#
+# HOW IT IS BUILT is not written here. publish.ps1 is run verbatim, because it already owns the
+# publish flags, the ISCC invocation, the installer-version cross-check and the sidecar guard, and
+# a second copy of those flags in YAML would drift from the one developers use locally. Local
+# publishing is unchanged by this workflow's existence; CI supplements it.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The same gate a pull request passes - the whole suite, at -warnaserror, on a clean runner.
+  # A failure here means no release is created at all.
+  gate:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: gate
+    runs-on: windows-latest
+    # The only elevated scope in either workflow, and the narrowest one that can create a release
+    # and upload assets. No packages, no id-token, no actions, and no secret beyond the automatic
+    # GITHUB_TOKEN - nothing here talks to anything but this repository's own releases.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # publish.ps1 probes %LOCALAPPDATA%\Programs\Inno Setup 6 (where winget puts it) and both
+      # Program Files locations (where the official installer and this Chocolatey package put it).
+      # winget is not usable on the hosted Windows runners - the image has no App Installer package
+      # registered for the runner's session - so Chocolatey, which is preinstalled, does the job.
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Publish the four assets
+        run: ./publish.ps1
+
+      # publish.ps1 has already generated each sidecar and verified it as shipped. This asserts the
+      # other half of the contract - that the files it produced are the four named ones - before
+      # anything is uploaded.
+      - name: Check the asset name contract
+        shell: pwsh
+        run: |
+          $expected = @('AorinEQ.exe', 'AorinEQ.exe.sha256', 'AorinEQ-Setup.exe', 'AorinEQ-Setup.exe.sha256')
+          $actual = (Get-ChildItem publish -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $missing = $expected | Where-Object { $_ -notin $actual }
+          if ($missing) { throw "publish.ps1 did not produce: $($missing -join ', '). The asset names are a contract - see the header of this workflow." }
+          foreach ($name in $expected) { "{0,-26} {1,12} bytes" -f $name, (Get-Item "publish/$name").Length }
+
+      # Created as a DRAFT, so the assets are verified as GitHub stored them BEFORE the release
+      # becomes visible to the updater or the website. A failure in the next step leaves a draft
+      # nobody can download rather than a published release with a digest that does not match.
+      - name: Create the draft release
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $ghArgs = @('release', 'create', $tag, '--draft', '--title', $tag, '--generate-notes')
+          # A tag like v1.2.3-rc1 or v0.0.0-ci-test is a pre-release; a plain vMAJOR.MINOR.PATCH is not.
+          if ($tag -match '-') { $ghArgs += '--prerelease' }
+          $ghArgs += @(
+              'publish/AorinEQ.exe', 'publish/AorinEQ.exe.sha256',
+              'publish/AorinEQ-Setup.exe', 'publish/AorinEQ-Setup.exe.sha256')
+          gh @ghArgs
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }
+
+      # The check that could not be made locally: download the assets back OFF the release and prove
+      # the bytes GitHub is serving are the bytes that were built, and that each sidecar - parsed by
+      # the same rules the shipped UpdateChecker.ParseSha256Text uses - describes them.
+      - name: Verify the published assets
+        shell: pwsh
+        run: |
+          . ./tools/Sha256Sidecar.ps1
+          $tag = $env:GITHUB_REF_NAME
+          gh release download $tag --dir verify --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release download failed with exit code $LASTEXITCODE" }
+
+          $expected = @('AorinEQ.exe', 'AorinEQ.exe.sha256', 'AorinEQ-Setup.exe', 'AorinEQ-Setup.exe.sha256')
+          $downloaded = (Get-ChildItem verify -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $diff = Compare-Object ($expected | Sort-Object) $downloaded
+          if ($diff) { throw "the release's assets are not exactly the four contract names: $($downloaded -join ', ')" }
+
+          foreach ($name in @('AorinEQ.exe', 'AorinEQ-Setup.exe')) {
+              $published = Test-Sha256Sidecar -Path "verify/$name"
+              $built = (Get-FileHash "publish/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($published -ne $built) {
+                  throw "$name was uploaded but the copy GitHub serves hashes to $published, not the $built that was built. Do not release this."
+              }
+              "$name  $published  verified against $name.sha256 as downloaded, and equal to the built file"
+          }
+
+      # Only now is it a release. Everything above has to have passed for this line to run.
+      - name: Publish the release
+        shell: pwsh
+        run: |
+          gh release edit $env:GITHUB_REF_NAME --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "gh release edit failed with exit code $LASTEXITCODE" }
+          gh release view $env:GITHUB_REF_NAME --json url,isDraft,isPrerelease,assets
+
+      # ------------------------------------------------------------------------------------------
+      # CODE SIGNING - where it slots in when SignPath Foundation approval lands.
+      #
+      # This workflow is the prerequisite: SignPath signs FROM CI, against a specific repository,
+      # workflow file and branch/tag. There is nothing to apply for while releases are cut by hand.
+      #
+      # THE ONE RULE THAT DECIDES THE SHAPE: signing REWRITES the file. A digest taken before a
+      # signature describes bytes nobody will ever download, so both sidecars must be (re)generated
+      # AFTER signing - and the installer must package the SIGNED exe, or the thing users actually
+      # run is unsigned inside a signed wrapper. That gives exactly two anchor points, in this order:
+      #
+      #   1. sign publish\AorinEQ.exe        after `dotnet publish`, BEFORE ISCC packages it
+      #   2. sign publish\AorinEQ-Setup.exe  after ISCC produces it
+      #   3. regenerate both sidecars        Publish-Sha256Sidecar (tools/Sha256Sidecar.ps1) is
+      #                                      idempotent and re-verifies as shipped, so calling it
+      #                                      again over the signed bytes is the whole of step 3
+      #
+      # Points 1 and 2 are inside publish.ps1's sequence, which is why the edit is small rather than
+      # a redesign:
+      #
+      #   * Conventional signtool / a certificate on the runner: give publish.ps1 an optional
+      #     -SignCommand parameter, invoked with the file path at points 1 and 2 and defaulting to
+      #     nothing (so local publishing stays byte-identical to today). publish.ps1 already
+      #     generates each sidecar immediately after each artifact is final, so step 3 comes free.
+      #     This workflow then passes -SignCommand when the signing secret is present.
+      #
+      #   * SignPath Foundation: signing round-trips through GitHub Actions artifacts
+      #     (actions/upload-artifact -> signpath/github-action-submit-signing-request ->
+      #     the signed artifact comes back), so the two anchor points become two calls to
+      #     publish.ps1 split at the ISCC boundary (-SkipInstaller, then -InstallerOnly) with the
+      #     SignPath action in between, and a final -InstallerOnly-side signing round for the setup.
+      #     Add `id-token: write` to THIS job's permissions (SignPath's action authenticates the
+      #     workflow run via the GitHub OIDC token) plus the SIGNPATH_API_TOKEN secret, and register
+      #     this file's path and the v* tag as the trusted build in the SignPath project. Nothing
+      #     else in this workflow changes: the name contract, the draft-then-verify ordering and the
+      #     post-upload verification all still apply, and they now cover the signed bytes.
+      # ------------------------------------------------------------------------------------------

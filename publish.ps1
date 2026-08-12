@@ -9,14 +9,16 @@
 # AorinEQ.exe.sha256 in every release, and the website's "latest" links point at them. The
 # installer is additive - it never replaces or renames the portable pair.
 #
-# Every sidecar is regenerated here, every time, and then VERIFIED AS SHIPPED - because it used
-# not to be. Until v3.1.0 this script published only the exe, so publish\AorinEQ.exe.sha256 was
-# whatever the last release had left on disk. A release cut from a stale sidecar publishes a digest
-# that does not match its own exe, and UpdateChecker REQUIRES both assets and verifies the download
-# against that digest: every user's auto-update would refuse the update, with nothing in the build
-# output to say why. It was caught with the v3.0.0 hash still sitting next to a v3.1.0 exe.
+# Every sidecar is regenerated here, every time, and then VERIFIED AS SHIPPED - see
+# tools/Sha256Sidecar.ps1, which owns that guard and is shared with the release workflow.
+#
+# This script stays the single source of truth for HOW a release is built. .github/workflows/
+# release.yml runs this exact file on a clean windows-latest runner rather than repeating its
+# flags, so a change made here is a change CI makes too.
 
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'tools\Sha256Sidecar.ps1')
 
 $out = 'publish'
 $exeName = 'AorinEQ.exe'
@@ -24,33 +26,6 @@ $setupName = 'AorinEQ-Setup.exe'
 $exe = Join-Path $out $exeName
 $setup = Join-Path $out $setupName
 $issScript = Join-Path 'installer' 'AorinEQ.iss'
-
-# Writes "<lowercase hex> *<file name>" (the sha256sum binary-mode convention, which is what the
-# shipped UpdateChecker.ParseSha256Text accepts), then reads it back off disk and parses it the way
-# that shipped function does, and re-hashes the file. The two are proven to agree AS SHIPPED rather
-# than as intended. Returns the verified digest.
-function Publish-Sha256Sidecar {
-    param([Parameter(Mandatory)][string] $Path)
-
-    $name = Split-Path $Path -Leaf
-    $sidecar = "$Path.sha256"
-
-    $hash = (Get-FileHash $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    Set-Content -Path $sidecar -Value "$hash *$name" -NoNewline -Encoding ascii
-
-    # Mirrors ParseSha256Text: a bare hex digest, or a sha256sum line whose first field is one.
-    $text = (Get-Content $sidecar -Raw).Trim()
-    $parsed = ($text -split '\s+')[0]
-    $actual = (Get-FileHash $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-
-    if ($parsed -notmatch '^[0-9a-f]{64}$') {
-        throw "sidecar $sidecar is not a 64-character lowercase hex digest: '$text'"
-    }
-    if ($parsed -ne $actual) {
-        throw "SHA-256 MISMATCH - $sidecar says $parsed but $Path hashes to $actual. Do not release this."
-    }
-    return $actual
-}
 
 dotnet publish src/AorinEQ -c Release -r win-x64 --self-contained `
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o $out

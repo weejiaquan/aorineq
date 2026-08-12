@@ -1,0 +1,50 @@
+# The gate. Builds and runs the whole test suite on a clean windows-latest runner.
+#
+# It publishes nothing. Every release before v3.3.0 was built and gated on one developer's machine,
+# which is how a stale AorinEQ.exe.sha256 once got as far as a shipped release: the desk is where
+# leftovers live. A clean runner has no leftovers.
+#
+# release.yml calls this workflow (workflow_call) instead of repeating the steps, so the gate a
+# release passes is exactly the gate a pull request passes.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+
+# Read-only. This workflow has no reason to write to the repository; the contents:write scope the
+# release needs is granted in release.yml, on the release job alone.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both SDKs, matching the development machine: the projects target net8.0-windows, while the
+      # .slnx solution file needs a CLI new enough to read it. The newest installed CLI is used.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore AorinEQ.slnx
+
+      # -warnaserror is the shipped standard: this repository builds with 0 warnings and a warning
+      # is treated as a defect, not as output to scroll past.
+      - name: Build
+        run: dotnet build AorinEQ.slnx -c Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test AorinEQ.slnx -c Release --no-build --logger "console;verbosity=normal"
