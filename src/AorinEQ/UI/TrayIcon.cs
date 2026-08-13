@@ -26,6 +26,9 @@ public sealed class TrayIcon : IDisposable
     private bool _disposed;
     private readonly ToolStripMenuItem _muteItem;
     private readonly ToolStripMenuItem _eqPresetMenu;
+    private readonly ToolStripMenuItem _hudMenu;
+    private readonly ToolStripMenuItem _hudEditItem;
+    private readonly ToolStripMenuItem _hudAddMenu;
     // NotifyIcon does not own its ContextMenuStrip, so the tray disposes it itself.
     private readonly ContextMenuStrip _menu;
     private Action? _balloonClickAction;
@@ -38,6 +41,15 @@ public sealed class TrayIcon : IDisposable
 
     /// <summary>An EQ preset was picked from the tray submenu, by name.</summary>
     public event Action<string>? EqPresetSelected;
+
+    /// <summary>The HUD's edit/live switch was toggled; true means EDIT.</summary>
+    public event Action<bool>? HudModeToggled;
+
+    /// <summary>A HUD widget's visibility was toggled, by widget id.</summary>
+    public event Action<string>? HudWidgetToggled;
+
+    /// <summary>A new HUD widget was asked for, by type.</summary>
+    public event Action<string>? HudWidgetAdded;
 
     /// <summary>Raised right before the context menu opens — the app refreshes the EQ preset
     /// submenu here so it always shows the current preset files and active selection.</summary>
@@ -57,11 +69,25 @@ public sealed class TrayIcon : IDisposable
             _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
             _eqPresetMenu = new ToolStripMenuItem("EQ preset");
 
+            // "Arrange widgets" rather than "Edit mode": the switch exists so the widgets can be
+            // moved, and naming it after the mode would make the user work out what the mode does.
+            _hudEditItem = new ToolStripMenuItem("Arrange widgets", null,
+                (_, _) => HudModeToggled?.Invoke(!_hudEditItem!.Checked));
+            _hudAddMenu = new ToolStripMenuItem("Add widget");
+            foreach (var type in HudWidgetTypes.All)
+            {
+                var chosen = type;
+                _hudAddMenu.DropDownItems.Add(new ToolStripMenuItem(
+                    HudWidgetTypes.DisplayName(type), null, (_, _) => HudWidgetAdded?.Invoke(chosen)));
+            }
+            _hudMenu = new ToolStripMenuItem("HUD widgets");
+
             menu = new ContextMenuStrip();
             menu.Items.Add(new ToolStripMenuItem("Open volume slider", null, (_, _) => OpenRequested?.Invoke()));
             menu.Items.Add(_muteItem);
             menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null, (_, _) => EqualizerRequested?.Invoke()));
             menu.Items.Add(_eqPresetMenu);
+            menu.Items.Add(_hudMenu);
             menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => SettingsRequested?.Invoke()));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
@@ -179,6 +205,38 @@ public sealed class TrayIcon : IDisposable
             var chosen = name;
             item.Click += (_, _) => EqPresetSelected?.Invoke(chosen);
             _eqPresetMenu.DropDownItems.Add(item);
+        }
+    }
+
+    /// <summary>Rebuilds the HUD submenu: the arrange switch, one checkable item per widget the
+    /// user has, and the add list. Rebuilt on every menu open for the same reason the EQ presets
+    /// are — the layout can change from the widgets themselves while the menu is closed.</summary>
+    public void SetHudState(bool editMode, IReadOnlyList<HudWidget> widgets)
+    {
+        // DropDownItems.Clear() only unparents; the discarded items are disposed after the Clear,
+        // never before — an item is still owned by the collection until it is removed. Everything
+        // except the two items this class owns for the tray's whole life.
+        var discarded = _hudMenu.DropDownItems.Cast<ToolStripItem>()
+            .Where(i => !ReferenceEquals(i, _hudEditItem) && !ReferenceEquals(i, _hudAddMenu))
+            .ToArray();
+        _hudMenu.DropDownItems.Clear();
+        foreach (var item in discarded) item.Dispose();
+
+        _hudEditItem.Checked = editMode;
+        _hudMenu.DropDownItems.Add(_hudEditItem);
+        _hudMenu.DropDownItems.Add(_hudAddMenu);
+        if (widgets.Count > 0)
+        {
+            _hudMenu.DropDownItems.Add(new ToolStripSeparator());
+            foreach (var widget in widgets)
+            {
+                var id = widget.Id;
+                _hudMenu.DropDownItems.Add(new ToolStripMenuItem(
+                    HudWidgetTypes.DisplayName(widget.Type), null, (_, _) => HudWidgetToggled?.Invoke(id))
+                {
+                    Checked = widget.Visible,
+                });
+            }
         }
     }
 

@@ -4,31 +4,9 @@
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
         Background="Transparent" Topmost="True"
         ShowInTaskbar="False" ShowActivated="False" SizeToContent="Manual">
-    <Grid>
-        <!-- Base layer. Its Clip is set in code to everything EXCEPT the filled bar region, so it
-             never stacks under a translucent full layer (no double-darkening) while decoration
-             outside the fill range still shows. Full canvas while muted.
-             EdgeMode=Aliased on both layers: their clips are complementary, and anti-aliased clip
-             edges each cover the shared boundary column at ~50% — the desktop bleeds through as a
-             dark seam line at the fill edge. Aliased edges rasterize both clips to the same pixel
-             cutoff, so the layers tile exactly. -->
-        <Image x:Name="EmptyImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased" />
-        <!-- Overlay layer: clipped to the fill width for the current percent; hidden while muted. -->
-        <Image x:Name="FullImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased">
-            <Image.Clip>
-                <RectangleGeometry x:Name="FillClip" />
-            </Image.Clip>
-        </Image>
-        <!-- Optional muted artwork: shown ALONE while muted when the skin ships one (empty/full
-             hidden, badge hidden — the art conveys mute); collapsed otherwise. -->
-        <Image x:Name="MutedImage" Stretch="Fill" Visibility="Collapsed" />
-        <!-- Percent number as glyph geometry so the outline can be a real stroke. -->
-        <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top" Visibility="Collapsed" />
-        <!-- Mute badge: small glyph chip, bottom-right, shown only while muted. -->
-        <Border x:Name="MuteBadge" Width="20" Height="20" CornerRadius="10" Background="#F2202020"
-                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,4" Visibility="Collapsed">
-            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="12" Foreground="White"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" Text="&#xE74F;" />
-        </Border>
-    </Grid>
+    <!-- The skin itself is drawn by SkinView, which the code-behind puts here. Everything this
+         window adds is behaviour a TRANSIENT OSD needs and a persistent HUD widget does not:
+         where it appears, the auto-hide fade, and drag/wheel-to-set-volume. The HUD's volume
+         widget hosts the same SkinView with its own behaviour around it. -->
+    <Grid x:Name="ViewHost" />
 </Window>

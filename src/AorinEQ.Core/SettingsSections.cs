@@ -13,13 +13,14 @@ public static class SettingsSections
     public const string Osd = "osd";
     public const string Skins = "skins";
     public const string Equalizer = "equalizer";
+    public const string Hud = "hud";
     public const string Updates = "updates";
     public const string About = "about";
 
     /// <summary>Every section, in sidebar order. The FIRST entry is also the default landing
     /// section — see <see cref="ForProtocolPage"/>.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Volume, Osd, Skins, Equalizer, Updates, About];
+        [Volume, Osd, Skins, Equalizer, Hud, Updates, About];
 
     public static bool IsSection(string section) => All.Contains(section);
 

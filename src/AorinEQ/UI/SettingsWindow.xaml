@@ -165,6 +165,8 @@
                                        Icon="{ui:SymbolIcon Color24}" />
                 <ui:NavigationViewItem x:Name="NavEqualizer" Content="Equalizer" TargetPageTag="equalizer"
                                        Icon="{ui:SymbolIcon Options24}" />
+                <ui:NavigationViewItem x:Name="NavHud" Content="HUD widgets" TargetPageTag="hud"
+                                       Icon="{ui:SymbolIcon DataHistogram24}" />
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
                 <ui:NavigationViewItem x:Name="NavUpdates" Content="Updates" TargetPageTag="updates"
@@ -519,6 +521,89 @@
             </ScrollViewer>
 
             <!-- ============================= SKINS ============================= -->
+            <!-- ============================== HUD ============================== -->
+            <ScrollViewer x:Name="SectionHud" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
+                <StackPanel>
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="HUD widgets" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
+                                  Text="Small always-on-top panels showing your own audio: the spectrum after your EQ, your output levels and clipping, your EQ curve, and your volume. They stay out of your way — never in Alt+Tab, never focused, and click-through unless you are arranging them." />
+
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Mode" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Arrange widgets" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="On: widgets can be dragged, resized and right-clicked for their own settings. Off: they are completely click-through, so a click over one reaches whatever is underneath." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="HudEditSwitch" Click="OnHudEditToggled" />
+                    </ui:CardControl>
+
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Your widgets" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Add a widget" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="A new widget appears on your main screen, ready to drag into place." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <WrapPanel>
+                            <ui:Button x:Name="AddSpectrumButton" Content="Spectrum" Margin="0,0,8,0"
+                                       Icon="{ui:SymbolIcon DataHistogram24}" Click="OnAddSpectrum" />
+                            <ui:Button x:Name="AddLevelsButton" Content="Levels" Margin="0,0,8,0"
+                                       Icon="{ui:SymbolIcon DataBarVertical24}" Click="OnAddLevels" />
+                            <ui:Button x:Name="AddEqCurveButton" Content="EQ curve" Margin="0,0,8,0"
+                                       Icon="{ui:SymbolIcon Options24}" Click="OnAddEqCurve" />
+                            <ui:Button x:Name="AddVolumeButton" Content="Volume"
+                                       Icon="{ui:SymbolIcon Speaker224}" Click="OnAddVolume" />
+                        </WrapPanel>
+                    </ui:CardControl>
+
+                    <ui:TextBlock x:Name="HudEmptyText" Style="{StaticResource RowSubtitle}"
+                                  Margin="0,8,0,0" Text="No widgets yet." />
+                    <ItemsControl x:Name="HudWidgetList" Margin="0,4,0,0" />
+
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Behaviour" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Hide while a fullscreen app is in front" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Overlays over exclusive-fullscreen games either flicker or do not draw at all, so hiding them is better than showing them badly." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="HudFullscreenSwitch" Click="OnHudBehaviourChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Show only while audio is playing" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="The widgets appear when sound starts and fade out a few seconds after it stops." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="HudOnlyPlayingSwitch" Click="OnHudBehaviourChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Refresh rate" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="How often every widget redraws. One timer serves all of them; lower it if you would rather spend nothing at all on the HUD." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="HudFpsCombo" MinWidth="160" SelectionChanged="OnHudFpsChanged">
+                            <ComboBoxItem Content="10 fps" Tag="10" />
+                            <ComboBoxItem Content="20 fps" Tag="20" />
+                            <ComboBoxItem Content="30 fps" Tag="30" />
+                            <ComboBoxItem Content="60 fps" Tag="60" />
+                        </ComboBox>
+                    </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
+
             <ScrollViewer x:Name="SectionSkins" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
                 <StackPanel>
                     <ui:TextBlock Style="{StaticResource PageTitle}" Text="Skins" />
