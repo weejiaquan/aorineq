@@ -368,9 +368,20 @@
                             <WrapPanel Margin="0,14,0,0">
                                 <ui:Button x:Name="SetupGuideButton" Content="Setup guide" Margin="0,0,8,4"
                                            Icon="{ui:SymbolIcon Book24}" Click="OnOpenSetupGuide" />
-                                <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="0,0,0,4"
+                                <ui:Button x:Name="OpenConfiguratorButton" Content="Configurator" Margin="0,0,8,4"
                                            Icon="{ui:SymbolIcon Settings24}" Click="OnOpenConfigurator" />
+                                <!-- Never automatic and never silent: the click is the consent, and
+                                     the confirmation it raises spells out the administrator prompt,
+                                     the audio interruption and the undo before anything is written. -->
+                                <ui:Button x:Name="RepairEapoButton" Content="Repair automatically" Margin="0,0,8,4"
+                                           Icon="{ui:SymbolIcon Wrench24}" Click="OnRepairEapo" />
+                                <ui:Button x:Name="UndoRepairButton" Content="Undo repair" Margin="0,0,0,4"
+                                           Visibility="Collapsed"
+                                           Icon="{ui:SymbolIcon ArrowUndo24}" Click="OnUndoEapoRepair" />
                             </WrapPanel>
+                            <ui:TextBlock x:Name="EapoRepairStatusText" Style="{StaticResource RowSubtitle}"
+                                          Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                          Margin="0,8,0,0" Visibility="Collapsed" />
                           </StackPanel>
                         </ui:CardControl.Header>
                     </ui:CardControl>
