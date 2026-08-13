@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace AorinEQ.Core;
 
@@ -135,13 +135,19 @@ public static class EapoRepair
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         ApoPaths.StateFolderName, "eapo-repair-result.json");
 
-    public static void SaveResult(EapoRepairResult result)
+    /// <param name="resultPath">Defaults to the machine-wide <see cref="ResultPath"/>. It is a
+    /// parameter for the same reason the backup slot is: the real file is written by the ELEVATED
+    /// helper and an unelevated process may not be able to overwrite it at all, so a test that
+    /// drove the real path was both mutating shared state and liable to fail on any machine that
+    /// had used the feature once.</param>
+    public static void SaveResult(EapoRepairResult result, string? resultPath = null)
     {
         try
         {
-            var dir = Path.GetDirectoryName(ResultPath);
+            var path = resultPath ?? ResultPath;
+            var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllText(ResultPath, JsonSerializer.Serialize(result));
+            File.WriteAllText(path, JsonSerializer.Serialize(result));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -162,12 +168,13 @@ public static class EapoRepair
     /// folder, and the unelevated app that reads it may have no right to delete somebody else's
     /// file there. A stale verdict from an earlier run is therefore IGNORED rather than trusted
     /// and removed — which is the property that actually matters.</summary>
-    public static EapoRepairResult? ReadResult(string token)
+    public static EapoRepairResult? ReadResult(string token, string? resultPath = null)
     {
         try
         {
-            if (!File.Exists(ResultPath)) return null;
-            var result = JsonSerializer.Deserialize<EapoRepairResult>(File.ReadAllText(ResultPath));
+            var path = resultPath ?? ResultPath;
+            if (!File.Exists(path)) return null;
+            var result = JsonSerializer.Deserialize<EapoRepairResult>(File.ReadAllText(path));
             return result is not null && result.Token == token ? result : null;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
@@ -210,9 +217,16 @@ public static class EapoRepair
     /// returns true when the audio services came back; <paramref name="verifyEndpointUsable"/> is
     /// the caller's independent check that the device is still enumerable and still opens for
     /// playback — the part that cannot be answered from the registry we just wrote.</summary>
+    /// <param name="backupPath">Where the undo record is kept. Defaults to the machine-wide
+    /// <see cref="BackupPath"/>, which is what the product always uses; it is a parameter so a
+    /// test can point the one backup SLOT at a file it owns. Tests that wrote to the real path
+    /// asserted the machine started with no backup and deleted it afterwards, which made an
+    /// unrelated suite run able to destroy a real pending undo.</param>
     public static EapoRepairResult Repair(
-        string endpointGuid, Func<bool> restartAudio, Func<bool> verifyEndpointUsable)
+        string endpointGuid, Func<bool> restartAudio, Func<bool> verifyEndpointUsable,
+        string? backupPath = null)
     {
+        var slot = backupPath ?? BackupPath;
         if (!Guid.TryParse(endpointGuid, out _))
             return new(EapoRepairOutcome.Refused, "that isn't a playback device AorinEQ recognises.");
 
@@ -239,7 +253,7 @@ public static class EapoRepair
         // and treating it as one would refuse every future repair with no way out from the UI. The
         // fresh capture that replaces it is a usable record of the same machine, which is strictly
         // better than an unusable one.
-        if (EapoRepairBackup.Load(BackupPath) is { IsRestorable: true } existing
+        if (EapoRepairBackup.Load(slot) is { IsRestorable: true } existing
             && (existing.IsInterrupted
                 || !string.Equals(existing.EndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
         {
@@ -266,7 +280,7 @@ public static class EapoRepair
             fxBefore.ToArray(), childBefore?.ToArray());
         try
         {
-            backup.Save(BackupPath);
+            backup.Save(slot);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -282,31 +296,31 @@ public static class EapoRepair
         catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException
             or IOException or InvalidOperationException)
         {
-            return RevertAfterFailure(backup, restartAudio,
+            return RevertAfterFailure(backup, restartAudio, slot,
                 "AorinEQ couldn't change the device's settings (" + ex.Message + ")");
         }
 
         bool restarted = restartAudio();
         if (!restarted)
         {
-            return RevertAfterFailure(backup, restartAudio,
+            return RevertAfterFailure(backup, restartAudio, slot,
                 "the Windows audio service couldn't be restarted, so the change couldn't take effect");
         }
 
         if (!EapoDetection.IsActiveOnEndpoint(endpointGuid))
         {
-            return RevertAfterFailure(backup, restartAudio,
+            return RevertAfterFailure(backup, restartAudio, slot,
                 "Windows didn't pick the change up");
         }
         if (!verifyEndpointUsable())
         {
-            return RevertAfterFailure(backup, restartAudio,
+            return RevertAfterFailure(backup, restartAudio, slot,
                 "the playback device stopped responding after the change");
         }
 
         try
         {
-            (backup with { Stage = EapoRepairBackup.Applied }).Save(BackupPath);
+            (backup with { Stage = EapoRepairBackup.Applied }).Save(slot);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -325,7 +339,8 @@ public static class EapoRepair
     /// <summary>Puts everything back and says what happened. Used both by the automatic revert and
     /// by the user's own "Undo". Idempotent enough to run twice: restoring a captured state over
     /// itself is a no-op.</summary>
-    public static EapoRepairResult Undo(EapoRepairBackup backup, Func<bool> restartAudio)
+    public static EapoRepairResult Undo(EapoRepairBackup backup, Func<bool> restartAudio,
+        string? backupPath = null)
     {
         // Checked BEFORE the first write, not discovered halfway through it: a restore that throws
         // partway leaves the endpoint in a third state that is neither where it was nor where the
@@ -356,13 +371,13 @@ public static class EapoRepair
                 "The device's settings are back exactly as they were, but Windows audio couldn't be "
                 + "restarted — restart your PC to finish. AorinEQ has kept its record until then.");
         }
-        TryDeleteBackup();
+        TryDeleteBackup(backupPath);
         return new(EapoRepairOutcome.Undone,
             "The device's settings are back exactly as they were before the repair.");
     }
 
     private static EapoRepairResult RevertAfterFailure(
-        EapoRepairBackup backup, Func<bool> restartAudio, string why)
+        EapoRepairBackup backup, Func<bool> restartAudio, string slot, string why)
     {
         try
         {
@@ -384,7 +399,7 @@ public static class EapoRepair
                 + "they were. Windows audio couldn't be restarted afterwards, so restart your PC to "
                 + "finish. AorinEQ has kept its record until then.");
         }
-        TryDeleteBackup();
+        TryDeleteBackup(slot);
         return new(EapoRepairOutcome.RevertedAfterFailure,
             "The repair didn't work — " + why + " — so AorinEQ put everything back exactly as it was. "
             + "Equalizer APO's own Configurator can switch the device on manually.");
@@ -399,11 +414,11 @@ public static class EapoRepair
             EapoEndpoint.RestoreChildApos(backup.EndpointGuid, backup.ChildApoValues);
     }
 
-    public static void TryDeleteBackup()
+    public static void TryDeleteBackup(string? backupPath = null)
     {
         try
         {
-            File.Delete(BackupPath);
+            File.Delete(backupPath ?? BackupPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
