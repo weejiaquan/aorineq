@@ -37,7 +37,6 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     // read-only previews (the apply-preset dialog, Simple mode) draw with too.
     private const double FMin = EqCurveRenderer.FMin, FMax = EqCurveRenderer.FMax;
     private const int CurvePoints = EqCurveRenderer.CurvePoints;
-    private const int FftSize = 4096;
     private static readonly int[] DbRanges = EqCurveRenderer.DbRanges;
     private static readonly double[] GridFrequencies = { 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 };
     private const double SpectrumTopDb = 0, SpectrumBottomDb = -90;
@@ -88,14 +87,17 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     private readonly List<UIElement> _curveElements = new();
     private readonly List<Ellipse> _nodes = new();
 
-    // Loopback capture + analysis state (capture thread writes, UI timer reads).
-    private readonly LoopbackCapture _capture = new();
-    private readonly ClipDetector _clip = new();
-    private readonly object _meterLock = new();
-    private readonly float[] _ring = new float[FftSize];
-    private int _ringPos;
-    private double _blockPeakL = MeterMath.FloorDb, _blockRmsL = MeterMath.FloorDb;
-    private double _blockPeakR = MeterMath.FloorDb, _blockRmsR = MeterMath.FloorDb;
+    // Audio comes from the application-wide pipeline, NOT from a capture of this window's own.
+    // Since v3.5.0 the HUD widgets read the same signal, and one WASAPI client, capture thread,
+    // event handle and COM object per surface would be four copies of an identical stream. This
+    // window registers a consumer while it is open and reads the SHARED analysis; the FFT behind
+    // its spectrum is the very transform the widgets are drawing from.
+    private readonly SharedAudioPipeline _pipeline;
+    private IDisposable? _audioConsumer;
+    /// <summary>This window's own clip indicator, so resetting it here cannot silently clear a
+    /// levels widget's — see <see cref="HudClipLatch"/>.</summary>
+    private readonly HudClipLatch _clip = new();
+    private bool _clipRebased;
     private double _shownRmsL = MeterMath.FloorDb, _shownRmsR = MeterMath.FloorDb;
     private double _shownPeakL = MeterMath.FloorDb, _shownPeakR = MeterMath.FloorDb;
     private readonly System.Windows.Threading.DispatcherTimer _frameTimer = new()
@@ -118,17 +120,17 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     private readonly List<BandColumn> _columns = new();
 
     public EqEditorWindow(Func<Settings> getSettings, Func<string?> getActiveDeviceId,
-        Func<string?, double?> getVolumeDbFor)
+        Func<string?, double?> getVolumeDbFor, SharedAudioPipeline pipeline)
     {
         _getSettings = getSettings;
         _getActiveDeviceId = getActiveDeviceId;
         _getVolumeDbFor = getVolumeDbFor;
+        _pipeline = pipeline;
         InitializeComponent();
 
         ApplyPalette();
 
         BandTypeCombo.ItemsSource = Enum.GetValues<EqBandType>();
-        _capture.SamplesAvailable += OnSamples;
         _frameTimer.Tick += (_, _) => OnFrame();
 
         PreviewKeyDown += OnWindowKeyDown;
@@ -145,13 +147,17 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
             // into Advanced on the next open, having never asked for it.
             if (EqEditorModes.Normalize(_getSettings().EqEditorMode) == EqEditorModes.Unset)
                 EditorModeChanged?.Invoke(_editorMode);
-            _capture.Start();
+            // Registering is what starts the shared capture if nothing else is using it yet.
+            _audioConsumer ??= _pipeline.AddConsumer("EQ editor");
             _frameTimer.Start();
         };
         Closed += (_, _) =>
         {
             _frameTimer.Stop();
-            _capture.Dispose();
+            // Releasing is what stops the shared capture if nothing else is left using it. The
+            // pipeline itself belongs to the app and outlives this window.
+            _audioConsumer?.Dispose();
+            _audioConsumer = null;
         };
 
         // Subscribed LAST, after everything above that can throw. ApplicationThemeManager.Changed
@@ -176,7 +182,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     public void OnActiveDeviceChanged()
     {
         PopulateScopeTabs();
-        _capture.Restart();
+        _pipeline.Restart();
     }
 
     /// <summary>The app-side preset list changed (tray switch, protocol install): refresh.</summary>
@@ -1355,52 +1361,30 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---- Meters + spectrum ----
 
-    /// <summary>Capture thread: fold the block into the analysis ring and the meter block
-    /// values. Kept tiny — the UI timer does all drawing.</summary>
-    private void OnSamples(float[] left, float[] right)
-    {
-        double peakL = MeterMath.PeakDb(left), rmsL = MeterMath.RmsDb(left);
-        double peakR = MeterMath.PeakDb(right), rmsR = MeterMath.RmsDb(right);
-        lock (_meterLock)
-        {
-            _blockPeakL = Math.Max(_blockPeakL, peakL);
-            _blockRmsL = Math.Max(_blockRmsL, rmsL);
-            _blockPeakR = Math.Max(_blockPeakR, peakR);
-            _blockRmsR = Math.Max(_blockRmsR, rmsR);
-            _clip.Observe(Math.Max(peakL, peakR));
-            for (int i = 0; i < left.Length; i++)
-            {
-                _ring[_ringPos] = (left[i] + right[i]) * 0.5f;
-                _ringPos = (_ringPos + 1) % _ring.Length;
-            }
-        }
-    }
-
-    /// <summary>UI timer (~30 fps): meters, clip indicator, spectrum, readouts.</summary>
+    /// <summary>UI timer (~30 fps): meters, clip indicator, spectrum, readouts, all from ONE
+    /// reading of the shared analysis. Taking the snapshot once here is what keeps this window and
+    /// the HUD widgets sharing a single FFT rather than each provoking their own.</summary>
     private void OnFrame()
     {
-        double peakL, rmsL, peakR, rmsR;
-        bool clipLatched;
-        int clipCount;
-        var snapshot = new float[_ring.Length];
-        lock (_meterLock)
+        var analysis = _pipeline.Analyze();
+        // A widget shown after an hour of clipping must not come up already lit, so the first
+        // reading only establishes this window's baseline.
+        if (!_clipRebased)
         {
-            peakL = _blockPeakL; rmsL = _blockRmsL;
-            peakR = _blockPeakR; rmsR = _blockRmsR;
-            _blockPeakL = _blockPeakR = _blockRmsL = _blockRmsR = MeterMath.FloorDb;
-            clipLatched = _clip.Latched;
-            clipCount = _clip.Count;
-            // Unroll the ring so index 0 is the oldest sample.
-            int head = _ringPos;
-            Array.Copy(_ring, head, snapshot, 0, _ring.Length - head);
-            Array.Copy(_ring, 0, snapshot, _ring.Length - head, head);
+            _clip.Rebase(analysis.ClipEvents);
+            _clipRebased = true;
+        }
+        else
+        {
+            _clip.Observe(analysis.ClipEvents);
         }
 
-        // Ballistics: instant attack, smooth release.
-        _shownRmsL = Math.Max(rmsL, _shownRmsL - 2.5);
-        _shownRmsR = Math.Max(rmsR, _shownRmsR - 2.5);
-        _shownPeakL = Math.Max(peakL, _shownPeakL - 1.5);
-        _shownPeakR = Math.Max(peakR, _shownPeakR - 1.5);
+        // Ballistics: instant attack, smooth release. Unchanged rates, so the meters read exactly
+        // as they did before the pipeline moved out of this window.
+        _shownRmsL = Math.Max(analysis.RmsDbL, _shownRmsL - 2.5);
+        _shownRmsR = Math.Max(analysis.RmsDbR, _shownRmsR - 2.5);
+        _shownPeakL = Math.Max(analysis.PeakDbL, _shownPeakL - 1.5);
+        _shownPeakR = Math.Max(analysis.PeakDbR, _shownPeakR - 1.5);
 
         DrawMeter(RmsBarL, PeakTickL, _shownRmsL, _shownPeakL);
         DrawMeter(RmsBarR, PeakTickR, _shownRmsR, _shownPeakR);
@@ -1408,11 +1392,12 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
             ? "silent"
             : $"peak {Math.Max(_shownPeakL, _shownPeakR):0.0} dBFS";
 
+        bool clipLatched = _clip.Latched;
         ClipIndicator.Background = Brush(clipLatched ? _palette.ClipLatched : _palette.ClipIdle);
         ClipIndicator.Foreground = Brush(clipLatched ? _palette.ClipLatchedText : _palette.ClipIdleText);
-        ClipCountText.Text = clipCount == 0 ? "" : $"clipped {clipCount}×";
+        ClipCountText.Text = _clip.Count == 0 ? "" : $"clipped {_clip.Count}×";
 
-        UpdateSpectrum(snapshot);
+        UpdateSpectrum(analysis);
         UpdatePreampReadout();
     }
 
@@ -1427,16 +1412,17 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         peakTick.Margin = new Thickness(0, 0, 0, Math.Min(Scale(peakDb), height - 2));
     }
 
-    private void UpdateSpectrum(float[] samples)
+    /// <summary>Draws the shared spectrum. The transform itself already happened — this only bins
+    /// and plots it.</summary>
+    private void UpdateSpectrum(AudioAnalysis analysis)
     {
-        if (_capture.SampleRate <= 0 || Plot.ActualWidth < 50)
+        if (analysis.SampleRate <= 0 || Plot.ActualWidth < 50)
         {
             _spectrumPolygon.Points.Clear();
             return;
         }
-        var db = Fft.SpectrumDb(samples);
         int bandCount = Math.Max(32, (int)(Plot.ActualWidth / 8));
-        var bands = Fft.LogBins(db, _capture.SampleRate, FMin, FMax, bandCount);
+        var bands = Fft.LogBins(analysis.SpectrumDb, analysis.SampleRate, FMin, FMax, bandCount);
 
         var points = new PointCollection { new Point(0, Plot.ActualHeight) };
         for (int i = 0; i < bands.Length; i++)
@@ -1448,11 +1434,5 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         _spectrumPolygon.Points = points;
     }
 
-    private void OnResetClip(object sender, RoutedEventArgs e)
-    {
-        lock (_meterLock)
-        {
-            _clip.Reset();
-        }
-    }
+    private void OnResetClip(object sender, RoutedEventArgs e) => _clip.Reset(_pipeline.Analyze().ClipEvents);
 }

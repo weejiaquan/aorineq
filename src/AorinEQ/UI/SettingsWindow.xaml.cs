@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -141,6 +142,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             (SettingsSections.Osd, SectionOsd),
             (SettingsSections.Skins, SectionSkins),
             (SettingsSections.Equalizer, SectionEqualizer),
+            (SettingsSections.Hud, SectionHud),
             (SettingsSections.Updates, SectionUpdates),
             (SettingsSections.About, SectionAbout),
         };
@@ -214,6 +216,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             SettingsSections.Osd => StyleCombo,
             SettingsSections.Updates => CheckUpdatesButton,
             SettingsSections.Equalizer => OpenEqualizerButton,
+            SettingsSections.Hud => HudEditSwitch,
             _ => null,
         };
         if (primary is null) return;
@@ -225,7 +228,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private IEnumerable<Wpf.Ui.Controls.NavigationViewItem> NavItems() =>
-        new[] { NavVolume, NavOsd, NavSkins, NavEqualizer, NavUpdates, NavAbout };
+        new[] { NavVolume, NavOsd, NavSkins, NavEqualizer, NavHud, NavUpdates, NavAbout };
 
     private Wpf.Ui.Controls.NavigationViewItem? NavItemFor(string section) =>
         NavItems().FirstOrDefault(i => i.TargetPageTag == section);
@@ -747,4 +750,122 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         e.Cancel = true; // App owns lifetime; hide like the OSD
         Hide();
     }
+
+    // ---- HUD ----
+
+    /// <summary>The arrange/live switch. True is EDIT.</summary>
+    public event Action<bool>? HudModeChanged;
+
+    /// <summary>Any of the three behaviour settings changed; all three are sent together because
+    /// the HUD applies them as one record.</summary>
+    public event Action<bool, bool, int>? HudBehaviourChanged;
+
+    /// <summary>A widget of this type was asked for.</summary>
+    public event Action<string>? HudWidgetAdded;
+
+    /// <summary>A widget's visibility was toggled, by id.</summary>
+    public event Action<string>? HudWidgetToggled;
+
+    /// <summary>A widget was removed, by id.</summary>
+    public event Action<string>? HudWidgetRemoved;
+
+    /// <summary>Renders one layout into the section. Called when Settings opens and again on every
+    /// layout change, so a widget dragged (or deleted) from the desktop is reflected here without
+    /// the user having to reopen the window.</summary>
+    public void ApplyHud(HudLayout layout)
+    {
+        bool wasInitializing = _initializing;
+        _initializing = true;   // populating must not raise the handlers back at the app
+        try
+        {
+            HudEditSwitch.IsChecked = layout.Mode == HudModes.Edit;
+            HudFullscreenSwitch.IsChecked = layout.HideWhenFullscreen;
+            HudOnlyPlayingSwitch.IsChecked = layout.OnlyWhilePlaying;
+            SelectByTag(HudFpsCombo, NearestFps(layout.Fps).ToString(CultureInfo.InvariantCulture));
+
+            HudWidgetList.Items.Clear();
+            foreach (var widget in layout.Widgets)
+                HudWidgetList.Items.Add(BuildWidgetRow(widget));
+            HudEmptyText.Visibility = layout.Widgets.Count == 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        finally
+        {
+            _initializing = wasInitializing;
+        }
+    }
+
+    /// <summary>The combo offers four rates; a layout carrying any other value (hand-edited, or
+    /// written by a later build) shows the nearest rather than nothing at all.</summary>
+    private static int NearestFps(int fps)
+    {
+        int[] offered = { 10, 20, 30, 60 };
+        return offered.OrderBy(o => Math.Abs(o - fps)).First();
+    }
+
+    private UIElement BuildWidgetRow(HudWidget widget)
+    {
+        var visible = new System.Windows.Controls.CheckBox
+        {
+            Content = HudWidgetTypes.DisplayName(widget.Type),
+            IsChecked = widget.Visible,
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 140,
+        };
+        var id = widget.Id;
+        visible.Click += (_, _) => { if (!_initializing) HudWidgetToggled?.Invoke(id); };
+
+        var remove = new Wpf.Ui.Controls.Button
+        {
+            Content = "Remove",
+            Icon = new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.Delete24),
+            Margin = new Thickness(12, 0, 0, 0),
+        };
+        remove.Click += (_, _) => { if (!_initializing) HudWidgetRemoved?.Invoke(id); };
+
+        var row = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        row.Children.Add(visible);
+        row.Children.Add(remove);
+        return row;
+    }
+
+    private void OnAddSpectrum(object sender, RoutedEventArgs e) => AddHudWidget(HudWidgetTypes.Spectrum);
+
+    private void OnAddLevels(object sender, RoutedEventArgs e) => AddHudWidget(HudWidgetTypes.Levels);
+
+    private void OnAddEqCurve(object sender, RoutedEventArgs e) => AddHudWidget(HudWidgetTypes.EqCurve);
+
+    private void OnAddVolume(object sender, RoutedEventArgs e) => AddHudWidget(HudWidgetTypes.Volume);
+
+    private void AddHudWidget(string type)
+    {
+        if (_initializing) return;
+        HudWidgetAdded?.Invoke(type);
+    }
+
+    private void OnHudEditToggled(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        HudModeChanged?.Invoke(HudEditSwitch.IsChecked == true);
+    }
+
+    private void OnHudBehaviourChanged(object sender, RoutedEventArgs e) => RaiseHudBehaviour();
+
+    private void OnHudFpsChanged(object sender, SelectionChangedEventArgs e) => RaiseHudBehaviour();
+
+    private void RaiseHudBehaviour()
+    {
+        if (_initializing) return;
+        HudBehaviourChanged?.Invoke(
+            HudFullscreenSwitch.IsChecked == true,
+            HudOnlyPlayingSwitch.IsChecked == true,
+            TagInt(HudFpsCombo, HudLayout.DefaultFps));
+    }
+
+    private static int TagInt(System.Windows.Controls.ComboBox combo, int fallback) =>
+        combo.SelectedItem is ComboBoxItem { Tag: string tag }
+            && int.TryParse(tag, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+            ? value
+            : fallback;
 }

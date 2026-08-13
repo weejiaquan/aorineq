@@ -58,7 +58,7 @@ jobs:
         run: |
           $log = 'test-output.txt'
           dotnet test AorinEQ.slnx -c Release --no-build `
-            --filter "Requires!=AudioEndpoint&Requires!=EqualizerApo&Requires!=MultipleRenderEndpoints" `
+            --filter "Requires!=AudioEndpoint&Requires!=EqualizerApo&Requires!=MultipleRenderEndpoints&Requires!=Display" `
             | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "dotnet test failed with exit code $LASTEXITCODE" }
 

@@ -31,6 +31,17 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private SkinDesignerWindow? _skinDesigner;
     private EqEditorWindow? _eqEditor;
+    /// <summary>THE application's one loopback capture and one analysis. Owned here because it
+    /// outlives every surface that reads it: the EQ editor opens and closes, HUD widgets appear
+    /// and disappear, and each takes a reference-counted registration for as long as it needs the
+    /// stream. The capture itself starts on the first registration and stops on the last.</summary>
+    private readonly SharedAudioPipeline _audioPipeline = new();
+    private HudManager? _hud;
+    /// <summary>Friendly name of the active render endpoint, CACHED. The HUD asks for a runtime
+    /// snapshot on every frame, and resolving this through IMMDeviceEnumerator each time would put
+    /// a COM enumeration on the UI thread thirty times a second. It only changes when the default
+    /// device does, which is exactly where it is refreshed.</summary>
+    private string _activeDeviceName = "";
     private OnboardingWindow? _onboarding;
     private OnboardingWindow? _startupWizard; // blocking first-run wizard, while it's up
     private DeviceVolumeStates _deviceStates = new(Settings.Default);
@@ -300,7 +311,11 @@ public partial class App : System.Windows.Application
             _tray.SettingsRequested += OpenSettings;
             _tray.EqualizerRequested += OpenEqEditor;
             _tray.MenuOpening += RefreshTrayEqPresets;
+            _tray.MenuOpening += RefreshTrayHudMenu;
             _tray.EqPresetSelected += OnTrayEqPresetSelected;
+            _tray.HudModeToggled += OnHudModeToggled;
+            _tray.HudWidgetToggled += OnHudWidgetToggled;
+            _tray.HudWidgetAdded += OnHudWidgetAdded;
             _tray.ExitRequested += BeginShutdown;
 
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
@@ -372,6 +387,8 @@ public partial class App : System.Windows.Application
         _tray!.Update(ActiveState.Percent, ActiveState.Muted);
 
         SetupEapoHealthMonitor();
+        RefreshActiveDeviceName();
+        SetupHud();
 
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
         try
@@ -738,6 +755,12 @@ public partial class App : System.Windows.Application
             _settingsWindow.RepairEapoRequested += OnEapoRepairRequested;
             _settingsWindow.UndoEapoRepairRequested += OnEapoUndoRepairRequested;
             _settingsWindow.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
+            _settingsWindow.HudModeChanged += OnHudModeToggled;
+            _settingsWindow.HudBehaviourChanged += (fullscreen, playing, fps) =>
+                _hud?.SetBehaviour(fullscreen, playing, fps);
+            _settingsWindow.HudWidgetAdded += OnHudWidgetAdded;
+            _settingsWindow.HudWidgetToggled += OnHudWidgetToggled;
+            _settingsWindow.HudWidgetRemoved += id => _hud?.Remove(id);
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
@@ -746,6 +769,7 @@ public partial class App : System.Windows.Application
                 _settings, _eapoHealth.Current);
         }
 
+        if (_hud is not null) _settingsWindow.ApplyHud(_hud.Layout);
         _settingsWindow.Show();
         _settingsWindow.Activate();
         // The user is looking at it now, so the reading behind the health row is taken fresh —
@@ -812,7 +836,8 @@ public partial class App : System.Windows.Application
                     ? null
                     : _deviceStates.Snapshot().TryGetValue(deviceId, out var v)
                         ? VolumeState.ToDb(v.Percent, v.Muted)
-                        : 0.0);
+                        : 0.0,
+                _audioPipeline);
             _eqEditor.ScopeChanged += OnEqScopeChanged;
             _eqEditor.EditorModeChanged += OnEqEditorModeChanged;
             _eqEditor.Closed += (_, _) => _eqEditor = null;
@@ -1887,10 +1912,12 @@ public partial class App : System.Windows.Application
     private void OnDefaultDeviceChanged()
     {
         _deviceStates.SwitchTo(AudioEndpoint.GetDefaultRenderEndpointId());
+        RefreshActiveDeviceName();
         RenderEqConfig();
         _tray?.Update(ActiveState.Percent, ActiveState.Muted);
         SaveSettings();
-        _eqEditor?.OnActiveDeviceChanged(); // retab + loopback re-attach, if the editor is open
+        _eqEditor?.OnActiveDeviceChanged(); // retab, if the editor is open
+        _hud?.OnDeviceChanged();            // re-attach the SHARED capture to the new endpoint
         // Equalizer APO is registered PER DEVICE, so this is the one moment the answer is
         // guaranteed to have changed — plugging in headphones moves the user onto a device that
         // may never have been ticked. Forced, because collapsing it against an unrelated probe
@@ -2153,6 +2180,126 @@ public partial class App : System.Windows.Application
         CheckEapoHealth(force: true);
     }
 
+    // ---- HUD ----
+
+    /// <summary>Builds the HUD and puts its widgets on screen.
+    ///
+    /// Deliberately after the OSD, the tray and the EQ pipeline: the volume widget renders the
+    /// same skin the OSD resolved, the "moved to your main screen" notice needs the tray, and the
+    /// runtime snapshot below reads state those steps establish. A user with no widgets pays for
+    /// one empty layout read and nothing else — no window, no timer, no capture.</summary>
+    private void SetupHud()
+    {
+        try
+        {
+            var store = new HudStore(HudLayout.DefaultPath);
+            _hud = new HudManager(store, _audioPipeline, SnapshotHudState);
+            _hud.LayoutChanged += layout => _settingsWindow?.ApplyHud(layout);
+            _hud.MovedToPrimary += () => _tray?.ShowInfo(
+                "A HUD widget's screen is gone — it has been moved to your main display.");
+            _hud.SetSkin(_useSkinOsd ? CurrentSkinInfo() : null);
+            _hud.ApplyPalette(EqPalette.For(SystemTheme.AppsUseLightTheme()));
+            _hud.Apply();
+            // Widgets follow the desktop: a resolution change, a monitor unplugged, or a dock
+            // leaves every remembered position describing a screen that may no longer be there.
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A HUD that cannot read its own layout must not stop the app the user actually
+            // relies on from starting.
+            _tray?.ShowWarning("The HUD layout could not be loaded: " + ex.Message);
+        }
+    }
+
+    /// <summary>Everything the HUD needs for one frame, read fresh each time so it can never show
+    /// state the app has already moved past.</summary>
+    private HudManager.HudRuntimeState SnapshotHudState() => new(
+        ActiveState.Percent,
+        ActiveState.Muted,
+        SystemModeActive ? null : ActiveState.CurrentDb,
+        _activeDeviceName,
+        ActiveEqBands(),
+        _useSkinOsd ? CurrentSkinInfo() : null);
+
+    /// <summary>The chain the user is actually hearing on the active device: the global scope's
+    /// bands followed by that device's, each only when its scope is enabled. The same composition
+    /// <see cref="BuildEqModel"/> renders into the config file, so the curve on screen is the
+    /// curve in the file.</summary>
+    private IReadOnlyList<EqBand> ActiveEqBands()
+    {
+        var bands = new List<EqBand>();
+        if (_settings.GlobalEq is { Enabled: true, Bands: { } globalBands })
+            bands.AddRange(globalBands);
+        if (_deviceStates.ActiveId is { } id && _settings.DeviceEq is { } map
+            && map.TryGetValue(id, out var scope) && scope.Enabled && scope.Bands is { } deviceBands)
+            bands.AddRange(deviceBands);
+        return bands;
+    }
+
+    /// <summary>The active skin, or null when the user is not on a skin style. Resolved through
+    /// the SAME loader the OSD uses rather than cached, so a skin edited in place reaches both.</summary>
+    private SkinInfo? CurrentSkinInfo()
+    {
+        if (_settings.OsdStyle != OsdStyles.Skin || string.IsNullOrEmpty(_settings.SkinName))
+            return null;
+        var info = SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), _settings.SkinName));
+        return info.IsValid ? info : null;
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        // Raised on a system thread; the same guarded hop every other SystemEvents handler here
+        // uses, for the same reason (posting to a dispatcher that has begun shutting down throws,
+        // and an exception on a system thread takes the process down mid-teardown).
+        PostToDispatcher(() => _hud?.PlaceAll());
+    }
+
+    /// <summary>Re-reads the active endpoint's friendly name. Called only on a device change —
+    /// see the field's remarks for why it is not read per frame.</summary>
+    private void RefreshActiveDeviceName()
+    {
+        var id = _deviceStates.ActiveId;
+        if (id is null)
+        {
+            _activeDeviceName = "";
+            return;
+        }
+        try
+        {
+            _activeDeviceName = AudioEndpoint.GetRenderEndpoints()
+                .FirstOrDefault(e => e.Id == id)?.FriendlyName ?? "";
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            _activeDeviceName = ""; // the device list is unreadable; a blank name is not a crash
+        }
+    }
+
+    private void RefreshTrayHudMenu()
+    {
+        if (_hud is null) return;
+        _tray?.SetHudState(_hud.EditMode, _hud.Layout.Widgets);
+    }
+
+    private void OnHudModeToggled(bool edit) => _hud?.SetMode(edit ? HudModes.Edit : HudModes.Live);
+
+    private void OnHudWidgetToggled(string id)
+    {
+        if (_hud?.Layout.Find(id) is not { } widget) return;
+        _hud.SetVisible(id, !widget.Visible);
+    }
+
+    private void OnHudWidgetAdded(string type)
+    {
+        if (_hud is null) return;
+        _hud.Add(type);
+        // A brand-new widget lands in whatever mode the HUD is in. In live mode that is a
+        // click-through window the user cannot pick up, so adding one switches to edit — you
+        // asked for a widget in order to place it.
+        if (!_hud.EditMode) _hud.SetMode(HudModes.Edit);
+    }
+
     /// <summary>Shows the currently active OSD window (skin-driven or the standard OsdWindow) for
     /// the current volume state. Shared by Render (volume/mute changes) and OnOsdSettingsChanged
     /// (so an OSD-only settings change is immediately visible without needing a volume keypress).</summary>
@@ -2223,6 +2370,7 @@ public partial class App : System.Windows.Application
             _loadedSkinFolder = null;
             _loadedSkinStamp = null;
             _skinOsd?.Hide();
+            _hud?.SetSkin(null);
             return;
         }
 
@@ -2234,6 +2382,7 @@ public partial class App : System.Windows.Application
             _loadedSkinFolder = null;
             _loadedSkinStamp = null;
             _skinOsd?.Hide();
+            _hud?.SetSkin(null);
             return;
         }
 
@@ -2261,10 +2410,14 @@ public partial class App : System.Windows.Application
                 _loadedSkinFolder = null;
                 _loadedSkinStamp = null;
                 _skinOsd?.Hide();
+                _hud?.SetSkin(null);
                 return;
             }
         }
         _skinOsd.ApplyConfig(s);
+        // The HUD's volume widget renders the SAME validated SkinInfo — one loader, one
+        // validation, one set of pixels for both surfaces.
+        _hud?.SetSkin(info);
         _useSkinOsd = true;
         _osd!.Hide(); // symmetric with the skin->standard branches above: only one OSD window is
                       // ever visible at a time, so switching TO skin must hide the standard one too.
@@ -2493,11 +2646,16 @@ public partial class App : System.Windows.Application
         _healthEventsSubscribed = false;
         Microsoft.Win32.SystemEvents.SessionSwitch -= OnSessionSwitch;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         _healthTimer?.Stop();
         // Unsubscribed early and for the same reason as the tray's: both listen on SystemEvents,
         // which raises on a system thread, and a theme change arriving mid-teardown must not find
         // a dispatcher that has begun shutting down.
         _appTheme?.Dispose();
+        // The HUD before the pipeline: its windows hold the audio registration, and the pipeline
+        // must not be torn down while a registration is still outstanding.
+        _hud?.Dispose();
+        _audioPipeline.Dispose();
         _tray?.Dispose();
         _writer?.Dispose();
         _endpointVolume?.Dispose();

@@ -27,6 +27,11 @@ public static class Requires
     /// directory.</summary>
     public const string EqualizerApo = "EqualizerApo";
 
+    /// <summary>At least one display attached. EnumDisplayMonitors reports nothing in a session
+    /// with no desktop, so a test that asserts on the machine's screens would be asserting on an
+    /// empty list — which is not the same test, and would pass for the wrong reason.</summary>
+    public const string Display = "Display";
+
     /// <summary>TWO OR MORE active render endpoints, because the test switches the machine's
     /// default playback device back and forth and asserts on what Windows delivers. With one
     /// endpoint there is no switch to make and nothing to observe.
