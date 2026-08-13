@@ -408,7 +408,12 @@ public class EapoRepairTests
     /// hardware. This one can only ever be refused.</summary>
     private const string NoSuchDevice = "{deadbeef-0000-0000-0000-000000000000}";
 
+    // These three drive EapoRepair.Repair past its "is Equalizer APO installed?" gate, which comes
+    // BEFORE the backup-slot guard they are actually about. Without the install they are refused
+    // for the wrong reason and assert nothing - so they are labelled, like every other test here
+    // that needs the real thing to talk to. See Requires.cs.
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
     public void An_unfinished_repair_is_never_overwritten_by_a_new_one()
     {
         // There is ONE backup slot. A repair that never reached its verification left the only
@@ -440,6 +445,7 @@ public class EapoRepairTests
     }
 
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
     public void An_undo_held_for_another_device_is_never_thrown_away()
     {
         var path = OwnSlot();
@@ -568,6 +574,7 @@ public class EapoRepairTests
     // ------------------------------------------------- codex round 2: the round-1 fixes, reviewed
 
     [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
     public void A_record_nothing_can_use_never_locks_the_user_out_of_repairing()
     {
         // The round-1 guard refuses a repair while an unfinished backup exists. A backup that
