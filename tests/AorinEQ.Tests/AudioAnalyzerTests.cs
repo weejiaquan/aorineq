@@ -138,9 +138,15 @@ public class AudioAnalyzerTests
         a.Feed(Silence(64).L, Silence(64).R);   // a new generation, so the cache cannot answer
         var second = a.Analyze();
 
+        // Under the destructive design the second reader saw ONLY those 64 silent samples and
+        // read the floor on both meters. Under a window it still sees the tone that is still in
+        // the window. The RMS moves by a hair, because 64 samples of silence really did join the
+        // window - that is the measurement being honest, not a reader consuming another's data.
         Assert.Equal(-0.92, first.PeakDbL, 1);
         Assert.Equal(first.PeakDbL, second.PeakDbL, 6);
-        Assert.Equal(first.RmsDbL, second.RmsDbL, 1);
+        Assert.True(second.RmsDbL > MeterMath.FloorDb + 60,
+            $"the second reader must still see the signal, read {second.RmsDbL:0.00} dBFS");
+        Assert.Equal(first.RmsDbL, second.RmsDbL, 0.25);
     }
 
     [Fact]
@@ -172,6 +178,60 @@ public class AudioAnalyzerTests
         a.Feed(Silence(1600).L, Silence(1600).R);
 
         Assert.Equal(-0.92, a.Analyze().PeakDbL, 1); // ...and the transient is still reported
+    }
+
+    [Fact]
+    public void The_level_is_measured_over_the_REAL_samples_not_the_silence_the_ring_started_as()
+    {
+        // Right after an attach (or a device switch) most of the window is still the zero fill it
+        // was created with. Averaging that in under-reports RMS for the first ~85 ms — which is
+        // exactly when somebody has just opened the editor and is looking at the meters.
+        var a = new AudioAnalyzer { SampleRate = 48000 };
+        var (l, r) = Sine(1000, 48000, 256, amplitude: 0.5); // 1/16th of the window
+
+        a.Feed(l, r);
+        var snap = a.Analyze();
+
+        _out.WriteLine($"rms over 256 real samples in a 4096 ring: {snap.RmsDbL:0.00} dBFS");
+        Assert.Equal(-9.03, snap.RmsDbL, 1); // the tone's true RMS, not diluted by the zero fill
+    }
+
+    [Fact]
+    public void A_reset_wins_against_a_transform_that_was_already_in_flight()
+    {
+        // The device-switch race: the capture re-attaches and Reset clears the window while a
+        // transform started before it is still running. If that stale result were published, the
+        // widgets would show the audio of the device the user has just left.
+        var a = new AudioAnalyzer { SampleRate = 48000 };
+        var (l, r) = Sine(1000, 48000, AudioAnalyzer.FftSize, amplitude: 1.0);
+        a.Feed(l, r);
+        Assert.True(a.Analyze().HasSignal);
+
+        a.Reset();
+
+        var after = a.Analyze();
+        Assert.False(after.HasSignal);
+        Assert.Equal(MeterMath.FloorDb, after.PeakDbL);
+        // And it stays reset: nothing may republish the old window afterwards.
+        Assert.False(a.Analyze().HasSignal);
+    }
+
+    [Fact]
+    public void Concurrent_readers_on_one_generation_get_ONE_transform_and_ONE_instance()
+    {
+        // Four widgets and the editor can ask at once. Two transforms for one generation is the
+        // per-widget cost the shared pipeline exists to avoid, and two different instances would
+        // mean two surfaces drawing subtly different pictures of the same moment.
+        var a = new AudioAnalyzer { SampleRate = 48000 };
+        var (l, r) = Sine(1000, 48000, 2048);
+        a.Feed(l, r);
+
+        long before = a.AnalysisCount;
+        var results = new AudioAnalysis[16];
+        Parallel.For(0, 16, i => results[i] = a.Analyze());
+
+        Assert.Equal(before + 1, a.AnalysisCount);
+        Assert.All(results, x => Assert.Same(results[0], x));
     }
 
     [Fact]

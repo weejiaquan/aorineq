@@ -33,7 +33,11 @@ internal sealed class HudManager : IDisposable
     private TimeSpan _lastTick;
     private EqPalette _palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
     private SkinInfo? _skin;
-    private bool _suppressed;      // hidden by the fullscreen or only-while-playing rules
+    // The two suppression rules are tracked SEPARATELY because they want opposite things from
+    // the capture: the silence rule needs it (it is its own sensor), the fullscreen rule must
+    // release it (a game is on screen and the HUD is not).
+    private bool _hiddenByFullscreen;
+    private bool _hiddenBySilence;
     private bool _disposed;
     private TimeSpan _lastSignal;
 
@@ -247,8 +251,12 @@ internal sealed class HudManager : IDisposable
     {
         var layout = _store.Layout;
         int top = layout.Widgets.Count == 0 ? 0 : layout.Widgets.Max(w => w.Z);
-        if (window.Widget.Z >= top) return;
-        _store.Update(l => l.With(window.Widget with { Z = top + 1 }));
+        if (window.Widget.Z < top)
+            _store.Update(l => l.With(window.Widget with { Z = top + 1 }));
+        // Restack even when the Z did not change: the widget the user just pressed is the one they
+        // want in front, and recording a number without moving a window is what made "bring to
+        // front" do nothing at all the first time round.
+        ApplyZOrder();
     }
 
     // ---- layout mutations ----
@@ -357,14 +365,19 @@ internal sealed class HudManager : IDisposable
     private void UpdateAudioRegistration()
     {
         var layout = _store.Layout;
-        // "Show only while audio is playing" is the one rule whose SENSOR is the capture itself:
-        // release the registration while it is hiding the HUD and nothing is left to notice that
-        // playback resumed, so the widgets would never come back. That rule therefore keeps the
-        // registration through its own suppression. The fullscreen rule has an independent
-        // trigger (the foreground window), so it releases as you would expect.
-        bool suppressedButStillListening = _suppressed && layout.OnlyWhilePlaying;
+        // The two rules pull in opposite directions, so they are answered separately.
+        //
+        // FULLSCREEN always releases: a game is in front, the HUD is not on screen, and the thing
+        // that will bring it back is the foreground window, not the audio. Holding a WASAPI
+        // capture open through a whole game for nothing is exactly what this must not do.
+        //
+        // SILENCE must NOT release, because the capture IS its sensor: let it go and nothing is
+        // left that could notice playback resuming, and the widgets never come back. That was a
+        // real defect, and re-fixing it as "keep the registration whenever suppressed" quietly
+        // reintroduced the fullscreen leak - hence two flags rather than one.
         bool needed = layout.NeedsAudio() && _windows.Count > 0
-            && (!_suppressed || suppressedButStillListening);
+            && !_hiddenByFullscreen
+            && (!_hiddenBySilence || layout.OnlyWhilePlaying);
         if (needed && _audio is null)
             _audio = _pipeline.AddConsumer("HUD");
         else if (!needed && _audio is not null)
@@ -388,7 +401,7 @@ internal sealed class HudManager : IDisposable
         if (analysis is { HasSignal: true }) _lastSignal = now;
 
         ApplySuppression(force: false);
-        if (_suppressed) return;
+        if (_hiddenByFullscreen || _hiddenBySilence) return;
 
         var state = _getState();
         var frame = new HudFrame(analysis, elapsed, state.Percent, state.Muted,
@@ -412,25 +425,40 @@ internal sealed class HudManager : IDisposable
     /// EDIT MODE OVERRIDES BOTH. Arranging widgets you cannot see is not arranging them.</summary>
     private void ApplySuppression(bool force)
     {
-        bool hide = false;
-        if (!EditMode)
-        {
-            var layout = _store.Layout;
-            if (layout.HideWhenFullscreen && IsFullscreenAppForeground())
-                hide = true;
-            if (layout.OnlyWhilePlaying && _clock.Elapsed - _lastSignal > SilenceHold)
-                hide = true;
-        }
-        if (!force && hide == _suppressed) return;
+        var layout = _store.Layout;
+        bool fullscreen = !EditMode && layout.HideWhenFullscreen && IsFullscreenAppForeground();
+        bool silent = !EditMode && layout.OnlyWhilePlaying
+            && _clock.Elapsed - _lastSignal > SilenceHold;
 
-        _suppressed = hide;
-        foreach (var window in _windows.Values)
+        // Coming back from fullscreen with the silence rule on: the capture was released while the
+        // game was up, so there is no evidence either way about whether anything is playing now.
+        // Treat that as "just heard something" - the widgets come back at once and fade again on
+        // their own if it really is silent, which beats staying hidden on stale evidence.
+        if (_hiddenByFullscreen && !fullscreen && layout.OnlyWhilePlaying)
         {
-            if (hide) window.Hide();
-            else window.Show();
+            _lastSignal = _clock.Elapsed;
+            silent = false;
         }
-        // A hidden HUD must not hold the capture open — that is the whole point of the
-        // only-while-playing rule, and it applies to the fullscreen rule for free.
+
+        bool hide = fullscreen || silent;
+        bool wasHidden = _hiddenByFullscreen || _hiddenBySilence;
+        bool reasonsChanged = fullscreen != _hiddenByFullscreen || silent != _hiddenBySilence;
+        _hiddenByFullscreen = fullscreen;
+        _hiddenBySilence = silent;
+        if (!force && !reasonsChanged) return;
+
+        if (force || hide != wasHidden)
+        {
+            foreach (var window in _windows.Values)
+            {
+                if (hide) window.Hide();
+                else window.Show();
+            }
+            // Show() lifts a window to the top of the topmost band, so unhiding the HUD would
+            // otherwise restack it into dictionary order and undo the front-to-back arrangement
+            // the user chose.
+            if (!hide) ApplyZOrder();
+        }
         UpdateAudioRegistration();
     }
 
@@ -456,14 +484,18 @@ internal sealed class HudManager : IDisposable
         }
 
         if (!GetWindowRect(hwnd, out var r)) return false;
-        var box = new HudRect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
-        // Which screen it is on, from the same enumeration the widgets are placed against, rather
-        // than a second source of truth for what a monitor is.
-        var monitors = DisplayMonitors.Enumerate();
-        if (monitors.Count == 0) return false;
-        var screen = monitors.OrderByDescending(m => box.IntersectionArea(m.Bounds)).First().Bounds;
-        return box.X <= screen.X && box.Y <= screen.Y
-            && box.Right >= screen.Right && box.Bottom >= screen.Bottom;
+
+        // MonitorFromWindow, NOT the full display enumeration: this runs on the dispatcher on
+        // EVERY frame, and DisplayMonitors.Enumerate walks every adapter and every monitor device
+        // to build its identity map. Two cheap native calls answer the only question asked here -
+        // which screen is this window on, and does it cover the whole of it.
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero) return false;
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info)) return false;
+
+        return r.Left <= info.rcMonitor.Left && r.Top <= info.rcMonitor.Top
+            && r.Right >= info.rcMonitor.Right && r.Bottom >= info.rcMonitor.Bottom;
     }
 
     public void Dispose()
@@ -486,6 +518,23 @@ internal sealed class HudManager : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetClassNameW")]
     private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int max);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO info);
+
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public int dwFlags;
+    }
 }
