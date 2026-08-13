@@ -2219,8 +2219,7 @@ public partial class App : System.Windows.Application
         ActiveState.Muted,
         SystemModeActive ? null : ActiveState.CurrentDb,
         _activeDeviceName,
-        ActiveEqBands(),
-        _useSkinOsd ? CurrentSkinInfo() : null);
+        ActiveEqBands());
 
     /// <summary>The chain the user is actually hearing on the active device: the global scope's
     /// bands followed by that device's, each only when its scope is enabled. The same composition

@@ -6,7 +6,8 @@ namespace AorinEQ.Core;
 /// It is an immutable snapshot rather than a set of properties on the analyzer so that a consumer
 /// reading it cannot be torn by the capture thread writing the next one, and so that
 /// <see cref="AudioAnalyzer.Analyze"/> can hand the very same instance to every consumer in a
-/// frame — which is what makes "one FFT, however many widgets" observable rather than hoped for.</summary>
+/// frame — which is what makes "one transform, however many widgets" observable rather than
+/// hoped for.</summary>
 /// <param name="SpectrumDb">Hann-windowed magnitude in dBFS, DC..Nyquist-1, from
 /// <see cref="Fft.SpectrumDb"/>.</param>
 /// <param name="ClipEvents">Distinct clipping events since the analyzer was created — MONOTONIC
@@ -26,14 +27,23 @@ public sealed record AudioAnalysis(
 /// <summary>The ONE analysis behind every audio-reading surface in the app.
 ///
 /// The capture thread <see cref="Feed"/>s decoded sample blocks in; UI timers ask for
-/// <see cref="Analyze"/>. THE FFT RUNS ONCE PER ARRIVAL OF NEW SAMPLES, not once per asker: the
-/// result is cached against a sample generation, so four widgets and the EQ editor all reading at
-/// 30 fps cost one transform a frame between them. That is the difference between the shared
-/// pipeline the design calls for and four accidental private ones, and it is the property the
-/// CPU measurement in the release notes is really measuring.
+/// <see cref="Analyze"/>. The transform runs ONCE PER ARRIVAL OF NEW SAMPLES, not once per asker:
+/// the result is cached against a sample generation, so four widgets reading in the same frame
+/// cost one transform between them. (Two INDEPENDENTLY TIMED surfaces — the HUD and the EQ editor
+/// — can still cost one each, because samples arrive between their ticks. The guarantee is per
+/// generation, not per wall-clock frame.)
 ///
-/// Feed is called from the capture thread and Analyze from a UI thread, so everything mutable is
-/// under one lock. The work under it is bounded (a copy plus, at most, one transform).</summary>
+/// THE READING IS NON-DESTRUCTIVE. Peak and RMS are measured over the analysis WINDOW that is
+/// still in the ring, not accumulated-and-cleared since the last read. That distinction is the
+/// whole reason two surfaces can share this: a "since you last looked" accumulator belongs to one
+/// reader, and whichever of two timers got there first would silently shorten the other's
+/// measurement interval and under-report its levels. A window belongs to nobody, and every reader
+/// sees the same true answer. At 4096 samples it also comfortably outlasts a 30 fps frame, so no
+/// transient can slip between two ticks unseen.
+///
+/// Feed runs on the WASAPI capture thread and Analyze on a UI thread. The lock is held only for
+/// the copy in and the copy out — never across the transform, which would park the capture thread
+/// behind an FFT.</summary>
 public sealed class AudioAnalyzer
 {
     /// <summary>Analysis window. A power of two for the radix-2 transform; 4096 at 48 kHz is
@@ -42,13 +52,11 @@ public sealed class AudioAnalyzer
     public const int FftSize = 4096;
 
     private readonly object _lock = new();
-    private readonly float[] _ring = new float[FftSize];
+    private readonly float[] _ringL = new float[FftSize];
+    private readonly float[] _ringR = new float[FftSize];
     private int _ringPos;
     private readonly ClipDetector _clip = new();
     private int _clipEvents;
-
-    private double _blockPeakL = MeterMath.FloorDb, _blockPeakR = MeterMath.FloorDb;
-    private double _blockRmsL = MeterMath.FloorDb, _blockRmsR = MeterMath.FloorDb;
 
     private long _generation;          // bumped by every Feed
     private long _analyzedGeneration = -1;
@@ -59,34 +67,29 @@ public sealed class AudioAnalyzer
     public int SampleRate { get; set; }
 
     /// <summary>How many transforms have actually been computed. Diagnostic, and the thing the
-    /// one-FFT-per-frame test asserts on.</summary>
+    /// one-transform-per-generation test asserts on.</summary>
     public long AnalysisCount { get; private set; }
 
-    /// <summary>Capture-thread entry point: fold a decoded block into the analysis window and the
-    /// block meters. Deliberately tiny — no transform happens here, because this runs on the
-    /// WASAPI capture thread and anything slow here is a dropped packet.</summary>
+    /// <summary>Capture-thread entry point: fold a decoded block into the analysis window.
+    /// Deliberately tiny — no transform happens here, because this runs on the WASAPI capture
+    /// thread and anything slow here is a dropped packet.</summary>
     public void Feed(float[] left, float[] right)
     {
-        double peakL = MeterMath.PeakDb(left), rmsL = MeterMath.RmsDb(left);
-        double peakR = MeterMath.PeakDb(right), rmsR = MeterMath.RmsDb(right);
+        // Clipping is detected OUTSIDE the lock and on the capture side, so an event that starts
+        // and ends between two frames is still counted. A UI timer that only inspected the peak it
+        // happens to read would miss a clip shorter than its own interval.
+        double peak = Math.Max(MeterMath.PeakDb(left), MeterMath.PeakDb(right));
         lock (_lock)
         {
-            _blockPeakL = Math.Max(_blockPeakL, peakL);
-            _blockPeakR = Math.Max(_blockPeakR, peakR);
-            _blockRmsL = Math.Max(_blockRmsL, rmsL);
-            _blockRmsR = Math.Max(_blockRmsR, rmsR);
-
-            // Clipping is counted HERE, on the capture side, so an event between two frames is
-            // still counted. A UI timer that only inspected the peak it happens to read would
-            // miss a clip that started and ended inside one frame.
-            _clip.Observe(Math.Max(peakL, peakR));
+            _clip.Observe(peak);
             _clipEvents = _clip.Count;
 
             int n = Math.Min(left.Length, right.Length);
             for (int i = 0; i < n; i++)
             {
-                _ring[_ringPos] = (left[i] + right[i]) * 0.5f;
-                _ringPos = (_ringPos + 1) % _ring.Length;
+                _ringL[_ringPos] = left[i];
+                _ringR[_ringPos] = right[i];
+                _ringPos = (_ringPos + 1) % FftSize;
             }
             _generation++;
         }
@@ -96,42 +99,66 @@ public sealed class AudioAnalyzer
     /// arrive; only the first ask after a Feed pays for a transform.</summary>
     public AudioAnalysis Analyze()
     {
+        float[] left, right;
+        long generation;
+        int clipEvents, rate;
         lock (_lock)
         {
             if (_cached is not null && _analyzedGeneration == _generation)
                 return _cached;
+            left = Unroll(_ringL);
+            right = Unroll(_ringR);
+            generation = _generation;
+            clipEvents = _clipEvents;
+            rate = SampleRate;
+        }
 
-            var window = new float[_ring.Length];
-            int head = _ringPos;
-            Array.Copy(_ring, head, window, 0, _ring.Length - head);
-            Array.Copy(_ring, 0, window, _ring.Length - head, head);
+        // Outside the lock: the transform is the expensive part, and holding the lock across it
+        // would block the capture thread's next Feed behind it.
+        var mono = new float[FftSize];
+        for (int i = 0; i < FftSize; i++)
+            mono[i] = (left[i] + right[i]) * 0.5f;
+        var analysis = new AudioAnalysis(
+            MeterMath.PeakDb(left), MeterMath.PeakDb(right),
+            MeterMath.RmsDb(left), MeterMath.RmsDb(right),
+            Fft.SpectrumDb(mono), rate, clipEvents);
 
-            var spectrum = Fft.SpectrumDb(window);
+        lock (_lock)
+        {
             AnalysisCount++;
-
-            _cached = new AudioAnalysis(
-                _blockPeakL, _blockPeakR, _blockRmsL, _blockRmsR, spectrum, SampleRate, _clipEvents);
-            _analyzedGeneration = _generation;
-
-            // The block meters describe the interval since the last reading, so they reset here
-            // and not in Feed — a peak that arrived between two readings is carried into the next
-            // one rather than lost.
-            _blockPeakL = _blockPeakR = _blockRmsL = _blockRmsR = MeterMath.FloorDb;
+            // Another thread may have published a NEWER reading while this one was transforming.
+            // Publishing this one over it would hand the next caller a stale spectrum, so the
+            // newer one stands and this result is simply returned to its own caller.
+            if (_cached is null || _analyzedGeneration <= generation)
+            {
+                _cached = analysis;
+                _analyzedGeneration = generation;
+            }
             return _cached;
         }
     }
 
-    /// <summary>Clears the analysis window and the block meters. Called when the capture attaches
-    /// to a different endpoint: the tail of the device the user just left is not this device's
-    /// signal, and leaving it in would draw a spectrum for audio that is no longer playing.
-    /// The clip COUNT survives — it is monotonic by contract, and every latch is relative to it.</summary>
+    /// <summary>Copies a ring into a flat array with index 0 as the OLDEST sample.</summary>
+    private float[] Unroll(float[] ring)
+    {
+        var window = new float[FftSize];
+        int head = _ringPos;
+        Array.Copy(ring, head, window, 0, FftSize - head);
+        Array.Copy(ring, 0, window, FftSize - head, head);
+        return window;
+    }
+
+    /// <summary>Clears the analysis window. Called when the capture attaches to a different
+    /// endpoint: the tail of the device the user just left is not this device's signal, and
+    /// leaving it in would draw a spectrum for audio that is no longer playing. The clip COUNT
+    /// survives — it is monotonic by contract, and every latch is relative to it.</summary>
     public void Reset()
     {
         lock (_lock)
         {
-            Array.Clear(_ring);
+            Array.Clear(_ringL);
+            Array.Clear(_ringR);
             _ringPos = 0;
-            _blockPeakL = _blockPeakR = _blockRmsL = _blockRmsR = MeterMath.FloorDb;
             _cached = null;
             _analyzedGeneration = -1;
             _generation++;

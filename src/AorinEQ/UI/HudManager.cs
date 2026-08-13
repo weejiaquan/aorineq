@@ -41,9 +41,12 @@ internal sealed class HudManager : IDisposable
 
     /// <summary>What the HUD needs from the app each frame. A snapshot function rather than a
     /// pile of references, so the HUD holds no part of the app's state and cannot fall behind it.</summary>
+    /// <summary>Deliberately does NOT carry the skin. Resolving a SkinInfo means reading the skin
+    /// folder off disk, and this snapshot is taken on the UI thread on every frame — the volume
+    /// widget is handed its skin once, by <see cref="SetSkin"/>, when the active skin changes.</summary>
     internal sealed record HudRuntimeState(
         int Percent, bool Muted, double? VolumeDb, string DeviceName,
-        IReadOnlyList<EqBand> EqBands, SkinInfo? Skin);
+        IReadOnlyList<EqBand> EqBands);
 
     /// <summary>Raised when the layout changes for any reason — Settings mirrors the mode.</summary>
     public event Action<HudLayout>? LayoutChanged;
@@ -103,8 +106,10 @@ internal sealed class HudManager : IDisposable
             window.SetEditMode(EditMode);
             window.ApplyPalette(_palette);
         }
-        UpdateAudioRegistration();
         UpdateTimer();
+        // Suppression FIRST, and it ends in UpdateAudioRegistration itself: deciding the
+        // registration before knowing whether the widgets are even going to be on screen would
+        // start a WASAPI capture and drop it again in the same call.
         ApplySuppression(force: true);
         LayoutChanged?.Invoke(layout);
     }
@@ -312,7 +317,15 @@ internal sealed class HudManager : IDisposable
     /// thread, an event handle and a COM object.</summary>
     private void UpdateAudioRegistration()
     {
-        bool needed = !_suppressed && _store.Layout.NeedsAudio() && _windows.Count > 0;
+        var layout = _store.Layout;
+        // "Show only while audio is playing" is the one rule whose SENSOR is the capture itself:
+        // release the registration while it is hiding the HUD and nothing is left to notice that
+        // playback resumed, so the widgets would never come back. That rule therefore keeps the
+        // registration through its own suppression. The fullscreen rule has an independent
+        // trigger (the foreground window), so it releases as you would expect.
+        bool suppressedButStillListening = _suppressed && layout.OnlyWhilePlaying;
+        bool needed = layout.NeedsAudio() && _windows.Count > 0
+            && (!_suppressed || suppressedButStillListening);
         if (needed && _audio is null)
             _audio = _pipeline.AddConsumer("HUD");
         else if (!needed && _audio is not null)
@@ -330,6 +343,8 @@ internal sealed class HudManager : IDisposable
         var elapsed = now - _lastTick;
         _lastTick = now;
 
+        // Taken BEFORE the suppression decision and even while hidden: under "only while playing"
+        // this reading is the only thing that can notice playback starting again.
         var analysis = _audio is not null ? _pipeline.Analyze() : null;
         if (analysis is { HasSignal: true }) _lastSignal = now;
 
@@ -342,9 +357,11 @@ internal sealed class HudManager : IDisposable
 
         foreach (var window in _windows.Values)
         {
-            // A widget whose source has not changed is skipped entirely. That is what makes the
-            // EQ curve and the volume widget nearly free between changes, and it is most of the
-            // reason four visible widgets cost about what one does.
+            // A widget whose source has not changed is skipped entirely. That is not every
+            // widget: a spectrum and a meter are still moving on a frame with no new audio,
+            // because their own ballistics are falling. It is what makes the EQ CURVE and the
+            // VOLUME widget cost nothing at all between changes, which is most of the difference
+            // between four widgets and four times one widget.
             if (window.View.NeedsRedraw(frame))
                 window.View.Render(frame);
         }

@@ -123,16 +123,55 @@ public class AudioAnalyzerTests
     }
 
     [Fact]
-    public void Reading_an_analysis_resets_the_block_meters_so_the_next_one_is_about_the_next_block()
+    public void Reading_an_analysis_does_not_consume_it_so_a_second_surface_sees_the_same_levels()
     {
+        // THE property that lets two independently-timed surfaces share one analyzer. A
+        // "since you last looked" accumulator belongs to ONE reader: whichever of the HUD's timer
+        // and the EQ editor's got there first would clear it, and the other would silently
+        // under-report every level it drew. The reading is over the analysis WINDOW instead, so it
+        // belongs to nobody and both see the same true answer.
         var a = new AudioAnalyzer { SampleRate = 48000 };
-        var (loudL, loudR) = Sine(1000, 48000, 512, amplitude: 0.9);
-        a.Feed(loudL, loudR);
+        var (l, r) = Sine(1000, 48000, 2048, amplitude: 0.9);
+        a.Feed(l, r);
+
+        var first = a.Analyze();
+        a.Feed(Silence(64).L, Silence(64).R);   // a new generation, so the cache cannot answer
+        var second = a.Analyze();
+
+        Assert.Equal(-0.92, first.PeakDbL, 1);
+        Assert.Equal(first.PeakDbL, second.PeakDbL, 6);
+        Assert.Equal(first.RmsDbL, second.RmsDbL, 1);
+    }
+
+    [Fact]
+    public void A_peak_leaves_the_reading_only_once_it_has_fallen_out_of_the_window()
+    {
+        // The flip side: the meters are not a latch either. Once the loud samples have been
+        // pushed out of the window by silence, the level really does read silent.
+        var a = new AudioAnalyzer { SampleRate = 48000 };
+        var (l, r) = Sine(1000, 48000, 512, amplitude: 0.9);
+        a.Feed(l, r);
         Assert.Equal(-0.92, a.Analyze().PeakDbL, 1);
 
-        a.Feed(Silence(512).L, Silence(512).R);
+        a.Feed(Silence(AudioAnalyzer.FftSize).L, Silence(AudioAnalyzer.FftSize).R);
 
         Assert.Equal(MeterMath.FloorDb, a.Analyze().PeakDbL);
+    }
+
+    [Fact]
+    public void The_window_outlasts_a_frame_so_nothing_can_slip_between_two_ticks_unseen()
+    {
+        // 4096 samples is ~85 ms at 48 kHz, comfortably longer than a 30 fps frame (33 ms) — a
+        // transient shorter than a frame is still in the window when the next tick reads it.
+        Assert.True(AudioAnalyzer.FftSize / 48000.0 > 2 * (1.0 / 30));
+
+        var a = new AudioAnalyzer { SampleRate = 48000 };
+        var (l, r) = Sine(1000, 48000, 64, amplitude: 0.9); // ~1.3 ms of signal
+        a.Feed(l, r);
+        // A whole frame of silence at 48 kHz goes by...
+        a.Feed(Silence(1600).L, Silence(1600).R);
+
+        Assert.Equal(-0.92, a.Analyze().PeakDbL, 1); // ...and the transient is still reported
     }
 
     [Fact]
