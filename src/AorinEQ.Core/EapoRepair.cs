@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.Json;
 
 namespace AorinEQ.Core;
 
@@ -39,13 +41,22 @@ public sealed record EapoRepairBackup(
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
-        // Written whole and flushed to the device before the caller is allowed to touch the
-        // registry: a backup still sitting in a write cache is not a backup.
-        using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+        // Written to a SIDE FILE, flushed to the device, and only then moved into place, so the
+        // record is never partially written where a reader would look for it.
+        //
+        // FileMode.Create on the real path would truncate first. That is survivable for the very
+        // first save (there is nothing to lose yet), but not for the applying -> applied rewrite:
+        // the endpoint is repaired by then, and a crash between the truncate and the last byte
+        // would leave the only description of how to undo it empty or half-written — which Load
+        // reports as "nothing to undo". The move is atomic on NTFS, so a reader sees the old
+        // record or the new one, never neither.
+        var temp = path + ".new";
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             JsonSerializer.Serialize(stream, this);
             stream.Flush(flushToDisk: true);
         }
+        File.Move(temp, path, overwrite: true);
     }
 
     public static EapoRepairBackup? Load(string path)
@@ -140,6 +151,100 @@ public static class EapoRepair
     /// helper and an unelevated process may not be able to overwrite it at all, so a test that
     /// drove the real path was both mutating shared state and liable to fail on any machine that
     /// had used the feature once.</param>
+    /// <summary>Locks the machine-wide state directory down to administrators, and reports whether
+    /// it now IS locked down. Called by the elevated helper before it trusts anything in there.
+    ///
+    /// WHY THIS EXISTS. The backup is instructions: the undo reads it and writes whatever values it
+    /// names into whichever endpoint it names, elevated. %ProgramData% grants BUILTIN\Users write
+    /// by default and the subdirectory ends up owned by whoever created it — which, for an app that
+    /// runs unelevated most of the time, is the user. Measured on a real machine: an unelevated
+    /// process could overwrite the backup file outright. That turns one UAC prompt the user was
+    /// going to approve anyway into an arbitrary write into HKLM, which is a confused deputy, not
+    /// an undo.
+    ///
+    /// The owner is reset too, not just the DACL: an owner can always rewrite the DACL, so leaving
+    /// the directory owned by the user would let the grant be put straight back.</summary>
+    public static bool SecureStateDirectory()
+    {
+        var dir = Path.GetDirectoryName(BackupPath);
+        if (string.IsNullOrEmpty(dir)) return false;
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            var security = new DirectorySecurity();
+            security.SetOwner(admins);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            var inherit = InheritanceFlags.ObjectInherit | InheritanceFlags.ContainerInherit;
+            security.AddAccessRule(new FileSystemAccessRule(
+                admins, FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(
+                system, FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+            // Read only: the unelevated app has to be able to see that an undo is available.
+            security.AddAccessRule(new FileSystemAccessRule(
+                users, FileSystemRights.ReadAndExecute, inherit, PropagationFlags.None, AccessControlType.Allow));
+            new DirectoryInfo(dir).SetAccessControl(security);
+
+            // Files already in there keep their own ACLs, which may predate this. Put them back
+            // under the directory's, so an existing user-writable backup stops being one.
+            foreach (var file in new[] { BackupPath, ResultPath })
+            {
+                if (!File.Exists(file)) continue;
+                var fileSecurity = new FileSecurity();
+                fileSecurity.SetOwner(admins);
+                fileSecurity.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+                new FileInfo(file).SetAccessControl(fileSecurity);
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException
+            or PrivilegeNotHeldException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Whether <paramref name="path"/> can only be modified by administrators — i.e.
+    /// whether the elevated helper may treat its contents as its own instructions.
+    ///
+    /// Any Allow rule carrying a write right for a principal outside Administrators / SYSTEM /
+    /// TrustedInstaller means somebody unprivileged could have authored the file, and a file that
+    /// somebody unprivileged could have authored is not a record of what THIS program did.</summary>
+    public static bool IsTrustworthyStateFile(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return false;
+            var rules = new FileInfo(path).GetAccessControl()
+                .GetAccessRules(true, true, typeof(SecurityIdentifier));
+            const FileSystemRights Writes =
+                FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete
+                | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+            foreach (FileSystemAccessRule rule in rules)
+            {
+                if (rule.AccessControlType != AccessControlType.Allow) continue;
+                if ((rule.FileSystemRights & Writes) == 0) continue;
+                if (rule.IdentityReference is not SecurityIdentifier sid) return false;
+                if (sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)
+                    || sid.IsWellKnown(WellKnownSidType.LocalSystemSid)
+                    || sid.Value == TrustedInstallerSid)
+                    continue;
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException
+            or InvalidOperationException or System.Security.Principal.IdentityNotMappedException)
+        {
+            return false;
+        }
+    }
+
+    private const string TrustedInstallerSid =
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+
     public static void SaveResult(EapoRepairResult result, string? resultPath = null)
     {
         try

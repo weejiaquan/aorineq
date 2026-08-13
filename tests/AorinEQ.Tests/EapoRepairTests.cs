@@ -750,6 +750,91 @@ public class EapoRepairTests
     }
 
     [Fact]
+    public void A_backup_anything_unprivileged_could_have_written_is_not_trusted()
+    {
+        // The backup is INSTRUCTIONS: the elevated undo writes the values it names into the
+        // endpoint it names. %ProgramData% grants BUILTIN\Users write by default, and on this
+        // machine an unelevated process could overwrite the real backup file outright — which
+        // turns one UAC prompt into an arbitrary write into HKLM. So the helper checks who could
+        // have authored the file before it acts on it.
+        var dir = Path.Combine(Path.GetTempPath(), "AorinEQ.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var open = Path.Combine(dir, "open.json");
+        var locked = Path.Combine(dir, "locked.json");
+        try
+        {
+            File.WriteAllText(open, "{}");
+            File.WriteAllText(locked, "{}");
+
+            // An ordinary file under an ordinary user-writable directory: refused.
+            Assert.False(EapoRepair.IsTrustworthyStateFile(open));
+
+            // The same file granting write to administrators and SYSTEM only: accepted.
+            var security = new System.Security.AccessControl.FileSecurity();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            foreach (var sid in new[]
+                     {
+                         new System.Security.Principal.SecurityIdentifier(
+                             System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null),
+                         new System.Security.Principal.SecurityIdentifier(
+                             System.Security.Principal.WellKnownSidType.LocalSystemSid, null),
+                     })
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    sid, System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.AccessControlType.Allow));
+            new FileInfo(locked).SetAccessControl(security);
+            Assert.True(EapoRepair.IsTrustworthyStateFile(locked));
+
+            // A file that is not there is not trustworthy either — "nothing to undo" is a
+            // different answer, and the caller distinguishes them.
+            Assert.False(EapoRepair.IsTrustworthyStateFile(Path.Combine(dir, "absent.json")));
+        }
+        finally
+        {
+            foreach (var f in new[] { open, locked })
+            {
+                if (!File.Exists(f)) continue;
+                var reset = new System.Security.AccessControl.FileSecurity();
+                reset.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+                try { new FileInfo(f).SetAccessControl(reset); } catch (UnauthorizedAccessException) { }
+                try { File.Delete(f); } catch (UnauthorizedAccessException) { }
+            }
+            try { Directory.Delete(dir, recursive: true); } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
+    public void Rewriting_the_backup_never_leaves_a_reader_with_half_a_record()
+    {
+        // applying -> applied rewrites the ONLY description of how to undo a repair that has by
+        // then already happened. Truncating in place would mean a crash mid-write loses it, and
+        // Load reports a truncated file as "nothing to undo". The write goes to a side file and
+        // is moved into place, so a reader sees the old record or the new one.
+        var path = OwnSlot();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            var first = new EapoRepairBackup(NoSuchDevice, EapoRepairBackup.Applying,
+                DateTimeOffset.UtcNow, [RegValue.Str("a", "1")], null);
+            first.Save(path);
+            Assert.Equal(EapoRepairBackup.Applying, EapoRepairBackup.Load(path)!.Stage);
+
+            (first with { Stage = EapoRepairBackup.Applied }).Save(path);
+            var reloaded = EapoRepairBackup.Load(path)!;
+            Assert.Equal(EapoRepairBackup.Applied, reloaded.Stage);
+            Assert.Equal("a", reloaded.FxValues[0].Name);
+            Assert.False(reloaded.IsInterrupted);
+
+            // And the side file is not left behind next to the record.
+            Assert.False(File.Exists(path + ".new"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void The_audio_restart_helper_is_the_one_the_setup_guide_already_uses()
     {
         // Elevated callers must not raise a second prompt — a prompt between a write and its

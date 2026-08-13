@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Reflection;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -1380,18 +1380,52 @@ public partial class App : System.Windows.Application
 
     private static int RunElevatedEapoRepair(bool undo, string token)
     {
+        // ONE privileged repair at a time, machine-wide. Without this, two helpers can both pass
+        // the "is there already a backup?" check before either has written one, and the second's
+        // capture then overwrites the first's — leaving one endpoint modified and the only record
+        // on disk describing the other. Global\ because the two could be different sessions.
+        using var only = new System.Threading.Mutex(initiallyOwned: false, @"Global\AorinEQ.EndpointRepair");
+        bool held;
+        try
+        {
+            held = only.WaitOne(TimeSpan.FromSeconds(30));
+        }
+        catch (AbandonedMutexException)
+        {
+            held = true; // a previous helper died holding it; its backup is still on disk to find
+        }
+        if (!held)
+        {
+            EapoRepair.SaveResult(new EapoRepairResult(EapoRepairOutcome.Refused,
+                "AorinEQ is already changing this PC's audio settings. Wait for that to finish.", token));
+            return 1;
+        }
         try
         {
             // Already elevated, so no second prompt — see this method's remarks.
             static bool Restart() => AudioServices.RestartAndSettle(elevate: false);
 
+            // Before anything in the machine-wide directory is read as an instruction. %ProgramData%
+            // is user-writable by default, and the backup tells the undo what to write where.
+            EapoRepair.SecureStateDirectory();
+
             EapoRepairResult result;
             if (undo)
             {
-                result = EapoRepairBackup.Load(EapoRepair.BackupPath) is { } backup
-                    ? EapoRepair.Undo(backup, Restart)
-                    : new EapoRepairResult(EapoRepairOutcome.Refused,
-                        "There's nothing to undo — AorinEQ has no record of changing this PC's audio settings.");
+                // A backup an unelevated process could have authored is not a record of what this
+                // program did — it is somebody else's instructions for an elevated write into HKLM.
+                // Refused rather than sanitised: there is no safe subset of "arbitrary values into
+                // an arbitrary endpoint".
+                result = !EapoRepair.IsTrustworthyStateFile(EapoRepair.BackupPath)
+                    ? new EapoRepairResult(EapoRepairOutcome.Refused,
+                        File.Exists(EapoRepair.BackupPath)
+                            ? "AorinEQ won't undo from a record that something else on this PC could have "
+                              + "changed. Equalizer APO's own Configurator can reset this device."
+                            : "There's nothing to undo — AorinEQ has no record of changing this PC's audio settings.")
+                    : EapoRepairBackup.Load(EapoRepair.BackupPath) is { } backup
+                        ? EapoRepair.Undo(backup, Restart)
+                        : new EapoRepairResult(EapoRepairOutcome.Refused,
+                            "There's nothing to undo — AorinEQ has no record of changing this PC's audio settings.");
             }
             else
             {
@@ -1414,6 +1448,10 @@ public partial class App : System.Windows.Application
             EapoRepair.SaveResult(new EapoRepairResult(EapoRepairOutcome.FailedAndNotReverted,
                 "The repair helper failed unexpectedly: " + ex.Message, token));
             return 2;
+        }
+        finally
+        {
+            only.ReleaseMutex();
         }
     }
 
@@ -1439,7 +1477,12 @@ public partial class App : System.Windows.Application
             using var probe = new LoopbackCapture();
             if (!probe.Start()) return false;
             probe.Stop();
-            return true;
+            // LoopbackCapture resolves the default render endpoint ITSELF, so a switch between the
+            // check above and this probe would have it reporting on a device nobody touched. The
+            // same equality is therefore asserted again afterwards: the evidence counts only if the
+            // repaired endpoint was the default for the whole of it.
+            return string.Equals(AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
+                endpointGuid, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException
             or InvalidCastException or InvalidOperationException)
