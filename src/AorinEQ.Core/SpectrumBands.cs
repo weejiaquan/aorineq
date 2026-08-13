@@ -40,6 +40,8 @@ public sealed class SpectrumBands
 
     public IReadOnlyList<double> Peaks => _peaks;
 
+    /// <summary>Bands at the silence floor — the starting state, and the target for a frame with
+    /// no analysis behind it.</summary>
     private static double[] Filled(int n)
     {
         var a = new double[n];
@@ -58,15 +60,19 @@ public sealed class SpectrumBands
         _peaks = Filled(n);
     }
 
-    /// <summary>Folds one analysis into the bars.</summary>
-    /// <param name="binDb">A linear-frequency dB spectrum — <see cref="AudioAnalysis.SpectrumDb"/>.</param>
+    /// <summary>Folds one analysis into the bars.
+    ///
+    /// With NO analysis to fold — the capture is stopped, or failed to attach — the ballistics
+    /// still run, against silence. Returning early instead would freeze the bars at whatever
+    /// height they last reached, which reads as a hung widget rather than as an idle one.</summary>
+    /// <param name="binDb">A linear-frequency dB spectrum — <see cref="AudioAnalysis.SpectrumDb"/>.
+    /// Empty means "no signal at all", not "nothing to do".</param>
     /// <param name="elapsed">Real time since the previous update, for the peak decay.</param>
     public void Update(double[] binDb, double sampleRate, double fMin, double fMax, TimeSpan elapsed)
     {
-        if (sampleRate <= 0 || binDb.Length == 0)
-            return;
-
-        var target = Fft.LogBins(binDb, sampleRate, fMin, fMax, _levels.Length);
+        var target = sampleRate > 0 && binDb.Length > 0
+            ? Fft.LogBins(binDb, sampleRate, fMin, fMax, _levels.Length)
+            : Filled(_levels.Length);
         double decay = PeakDecayDbPerSecond * Math.Max(0, elapsed.TotalSeconds);
 
         for (int i = 0; i < _levels.Length; i++)

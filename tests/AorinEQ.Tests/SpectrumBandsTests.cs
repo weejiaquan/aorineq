@@ -146,6 +146,28 @@ public class SpectrumBandsTests
     }
 
     [Fact]
+    public void With_no_analysis_at_all_the_bars_fall_rather_than_freezing()
+    {
+        // The capture stopped, or never attached. Freezing the bars where they were reads as a
+        // hung widget; falling to nothing reads as an idle one, which is what it is.
+        var bands = new SpectrumBands(8, smoothing: 0.6, peakDecayDbPerSecond: 30);
+        var frame = TimeSpan.FromMilliseconds(33);
+        for (int i = 0; i < 50; i++) bands.Update(Flat(1024, -6), 48000, 20, 20000, frame);
+        Assert.All(bands.Levels, v => Assert.Equal(-6, v, 1));
+
+        double firstFall = double.NaN;
+        for (int i = 0; i < 200; i++)
+        {
+            bands.Update(Array.Empty<double>(), 0, 20, 20000, frame);
+            if (i == 0) firstFall = bands.Levels[0];
+        }
+
+        Assert.True(firstFall < -6, "the very first empty frame must already be falling");
+        Assert.All(bands.Levels, v => Assert.True(v < -70, $"bars should reach the floor, was {v}"));
+        Assert.All(bands.Peaks, v => Assert.True(v < -70, $"peaks should decay too, was {v}"));
+    }
+
+    [Fact]
     public void Normalized_height_maps_the_display_window_onto_zero_to_one()
     {
         Assert.Equal(0, SpectrumBands.Normalize(SpectrumBands.BottomDb, SpectrumBands.BottomDb, SpectrumBands.TopDb), 6);
