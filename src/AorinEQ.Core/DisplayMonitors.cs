@@ -11,8 +11,13 @@ namespace AorinEQ.Core;
 /// name follows the slot rather than the screen. EnumDisplayDevices with
 /// EDD_GET_DEVICE_INTERFACE_NAME instead returns the monitor's device interface path — which
 /// encodes the hardware, survives docking and re-cabling, and is what the widgets are keyed on.
-/// Where Windows declines to give one (some virtual and remote displays), the adapter\monitor id
-/// pair stands in: still better than an index, and stable for as long as that display exists.
+///
+/// THE FALLBACK CHAIN MATTERS, because getting it wrong reintroduces the very bug the device path
+/// exists to avoid. Interface path first; then the monitor's plain hardware id (MONITOR\GSM5B09\
+/// {...}, also hardware-derived and also stable); and only if BOTH are unavailable, the adapter
+/// name. That last one really IS the arrangement slot, so a widget on a display that declines to
+/// identify itself at all can still follow the slot rather than the screen. It is the last
+/// resort, not the fallback.
 ///
 /// GEOMETRY IS IN PHYSICAL PIXELS at the API boundary and in DIPs everywhere above it. The
 /// process is PerMonitorV2 (see app.manifest), so the two differ per screen; the caller supplies
@@ -51,25 +56,36 @@ public static class DisplayMonitors
 
     private static HudRect ToRect(RECT r) => new(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
 
-    /// <summary>Adapter name (<c>\\.\DISPLAY1</c>) to the attached monitor's device interface path.
-    /// Two passes because the path lives on the MONITOR device, which is a child of the adapter.</summary>
+    /// <summary>Adapter name (<c>\\.\DISPLAY1</c>) to the attached monitor's most stable
+    /// identifier. Two passes because the identity lives on the MONITOR device, which is a child
+    /// of the adapter: the interface path first, and the plain hardware id when Windows will not
+    /// give one. Both describe the hardware; neither moves when the arrangement does.</summary>
     private static Dictionary<string, string> DeviceInterfacePaths()
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var adapter = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
         for (uint i = 0; EnumDisplayDevices(null, i, ref adapter, 0); i++)
         {
-            if ((adapter.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0)
+            if ((adapter.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0)
             {
-                adapter = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
-                continue;
+                string id = MonitorId(adapter.DeviceName, EDD_GET_DEVICE_INTERFACE_NAME);
+                if (string.IsNullOrEmpty(id))
+                    id = MonitorId(adapter.DeviceName, 0);
+                if (!string.IsNullOrEmpty(id))
+                    map[adapter.DeviceName] = id;
             }
-            var monitor = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
-            if (EnumDisplayDevices(adapter.DeviceName, 0, ref monitor, EDD_GET_DEVICE_INTERFACE_NAME))
-                map[adapter.DeviceName] = monitor.DeviceID ?? "";
             adapter = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
         }
         return map;
+    }
+
+    /// <summary>The monitor device's id under <paramref name="flags"/>, or "" if it has none.</summary>
+    private static string MonitorId(string adapterName, uint flags)
+    {
+        var monitor = new DISPLAY_DEVICE { cb = Marshal.SizeOf<DISPLAY_DEVICE>() };
+        return EnumDisplayDevices(adapterName, 0, ref monitor, flags)
+            ? monitor.DeviceID ?? ""
+            : "";
     }
 
     /// <summary>What to call a screen in a menu: the monitor's own description where Windows has

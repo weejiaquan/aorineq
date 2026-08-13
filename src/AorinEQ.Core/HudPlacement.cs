@@ -129,7 +129,9 @@ public static class HudPlacement
 /// pixel-hunting exercise; with it, a drag that gets close finishes the job.</summary>
 public static class HudSnap
 {
-    /// <summary>How near an edge has to be, in DIPs, before it pulls.</summary>
+    /// <summary>How near an edge has to be before it pulls, in DEVICE-INDEPENDENT PIXELS —
+    /// this is a distance the user perceives, so it must not shrink on a high-DPI display. Boxes
+    /// here are in physical pixels, so the caller scales this by the target monitor's DPI.</summary>
     public const double DefaultThreshold = 12;
 
     /// <summary>Moves <paramref name="box"/> to the nearest screen edge or neighbouring widget

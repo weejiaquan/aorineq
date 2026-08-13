@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
 using AorinEQ.Core;
 
@@ -28,6 +29,7 @@ internal sealed class HudManager : IDisposable
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private IDisposable? _audio;
+    private System.Windows.Controls.ContextMenu? _openMenu;
     private TimeSpan _lastTick;
     private EqPalette _palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
     private SkinInfo? _skin;
@@ -141,13 +143,29 @@ internal sealed class HudManager : IDisposable
     /// <summary>Right-click in edit mode: this widget's own settings, on the widget itself.</summary>
     private void ShowWidgetMenu(HudWidgetWindow window)
     {
+        CloseWidgetMenu();
         var menu = HudWidgetMenu.Build(this, window.Widget);
         menu.PlacementTarget = window;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
         // A menu over a WS_EX_NOACTIVATE window would otherwise stay open after a click elsewhere,
         // because the window never takes focus to lose.
         menu.StaysOpen = false;
+        menu.Closed += (_, _) => { if (ReferenceEquals(_openMenu, menu)) _openMenu = null; };
+        _openMenu = menu;
         menu.IsOpen = true;
+    }
+
+    /// <summary>Dismisses an open widget menu.
+    ///
+    /// This is part of live mode being click-through, not housekeeping. The widget WINDOWS go
+    /// click-through the moment the mode changes, but a popup is an ordinary interactive window
+    /// of its own — leaving one up would mean the first desktop click after switching to live was
+    /// still swallowed, by the one surface the mode switch had not reached.</summary>
+    private void CloseWidgetMenu()
+    {
+        if (_openMenu is null) return;
+        _openMenu.IsOpen = false;
+        _openMenu = null;
     }
 
     private void CloseWindow(string id)
@@ -176,7 +194,21 @@ internal sealed class HudManager : IDisposable
             window.SetBox(placed.Bounds);
             anyMoved |= placed.MovedToFallback;
         }
+        ApplyZOrder();
         if (anyMoved) MovedToPrimary?.Invoke();
+    }
+
+    /// <summary>Puts the native windows in the order the layout says. Every widget is topmost, so
+    /// "in front" is decided within that band by the order they were last raised — lift them in
+    /// ASCENDING Z and the highest ends up last, and therefore in front.
+    ///
+    /// Without this, "bring to front" changed a number in a file and nothing on screen, and a
+    /// widget could sit permanently buried under another one with no way to reach it.</summary>
+    private void ApplyZOrder()
+    {
+        foreach (var widget in _store.Layout.Widgets.OrderBy(w => w.Z))
+            if (_windows.TryGetValue(widget.Id, out var window))
+                window.BringToTop();
     }
 
     /// <summary>Raised when at least one widget had to be placed on the primary screen because the
@@ -194,7 +226,13 @@ internal sealed class HudManager : IDisposable
             .Where(w => !ReferenceEquals(w, window))
             .Select(w => w.Box)
             .ToList();
-        return HudSnap.Apply(box, host.WorkArea, others, HudSnap.DefaultThreshold);
+        // The threshold is a DISTANCE THE USER PERCEIVES, so it is expressed in DIPs and scaled
+        // into the pixel space the boxes live in. Comparing 12 DIPs against pixels directly would
+        // make the snap band shrink to two thirds of itself at 150% and to half at 200%, on the
+        // very displays where everything else is bigger.
+        double scale = VisualTreeHelper.GetDpi(window).DpiScaleX;
+        return HudSnap.Apply(box, host.WorkArea, others,
+            HudSnap.DefaultThreshold * (scale > 0 ? scale : 1));
     }
 
     private void OnBoxChanged(HudWidgetWindow window, HudRect box)
@@ -249,6 +287,7 @@ internal sealed class HudManager : IDisposable
     public void SetMode(string mode)
     {
         _store.Update(l => l with { Mode = HudModes.Normalize(mode) });
+        if (!EditMode) CloseWidgetMenu();
         foreach (var window in _windows.Values) window.SetEditMode(EditMode);
         // Edit mode must be able to reach a widget that the fullscreen or silence rules would
         // otherwise keep hidden — otherwise "arrange my widgets" shows an empty screen.
@@ -432,6 +471,7 @@ internal sealed class HudManager : IDisposable
         if (_disposed) return;
         _disposed = true;
         Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnAppThemeChanged;
+        CloseWidgetMenu();
         _timer.Stop();
         _audio?.Dispose();
         _audio = null;

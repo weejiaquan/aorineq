@@ -155,11 +155,10 @@ internal sealed class HudWidgetWindow : Window
         // The affordance exists so a widget whose data is SILENT is still visible to grab. Without
         // it, a spectrum over silence in edit mode is an invisible window nobody can find.
         _editLabel.Visibility = edit ? Visibility.Visible : Visibility.Collapsed;
-        if (!edit)
-        {
-            _drag = DragKind.None;
-            if (IsMouseCaptured) ReleaseMouseCapture();
-        }
+        // Leaving edit mode mid-drag must COMMIT the drag, not abandon it: the window is already
+        // where the user dragged it, and merely clearing the flag would leave hud.json describing
+        // the old box — so the widget would jump back at the next Apply or restart.
+        if (!edit) EndDrag();
         Cursor = null;
     }
 
@@ -196,15 +195,31 @@ internal sealed class HudWidgetWindow : Window
     }
 
     /// <summary>Moves and sizes the window in PHYSICAL PIXELS, without activating it — a widget
-    /// that stole focus every time the layout was applied would be unusable.</summary>
+    /// that stole focus every time the layout was applied would be unusable.
+    ///
+    /// Deliberately does NOT restack: passing HWND_TOPMOST here would lift this window to the top
+    /// of the topmost band as a side effect of being MOVED, so the last widget to be placed would
+    /// always win regardless of the order the user chose. Stacking is <see cref="BringToTop"/>'s
+    /// job and the HUD applies it in Z order.</summary>
     public void SetBox(HudRect box)
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
-        SetWindowPos(hwnd, HWND_TOPMOST,
+        SetWindowPos(hwnd, IntPtr.Zero,
             (int)Math.Round(box.X), (int)Math.Round(box.Y),
             (int)Math.Round(box.Width), (int)Math.Round(box.Height),
-            SWP_NOACTIVATE);
+            SWP_NOACTIVATE | SWP_NOZORDER);
+    }
+
+    /// <summary>Lifts this window to the top of the always-on-top band. Called for each widget in
+    /// ascending Z, so the highest Z is the last one lifted and therefore the one in front.
+    /// Without this, "bring to front" changed a number in a file and nothing on screen, and a
+    /// widget could sit permanently buried under another one with no way to reach it.</summary>
+    public void BringToTop()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
     }
 
     // ---- edit-mode input ----
@@ -332,6 +347,9 @@ internal sealed class HudWidgetWindow : Window
     }
 
     private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
 
     [DllImport("user32.dll")]
