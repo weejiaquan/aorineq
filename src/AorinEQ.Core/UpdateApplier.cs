@@ -8,6 +8,16 @@ namespace AorinEQ.Core;
 /// <see cref="UpdateChecker"/>: this class only moves files that already passed the download
 /// gates.
 ///
+/// WHEN <see cref="Apply"/> MAY BE CALLED, and it is not a style preference — v3.5.0 and earlier
+/// called it the moment the download finished and kept running, which crashed the app. This build
+/// publishes as a self-contained SINGLE FILE: the CLR reads bundled managed assemblies out of the
+/// exe BY PATH, ON DEMAND, for the life of the process. Renaming the running image aside does NOT
+/// give the process a private copy — the path it will read from now holds a different build, so
+/// the next not-yet-loaded assembly is read at the old offsets and throws FileNotFoundException.
+/// A user ran 12 hours that way and the app died the moment opening the tray menu needed an
+/// assembly it had not loaded yet. So: stage to <see cref="StagedPathFor"/> while running, and
+/// call <see cref="Apply"/> only as the process exits (see PendingUpdate).
+///
 /// The exception is v3.0.0's rename, where the running image is a pre-rename
 /// <c>ApoVolume.exe</c> and the release ships <c>AorinEQ.exe</c>: see
 /// <see cref="TargetPathFor"/>.</summary>
@@ -17,6 +27,32 @@ public static class UpdateApplier
     public const long MaxExeBytes = 200 * 1024 * 1024;
 
     public static string OldPathFor(string exePath) => exePath + ".old";
+
+    /// <summary>Where a verified download waits until shutdown. Beside the target for two
+    /// reasons: the exit-time <see cref="Apply"/> is then a rename on one volume rather than a
+    /// 74 MB copy across two (temp is not always on the system drive, and shutdown is the one
+    /// moment the app must not hang), and a staged build abandoned by a crash is found by
+    /// <see cref="TryDeleteStaged"/> on the next start. Named after the TARGET for the same
+    /// reason <see cref="Apply"/> names the backup that way — see <see cref="TargetPathFor"/>.</summary>
+    public static string StagedPathFor(string exePath) => TargetPathFor(exePath) + ".new";
+
+    /// <summary>Drops a staged build left behind by a process that died before its shutdown swap.
+    /// It is deliberately NOT applied at startup: this process is running from the very exe that
+    /// swap would rename, which is exactly what v3.5.1 stopped doing. The next check downloads it
+    /// again. False when the file is still locked, on the same terms as
+    /// <see cref="TryDeleteOld"/>.</summary>
+    public static bool TryDeleteStaged(string exePath)
+    {
+        try
+        {
+            File.Delete(StagedPathFor(exePath)); // no-op when absent
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Where an update installs to: the release asset's own name, in the running exe's
     /// directory. Identical to <paramref name="exePath"/> for any normally-named install, so the

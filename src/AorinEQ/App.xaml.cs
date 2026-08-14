@@ -61,6 +61,16 @@ public partial class App : System.Windows.Application
     private bool _processingProtocolLinks;
     private System.Windows.Threading.DispatcherTimer? _updateTimer;
     private bool _updateCheckRunning;
+    /// <summary>A downloaded update waiting for this process to EXIT before it is swapped in —
+    /// never applied while the app runs. See <see cref="UpdateApplier"/> for why that timing is
+    /// the whole point of v3.5.1, and <see cref="ApplyPendingUpdateOnExit"/> for where it lands.</summary>
+    private PendingUpdate? _pendingUpdate;
+    /// <summary>Set when this shutdown exists to finish an update — the successor is started once
+    /// the swap has happened. False for an ordinary Exit: the update still applies, quietly, and
+    /// the user's next launch runs the new build.</summary>
+    private bool _relaunchAfterUpdate;
+    /// <summary>Guards <see cref="ReportFatal"/> against a crash raised while reporting a crash.</summary>
+    private bool _reportingFatal;
     /// <summary>Equalizer APO health: one tracker, fed from four triggers (default-device change,
     /// session unlock, resume from sleep, and a slow timer). See <see cref="SetupEapoHealthMonitor"/>.</summary>
     private readonly EapoHealthTracker _eapoHealth = new();
@@ -81,8 +91,86 @@ public partial class App : System.Windows.Application
     /// Windows default render device via <see cref="OnDefaultDeviceChanged"/>.</summary>
     private VolumeState ActiveState => _deviceStates.Active;
 
+    /// <summary>Wired before anything else can throw. Until v3.5.1 the app had no unhandled
+    /// exception handler at all: a crash simply removed the tray icon, with no message, no log and
+    /// nothing for the user to report — the update-swap crash this release fixes could only be
+    /// diagnosed from a Windows Error Reporting minidump. These three cover the three ways an
+    /// exception escapes: the UI thread's dispatcher, any other thread, and a faulted Task nobody
+    /// awaited.</summary>
+    private void InstallCrashHandlers()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            // Handled, so WPF's default "the process dies right here" is replaced by an orderly
+            // shutdown that still ends the session — never a swallow that leaves the app running
+            // with half its state gone.
+            args.Handled = true;
+            ReportFatal(args.Exception, "Dispatcher");
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            // The process is already going down and this may be any thread, so there is no safe
+            // way to put UI on screen — record it and let the runtime finish.
+            if (args.ExceptionObject is Exception ex)
+                TryWriteCrashLog(ex, "AppDomain");
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            // Deliberately NOT fatal: since .NET 4.5 an unobserved Task exception does not tear
+            // the process down, and killing the app over one would turn a logged curiosity into an
+            // outage. Recorded and marked observed.
+            TryWriteCrashLog(args.Exception, "TaskScheduler");
+            args.SetObserved();
+        };
+    }
+
+    /// <summary>Records a fatal exception, tells the user where the record is, and ends the
+    /// session. Reentrancy is guarded: a failure raised BY this path (the v3.5.0 crash did exactly
+    /// that — WinForms threw from inside its own error dialog) must not recurse.</summary>
+    private void ReportFatal(Exception exception, string source)
+    {
+        if (_reportingFatal) return;
+        _reportingFatal = true;
+
+        var logPath = TryWriteCrashLog(exception, source);
+        try
+        {
+            System.Windows.MessageBox.Show(
+                $"AorinEQ hit an unexpected error and has to close.\n\n" +
+                $"{exception.GetType().Name}: {exception.Message}\n\n" +
+                (logPath is null ? "" : $"Details were written to:\n{logPath}"),
+                "AorinEQ", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        catch (Exception)
+        {
+            // Whatever broke may well be what breaks the dialog too. The log is the record that
+            // matters; showing it is best effort.
+        }
+
+        try { Shutdown(1); }
+        catch (InvalidOperationException) { } // already shutting down
+    }
+
+    /// <summary>Best-effort crash record. Returns where it landed, or null if even that failed.</summary>
+    private static string? TryWriteCrashLog(Exception exception, string source)
+    {
+        try
+        {
+            var root = ApoPaths.GetStateRoot();
+            CrashLog.Write(root, exception, GetVersionString(), source);
+            return CrashLog.PathFor(root);
+        }
+        catch (Exception)
+        {
+            return null; // no %APPDATA%, no rights — nothing left to try
+        }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        InstallCrashHandlers();
         base.OnStartup(e);
 
         if (e.Args.Contains("--setup"))
@@ -1629,6 +1717,10 @@ public partial class App : System.Windows.Application
     /// process), create the 24 h re-check timer, and kick the startup check when enabled.</summary>
     private void SetupAutoUpdate()
     {
+        // A build staged by a session that died before its shutdown swap. It is NOT applied here:
+        // this process is running from the very exe that swap would rename aside, which is the
+        // thing v3.5.1 exists to stop doing. Dropped instead — the check below re-downloads it.
+        UpdateApplier.TryDeleteStaged(ExePath);
         if (!UpdateApplier.TryDeleteOld(ExePath))
         {
             var cleanup = new System.Windows.Threading.DispatcherTimer
@@ -1670,6 +1762,11 @@ public partial class App : System.Windows.Application
         else
         {
             _updateTimer?.Stop();
+            // Turning auto-update off must also drop a build already staged for the next restart —
+            // otherwise the exit swap would install an update the user has just declined.
+            _pendingUpdate?.Discard();
+            _pendingUpdate = null;
+            _relaunchAfterUpdate = false;
         }
         _ = SyncSettingsWindowStateAsync();
     }
@@ -1747,10 +1844,15 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>Downloads a newer release through the gates (sha256 asset REQUIRED, 200 MB cap,
-    /// MZ magic) and applies the in-place swap. Unwritable exe directory → no swap, just a
-    /// clickable balloon to the release page. After the swap: RunAsAdmin sessions finish on the
-    /// next start (no surprise UAC); otherwise relaunch immediately via the mutex-takeover path
-    /// and exit.</summary>
+    /// MZ magic) and STAGES it beside the exe. Unwritable exe directory → nothing staged, just a
+    /// clickable balloon to the release page.
+    ///
+    /// The swap itself deliberately does NOT happen here — see <see cref="UpdateApplier"/>: doing
+    /// it under the running process is what killed v3.5.0. It happens in
+    /// <see cref="ApplyPendingUpdateOnExit"/>. What differs by install type is only how soon this
+    /// process exits: a normal install restarts itself immediately (no UAC, nothing to weigh up),
+    /// while a RunAsAdmin install would need a UAC prompt to come back elevated, so it offers the
+    /// restart on a click and otherwise waits for the user's own next start.</summary>
     private async Task DownloadAndApplyUpdateAsync(ReleaseInfo release, bool interactive)
     {
         var exeDir = Path.GetDirectoryName(ExePath)!;
@@ -1763,8 +1865,9 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var staging = Path.Combine(Path.GetTempPath(), "aorineq-update-" + Guid.NewGuid().ToString("N") + ".exe");
-        string installedExePath;
+        // Beside the exe, not in %TEMP%: the exit-time move is then a rename on one volume rather
+        // than a 74 MB cross-volume copy at the one moment the app must not hang.
+        var staging = UpdateApplier.StagedPathFor(ExePath);
         try
         {
             var sha = await UpdateChecker.FetchSha256Async(release.Sha256Url!);
@@ -1772,62 +1875,97 @@ public partial class App : System.Windows.Application
                 throw new InvalidOperationException("couldn't verify the release checksum.");
             await GatedDownload.DownloadAsync(release.ExeUrl!, staging, UpdateApplier.MaxExeBytes,
                 GatedDownload.ExeMagic, sha);
-            // Usually our own path; different only on the update that carries v3.0.0's rename,
-            // which is why the relaunch below uses what Apply reports rather than ExePath.
-            installedExePath = UpdateApplier.Apply(ExePath, staging);
         }
         catch (InvalidOperationException ex)
         {
+            UpdateApplier.TryDeleteStaged(ExePath); // a partial download must never be swapped in
             _settingsWindow?.SetUpdateStatus($"Update to {release.TagName} failed: {ex.Message}");
             if (interactive)
                 _tray?.ShowWarning($"Update failed: {ex.Message}");
             return;
         }
-        finally
-        {
-            try { File.Delete(staging); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
 
-        // The swap is done — the exe path now holds the new build; this process keeps running
-        // from its renamed .old image until it exits.
-        if (!string.Equals(installedExePath, ExePath, StringComparison.OrdinalIgnoreCase))
-            RepointExternalReferencesTo(installedExePath);
+        // A newer release that arrives before this one was applied supersedes it. Discard() only
+        // marks the superseded record consumed — the file it names is the one just overwritten by
+        // the download above, so there is nothing of ours left to delete.
+        _pendingUpdate = new PendingUpdate(ExePath, staging, release.TagName);
 
         if (_settings.RunAsAdmin)
         {
-            // Auto-restarting would spring a surprise UAC prompt; the next launch runs the
-            // new exe anyway.
-            _settingsWindow?.SetUpdateStatus($"Updated to {release.TagName} — applies on the next start.");
-            _tray?.ShowInfo($"Update to {release.TagName} will apply the next time AorinEQ starts.");
+            // Restarting on our own would spring a UAC prompt the user did not ask for. Offering
+            // it on a click is not a surprise — and until they take it, nothing has changed on
+            // disk, so this session stays exactly as healthy as it was.
+            _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — applies when AorinEQ restarts.");
+            _tray?.ShowNotice(
+                $"AorinEQ {release.TagName} is ready — click to restart now, or it applies the next time AorinEQ starts.",
+                RestartForUpdate);
             return;
         }
 
-        // Relaunch via the SAME proven handoff as the elevation bounce: start the successor
-        // FIRST, then BeginShutdown (which disposes the show event before Shutdown drains, so the
-        // successor's probe misses the dying event and takes over via the mutex teardown-wait).
-        // Starting first means a failed Process.Start never disposes our IPC — we stay fully
-        // functional on the old image, and the completed swap runs on any later start.
-        System.Diagnostics.Process? proc;
-        try
+        _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — restarting…");
+        RestartForUpdate();
+    }
+
+    /// <summary>Ends this session so the staged update can be applied on the way out, and marks
+    /// the successor as wanted. Everything else is <see cref="ApplyPendingUpdateOnExit"/>'s job:
+    /// the swap cannot happen before the process is finished with its own image.</summary>
+    private void RestartForUpdate()
+    {
+        if (_pendingUpdate is null) return;
+        _relaunchAfterUpdate = true;
+        BeginShutdown();
+    }
+
+    /// <summary>THE SWAP, and the last thing this process does. Runs from OnExit with every
+    /// window closed, the tray gone, the show event disposed and the mutex released — so the
+    /// successor started at the end of it takes over cleanly.
+    ///
+    /// Everything after the swap runs against an exe path that no longer holds THIS build's
+    /// bundle, so this method loads nothing new after it: the relaunch descriptor is built BEFORE
+    /// the swap precisely so <c>Process.Start</c>'s assembly is already resident when it is
+    /// needed. Never throws — a failure here must not take the rest of teardown with it, and the
+    /// install is left with a working exe either way.</summary>
+    private void ApplyPendingUpdateOnExit()
+    {
+        var pending = _pendingUpdate;
+        if (pending is null) return;
+
+        // Built first, deliberately: constructing this touches System.Diagnostics.Process while
+        // the bundle is still readable. UseShellExecute + runas asks for elevation the user has
+        // already opted into by clicking Restart; a plain install starts unelevated as always.
+        var launch = new System.Diagnostics.ProcessStartInfo(ExePath, "--updated")
         {
-            proc = System.Diagnostics.Process.Start(
-                new System.Diagnostics.ProcessStartInfo(installedExePath, "--updated")
-                {
-                    UseShellExecute = true,
-                });
-        }
-        catch (System.ComponentModel.Win32Exception)
+            UseShellExecute = true,
+            Verb = _settings.RunAsAdmin ? "runas" : string.Empty,
+        };
+
+        if (!pending.TryApply(out var installedPath, out var error))
         {
-            proc = null;
-        }
-        if (proc is null)
-        {
-            _tray?.ShowInfo($"Updated to {release.TagName} — restart AorinEQ to finish.");
+            CrashLog.Write(ApoPaths.GetStateRoot(),
+                new InvalidOperationException($"Update to {pending.TagName} could not be applied: {error}"),
+                GetVersionString(), "UpdateOnExit");
             return;
         }
-        BeginShutdown();
+
+        // The one case where the swap changes the exe's NAME (v3.0.0's rename). It has to happen
+        // here rather than on the next start, because on a RunAsAdmin install the thing that would
+        // PRODUCE the next start is the scheduled task still naming the exe the swap just removed.
+        if (!string.Equals(installedPath, ExePath, StringComparison.OrdinalIgnoreCase))
+        {
+            RepointExternalReferencesTo(installedPath!);
+            launch.FileName = installedPath!;
+        }
+
+        if (!_relaunchAfterUpdate) return;
+        try
+        {
+            System.Diagnostics.Process.Start(launch);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // UAC declined, or the shell refused. The update is installed either way; the user's
+            // own next launch runs it.
+        }
     }
 
     private static void OpenUrl(string url)
@@ -2672,6 +2810,11 @@ public partial class App : System.Windows.Application
         }
         _mutex?.Dispose();
         _settingsSaver.Dispose();
+        // LAST, and see its remarks for why the order is not negotiable: it replaces the file this
+        // process's own assemblies are read from, so nothing that might need to load one may run
+        // after it. It is also why it sits below the mutex release — the successor it starts must
+        // find the single-instance objects already gone.
+        ApplyPendingUpdateOnExit();
         base.OnExit(e);
     }
 }
