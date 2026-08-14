@@ -19,6 +19,12 @@ public static class CrashLog
     /// newest entry is the one worth keeping.</summary>
     public const int MaxBytes = 256 * 1024;
 
+    /// <summary>Serialises writers. One bad shutdown can raise all three handlers at once — a
+    /// dispatcher exception on the UI thread and an AppDomain one on a background thread — and
+    /// every write is a read-modify-write of the whole file, so unsynchronised writers would drop
+    /// exactly the entry being debugged.</summary>
+    private static readonly object Gate = new();
+
     public static string PathFor(string stateRoot) => Path.Combine(stateRoot, "crash.log");
 
     /// <summary>Appends one entry: when, which handler caught it, the running build, and the full
@@ -31,22 +37,25 @@ public static class CrashLog
     {
         try
         {
-            var entry = new StringBuilder()
-                .Append("=== ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))
-                .Append(" | ").Append(source)
-                .Append(" | AorinEQ ").Append(version)
-                .AppendLine(" ===")
-                .AppendLine(exception.ToString()) // type, message, stack, and every inner exception
-                .AppendLine()
-                .ToString();
+            lock (Gate)
+            {
+                var entry = new StringBuilder()
+                    .Append("=== ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))
+                    .Append(" | ").Append(source)
+                    .Append(" | AorinEQ ").Append(version)
+                    .AppendLine(" ===")
+                    .AppendLine(exception.ToString()) // type, message, stack, and every inner exception
+                    .AppendLine()
+                    .ToString();
 
-            var path = PathFor(stateRoot);
-            var existing = ReadExisting(path);
-            var combined = existing + entry;
-            if (Encoding.UTF8.GetByteCount(combined) > MaxBytes)
-                combined = TrimToWholeEntries(combined);
+                var path = PathFor(stateRoot);
+                var existing = ReadExisting(path);
+                var combined = existing + entry;
+                if (Encoding.UTF8.GetByteCount(combined) > MaxBytes)
+                    combined = TrimToWholeEntries(combined);
 
-            File.WriteAllText(path, combined, Encoding.UTF8);
+                File.WriteAllText(path, combined, Encoding.UTF8);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
             or System.Security.SecurityException or NotSupportedException or ArgumentException)
