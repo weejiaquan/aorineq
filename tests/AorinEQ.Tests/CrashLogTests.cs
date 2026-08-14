@@ -92,16 +92,20 @@ public class CrashLogTests : IDisposable
     [Fact]
     public void Write_trims_the_oldest_entries_instead_of_growing_without_bound()
     {
-        // A crash loop must not fill the user's disk.
-        for (var i = 0; i < 400; i++)
-            CrashLog.Write(_dir, Thrown($"crash number {i}"), "3.5.1", "Dispatcher");
+        // A crash loop must not fill the user's disk. The entries are deliberately fat: with
+        // small ones the total never reaches the cap, and this test passed happily with the
+        // trimming deleted — proving nothing. 100 x ~8 KB comfortably exceeds 256 KB.
+        var padding = new string('x', 8 * 1024);
+        for (var i = 0; i < 100; i++)
+            CrashLog.Write(_dir, Thrown($"crash number {i} {padding}"), "3.5.1", "Dispatcher");
 
         var size = new FileInfo(LogPath).Length;
         var text = File.ReadAllText(LogPath);
-        _out.WriteLine($"log size after 400 crashes: {size} bytes (cap {CrashLog.MaxBytes})");
+        _out.WriteLine($"log size after 100 fat crashes: {size} bytes (cap {CrashLog.MaxBytes})");
         Assert.True(size <= CrashLog.MaxBytes, $"log grew to {size} bytes");
-        Assert.Contains("crash number 399", text);      // the newest is what matters
+        Assert.Contains("crash number 99 ", text);      // the newest is what matters
         Assert.DoesNotContain("crash number 0 ", text); // the oldest were dropped
+        Assert.StartsWith("=== ", text);                // and it was cut at an entry boundary
     }
 
     [Fact]
