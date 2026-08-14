@@ -1940,6 +1940,17 @@ public partial class App : System.Windows.Application
         RestartForUpdate();
     }
 
+    // Ending this process the instant its own image has been replaced — see the end of
+    // ApplyPendingUpdateOnExit for why returning normally is not sufficient there. Declared with
+    // the update code rather than in a helper class because this is the only place in the app that
+    // may ever call it.
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
     /// <summary>One place for "the update didn't happen", so the status line and the balloon can
     /// never disagree about it.</summary>
     private void ReportUpdateFailure(string tagName, string reason, bool interactive)
@@ -2008,7 +2019,32 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        if (!_relaunchAfterUpdate) return;
+        if (_relaunchAfterUpdate)
+            StartSuccessor(launch);
+
+        // NOTHING OF OURS MAY RUN FROM HERE, and returning normally is not good enough: it hands
+        // control back to CLR and WPF rundown — finalizers, COM release, process teardown — all of
+        // it against an exe path that now holds a different build. Ending the process outright is
+        // what makes the window actually empty instead of merely short, and it is safe precisely
+        // here: OnExit has already disposed every owner of state (settings coalescer flushed,
+        // ApoWriter drained, mutex released), so there is nothing left for a finalizer to save.
+        //
+        // Measured on the real binary: 12-16 ms from Process.Start returning to this process being
+        // gone. The ~1.5 s before that is spent INSIDE Process.Start, in the kernel, while Windows
+        // scans the freshly written 74 MB image on its first execution (a cold launch of a
+        // just-written copy costs 1471 ms; the second costs 4 ms). No managed code of ours runs
+        // during it, which is why that call is the only post-swap exposure left.
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+
+    /// <summary>The one piece of managed work that still runs after the swap, kept to a single
+    /// call. Catches EVERYTHING: UAC declined and a shell refusal are the expected failures, but
+    /// ShellExecute's own graph is not provably resident by then, so a FileNotFoundException out
+    /// of the replaced bundle is possible too. Catching it is what keeps that harmless — the
+    /// update is installed and the app is exiting; the worst case is that it does not come back on
+    /// its own.</summary>
+    private static void StartSuccessor(System.Diagnostics.ProcessStartInfo launch)
+    {
         try
         {
             System.Diagnostics.Process.Start(launch);
