@@ -109,6 +109,30 @@ public class CrashLogTests : IDisposable
     }
 
     [Fact]
+    public void Write_from_several_threads_at_once_keeps_every_entry()
+    {
+        // One bad shutdown can raise the dispatcher handler on the UI thread and the AppDomain one
+        // on a background thread at the same moment. Every write is a read-modify-write of the
+        // whole file, so without serialisation the entry being debugged is the one that vanishes.
+        const int threads = 8, perThread = 10;
+        Parallel.For(0, threads, t =>
+        {
+            for (var i = 0; i < perThread; i++)
+                CrashLog.Write(_dir, Thrown($"thread {t} entry {i}"), "3.5.1", "Dispatcher");
+        });
+
+        var text = File.ReadAllText(LogPath);
+        var missing = new List<string>();
+        for (var t = 0; t < threads; t++)
+            for (var i = 0; i < perThread; i++)
+                if (!text.Contains($"thread {t} entry {i}"))
+                    missing.Add($"thread {t} entry {i}");
+
+        _out.WriteLine($"{threads * perThread - missing.Count}/{threads * perThread} entries survived");
+        Assert.Empty(missing);
+    }
+
+    [Fact]
     public void Write_never_throws_when_the_log_cannot_be_written()
     {
         // It runs from an unhandled-exception handler. Throwing there replaces a diagnosable

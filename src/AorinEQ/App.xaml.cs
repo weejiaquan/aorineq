@@ -1865,38 +1865,50 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        // Already downloaded and waiting for the restart. Re-downloading it would overwrite the
-        // staged file it names — and a re-download that FAILS would leave the record pointing at
-        // a file that is no longer there, throwing away a good update. This session's version is
-        // still the old one, so every later check finds the same release again; this is the
-        // common path for a RunAsAdmin install that has not restarted yet, not an edge case.
-        if (_pendingUpdate is { } staged && staged.TagName == release.TagName)
+        // Already downloaded and waiting for the restart — and the file is still there. This
+        // session's version is still the OLD one, so every later check finds the same release
+        // again; for a RunAsAdmin install that has not restarted yet this is the common path, not
+        // an edge case. The File.Exists is not paranoia: if something swept the staged build, the
+        // record must not keep promising an update that can no longer be applied.
+        if (_pendingUpdate is { } ready && ready.TagName == release.TagName
+            && File.Exists(ready.StagedExePath))
         {
             _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — applies when AorinEQ restarts.");
             return;
         }
 
-        // Beside the exe, not in %TEMP%: the exit-time move is then a rename on one volume rather
-        // than a 74 MB cross-volume copy at the one moment the app must not hang.
-        var staging = UpdateApplier.StagedPathFor(ExePath);
+        // The checksum first, ALONE: it writes nothing, so a failure here must leave any build
+        // already staged exactly as it was. Everything below overwrites the staged file.
+        string sha;
         try
         {
-            var sha = await UpdateChecker.FetchSha256Async(release.Sha256Url!);
-            if (sha is null)
-                throw new InvalidOperationException("couldn't verify the release checksum.");
+            sha = await UpdateChecker.FetchSha256Async(release.Sha256Url!)
+                ?? throw new InvalidOperationException("couldn't verify the release checksum.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            ReportUpdateFailure(release.TagName, ex.Message, interactive);
+            return;
+        }
+
+        // Beside the exe, not in %TEMP%: the exit-time move is then a rename on one volume rather
+        // than a 74 MB cross-volume copy at the one moment the app must not hang.
+        //
+        // From this line the staged file belongs to THIS download, so any record naming it is
+        // dropped first: one staging path means a newer release necessarily destroys an older
+        // staged build, and a record that outlived its file is a promise nothing can keep.
+        var staging = UpdateApplier.StagedPathFor(ExePath);
+        _pendingUpdate = null;
+        _relaunchAfterUpdate = false;
+        try
+        {
             await GatedDownload.DownloadAsync(release.ExeUrl!, staging, UpdateApplier.MaxExeBytes,
                 GatedDownload.ExeMagic, sha);
         }
         catch (InvalidOperationException ex)
         {
             UpdateApplier.TryDeleteStaged(ExePath); // a partial download must never be swapped in
-            // The staged file this may have just deleted is the one any older record names, so the
-            // record goes with it rather than surviving as a promise nothing can keep.
-            _pendingUpdate = null;
-            _relaunchAfterUpdate = false;
-            _settingsWindow?.SetUpdateStatus($"Update to {release.TagName} failed: {ex.Message}");
-            if (interactive)
-                _tray?.ShowWarning($"Update failed: {ex.Message}");
+            ReportUpdateFailure(release.TagName, ex.Message, interactive);
             return;
         }
 
@@ -1910,9 +1922,6 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        // A newer release that arrives before this one was applied supersedes it. Discard() only
-        // marks the superseded record consumed — the file it names is the one just overwritten by
-        // the download above, so there is nothing of ours left to delete.
         _pendingUpdate = new PendingUpdate(ExePath, staging, release.TagName);
 
         if (_settings.RunAsAdmin)
@@ -1929,6 +1938,15 @@ public partial class App : System.Windows.Application
 
         _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — restarting…");
         RestartForUpdate();
+    }
+
+    /// <summary>One place for "the update didn't happen", so the status line and the balloon can
+    /// never disagree about it.</summary>
+    private void ReportUpdateFailure(string tagName, string reason, bool interactive)
+    {
+        _settingsWindow?.SetUpdateStatus($"Update to {tagName} failed: {reason}");
+        if (interactive)
+            _tray?.ShowWarning($"Update failed: {reason}");
     }
 
     /// <summary>Ends this session so the staged update can be applied on the way out, and marks
@@ -1976,14 +1994,14 @@ public partial class App : System.Windows.Application
         // The path it points at exists moments later; if the swap fails instead, it is pointed
         // straight back, which is safe because a failed swap leaves the bundle untouched.
         if (renames)
-            RepointExternalReferencesTo(targetPath);
+            TryRepointExternalReferences(targetPath);
 
         // The path it reports is TargetPathFor's, which is exactly the launch.FileName computed
         // above — the descriptor could not wait for it, so it is derived rather than returned.
         if (!pending.TryApply(out _, out var error))
         {
             if (renames)
-                RepointExternalReferencesTo(ExePath);
+                TryRepointExternalReferences(ExePath);
             CrashLog.Write(ApoPaths.GetStateRoot(),
                 new InvalidOperationException($"Update to {pending.TagName} could not be applied: {error}"),
                 GetVersionString(), "UpdateOnExit");
@@ -1995,10 +2013,29 @@ public partial class App : System.Windows.Application
         {
             System.Diagnostics.Process.Start(launch);
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        catch (Exception)
         {
-            // UAC declined, or the shell refused. The update is installed either way; the user's
-            // own next launch runs it.
+            // Deliberately everything, and this is the ONE piece of managed work that still runs
+            // after the swap. UAC declined and a shell refusal are the expected failures, but
+            // ShellExecute's own graph is not provably resident by the time it is called, so a
+            // FileNotFoundException out of the replaced bundle is possible here too. Catching it
+            // is what keeps that possibility harmless: the update is already installed, the app is
+            // already exiting, and the worst outcome is that it does not come back on its own.
+        }
+    }
+
+    /// <summary>Repointing, with the whole call contained. It runs from teardown, where the tray
+    /// it would normally warn through is already disposed and nothing above can handle a throw —
+    /// and it must not be able to leave the exe rolled back but the launch points moved.</summary>
+    private void TryRepointExternalReferences(string exePath)
+    {
+        try
+        {
+            RepointExternalReferencesTo(exePath);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ApoPaths.GetStateRoot(), ex, GetVersionString(), "UpdateOnExit");
         }
     }
 
