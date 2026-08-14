@@ -102,17 +102,37 @@ public static class UpdateApplier
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            try
-            {
-                if (!File.Exists(exePath))
-                    File.Move(oldPath, exePath); // roll back: the original exe returns to its path
-            }
-            catch (Exception rollbackEx) when (rollbackEx is IOException or UnauthorizedAccessException)
-            {
-            }
-            throw new InvalidOperationException($"Couldn't apply the update: {ex.Message}", ex);
+            // Roll back, and keep trying for a moment: the usual reason a rename fails is a
+            // transient scan (indexer, AV) on a file that was just written, and this is the one
+            // failure that would leave the install with NO exe at the path everything names.
+            var rolledBack = TryRollBack(oldPath, exePath);
+            throw new InvalidOperationException(rolledBack
+                ? $"Couldn't apply the update: {ex.Message}"
+                : $"Couldn't apply the update: {ex.Message} The previous version is still on disk " +
+                  $"as '{oldPath}' — rename it back to '{Path.GetFileName(exePath)}' to restore it.", ex);
         }
         return targetPath;
+    }
+
+    /// <summary>Returns the running exe to the name it was launched as. Retries briefly, then
+    /// reports failure so the caller can tell the user where their exe went — silence here is how
+    /// an install ends up looking uninstalled.</summary>
+    private static bool TryRollBack(string oldPath, string exePath)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                if (File.Exists(exePath)) return true; // never overwrite whatever is there now
+                File.Move(oldPath, exePath);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(100);
+            }
+        }
+        return File.Exists(exePath);
     }
 
     /// <summary>Deletes the <c>.old</c> backup next to <paramref name="exePath"/>. True when it

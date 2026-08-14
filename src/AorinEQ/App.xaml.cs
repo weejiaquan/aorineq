@@ -1865,6 +1865,17 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // Already downloaded and waiting for the restart. Re-downloading it would overwrite the
+        // staged file it names — and a re-download that FAILS would leave the record pointing at
+        // a file that is no longer there, throwing away a good update. This session's version is
+        // still the old one, so every later check finds the same release again; this is the
+        // common path for a RunAsAdmin install that has not restarted yet, not an edge case.
+        if (_pendingUpdate is { } staged && staged.TagName == release.TagName)
+        {
+            _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — applies when AorinEQ restarts.");
+            return;
+        }
+
         // Beside the exe, not in %TEMP%: the exit-time move is then a rename on one volume rather
         // than a 74 MB cross-volume copy at the one moment the app must not hang.
         var staging = UpdateApplier.StagedPathFor(ExePath);
@@ -1879,9 +1890,23 @@ public partial class App : System.Windows.Application
         catch (InvalidOperationException ex)
         {
             UpdateApplier.TryDeleteStaged(ExePath); // a partial download must never be swapped in
+            // The staged file this may have just deleted is the one any older record names, so the
+            // record goes with it rather than surviving as a promise nothing can keep.
+            _pendingUpdate = null;
+            _relaunchAfterUpdate = false;
             _settingsWindow?.SetUpdateStatus($"Update to {release.TagName} failed: {ex.Message}");
             if (interactive)
                 _tray?.ShowWarning($"Update failed: {ex.Message}");
+            return;
+        }
+
+        // Auto-update can be switched off WHILE this download runs — it is minutes of network on a
+        // background check nobody asked for. Honour the newer answer and throw the build away. A
+        // manual "Check now" is explicit intent and installs either way.
+        if (!interactive && !_settings.AutoUpdate)
+        {
+            UpdateApplier.TryDeleteStaged(ExePath);
+            _settingsWindow?.SetUpdateStatus($"{release.TagName} was downloaded, then auto-update was turned off.");
             return;
         }
 
@@ -1930,30 +1955,39 @@ public partial class App : System.Windows.Application
         var pending = _pendingUpdate;
         if (pending is null) return;
 
-        // Built first, deliberately: constructing this touches System.Diagnostics.Process while
-        // the bundle is still readable. UseShellExecute + runas asks for elevation the user has
-        // already opted into by clicking Restart; a plain install starts unelevated as always.
-        var launch = new System.Diagnostics.ProcessStartInfo(ExePath, "--updated")
+        // Everything that could need to LOAD something happens here, above the swap.
+        //
+        // The launch descriptor is built now so System.Diagnostics.Process is resident when it is
+        // used below. UseShellExecute + runas asks for elevation the user has already opted into
+        // by clicking Restart; a plain install starts unelevated as always.
+        var targetPath = UpdateApplier.TargetPathFor(ExePath);
+        var renames = !string.Equals(targetPath, ExePath, StringComparison.OrdinalIgnoreCase);
+        var launch = new System.Diagnostics.ProcessStartInfo(renames ? targetPath : ExePath, "--updated")
         {
             UseShellExecute = true,
             Verb = _settings.RunAsAdmin ? "runas" : string.Empty,
         };
 
-        if (!pending.TryApply(out var installedPath, out var error))
+        // The one case where the swap changes the exe's NAME (v3.0.0's rename). Repointing has to
+        // happen on this side of the swap for the same reason as everything else here — it runs
+        // registry and scheduled-task code this session may never have touched — and it cannot
+        // wait for the next start, because on a RunAsAdmin install the thing that would PRODUCE
+        // the next start is the scheduled task still naming the exe the swap is about to remove.
+        // The path it points at exists moments later; if the swap fails instead, it is pointed
+        // straight back, which is safe because a failed swap leaves the bundle untouched.
+        if (renames)
+            RepointExternalReferencesTo(targetPath);
+
+        // The path it reports is TargetPathFor's, which is exactly the launch.FileName computed
+        // above — the descriptor could not wait for it, so it is derived rather than returned.
+        if (!pending.TryApply(out _, out var error))
         {
+            if (renames)
+                RepointExternalReferencesTo(ExePath);
             CrashLog.Write(ApoPaths.GetStateRoot(),
                 new InvalidOperationException($"Update to {pending.TagName} could not be applied: {error}"),
                 GetVersionString(), "UpdateOnExit");
             return;
-        }
-
-        // The one case where the swap changes the exe's NAME (v3.0.0's rename). It has to happen
-        // here rather than on the next start, because on a RunAsAdmin install the thing that would
-        // PRODUCE the next start is the scheduled task still naming the exe the swap just removed.
-        if (!string.Equals(installedPath, ExePath, StringComparison.OrdinalIgnoreCase))
-        {
-            RepointExternalReferencesTo(installedPath!);
-            launch.FileName = installedPath!;
         }
 
         if (!_relaunchAfterUpdate) return;
@@ -2810,11 +2844,14 @@ public partial class App : System.Windows.Application
         }
         _mutex?.Dispose();
         _settingsSaver.Dispose();
-        // LAST, and see its remarks for why the order is not negotiable: it replaces the file this
-        // process's own assemblies are read from, so nothing that might need to load one may run
-        // after it. It is also why it sits below the mutex release — the successor it starts must
-        // find the single-instance objects already gone.
-        ApplyPendingUpdateOnExit();
+        // base FIRST, then the swap: everything above is ours, but base.OnExit raises the Exit
+        // event and runs WPF's own teardown, which is code this process has not necessarily
+        // executed before. It must happen while the bundle is still readable.
         base.OnExit(e);
+        // GENUINELY LAST, and see its remarks for why the order is not negotiable: it replaces the
+        // file this process's own assemblies are read from, so nothing that might need to load one
+        // may run after it. It is also why it sits below the mutex release — the successor it
+        // starts must find the single-instance objects already gone.
+        ApplyPendingUpdateOnExit();
     }
 }
