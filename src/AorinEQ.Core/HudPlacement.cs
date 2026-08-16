@@ -18,6 +18,12 @@ public readonly record struct HudRect(double X, double Y, double Width, double H
     public bool Contains(HudRect other) =>
         other.X >= X && other.Y >= Y && other.Right <= Right && other.Bottom <= Bottom;
 
+    /// <summary>Whether a point falls inside, top-left inclusive and far edges exclusive — the
+    /// half-open convention Windows uses for a RECT, so two adjacent boxes never both claim the
+    /// same pixel. An empty box contains nothing, which is what a widget whose window does not
+    /// exist yet reports.</summary>
+    public bool Contains(double x, double y) => x >= X && x < Right && y >= Y && y < Bottom;
+
     /// <summary>Overlap area with <paramref name="other"/>, 0 when they do not meet. Used to
     /// decide which screen a box dropped across a boundary actually belongs to.</summary>
     public double IntersectionArea(HudRect other)

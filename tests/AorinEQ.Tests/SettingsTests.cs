@@ -258,6 +258,61 @@ public class SettingsTests : IDisposable
         Assert.False(s.AutoUpdate);
     }
 
+    /// <summary>Scroll-to-adjust and the click bindings arrived in v3.6; every settings.json
+    /// written before it has none of the four fields. The left button must keep doing exactly
+    /// what it did before the setting existed — anything else silently re-binds the click of
+    /// every existing user on upgrade.</summary>
+    [Fact]
+    public void Tray_click_and_scroll_default_to_the_pre_v36_behaviour_when_missing()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, "{\"Percent\":50,\"Muted\":false}");
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded: left={s.TrayLeftClick} middle={s.TrayMiddleClick} " +
+                       $"scroll={s.TrayScrollEnabled} inverted={s.ScrollInverted}");
+        Assert.Equal(TrayActions.VolumeBar, s.TrayLeftClick); // what left-click has always done
+        Assert.Equal(TrayActions.Mute, s.TrayMiddleClick);
+        Assert.True(s.TrayScrollEnabled);
+        Assert.False(s.ScrollInverted);
+    }
+
+    /// <summary>A value from a newer build (or a hand-edited file) must not leave a button bound
+    /// to something this build cannot run — and each button falls back to its OWN default, not to
+    /// a shared one.</summary>
+    [Fact]
+    public void Load_normalizes_an_unknown_tray_action_per_button()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path,
+            "{\"Percent\":50,\"Muted\":false,\"TrayLeftClick\":\"device-picker\",\"TrayMiddleClick\":\"device-picker\"}");
+        var s = Settings.Load(_path);
+        _out.WriteLine($"normalized: left={s.TrayLeftClick} middle={s.TrayMiddleClick}");
+        Assert.Equal(TrayActions.VolumeBar, s.TrayLeftClick);
+        Assert.Equal(TrayActions.Mute, s.TrayMiddleClick);
+    }
+
+    /// <summary>"none" is a deliberate binding, so normalization must leave it alone rather than
+    /// treat it as an empty value and reinstate the default.</summary>
+    [Fact]
+    public void Load_keeps_a_deliberately_inert_tray_button()
+    {
+        new Settings(50, false, TrayLeftClick: TrayActions.None, TrayMiddleClick: TrayActions.None).Save(_path);
+        var s = Settings.Load(_path);
+        _out.WriteLine($"loaded: left={s.TrayLeftClick} middle={s.TrayMiddleClick}");
+        Assert.Equal(TrayActions.None, s.TrayLeftClick);
+        Assert.Equal(TrayActions.None, s.TrayMiddleClick);
+    }
+
+    [Fact]
+    public void Tray_scroll_off_and_inverted_roundtrip()
+    {
+        new Settings(50, false, TrayScrollEnabled: false, ScrollInverted: true).Save(_path);
+        _out.WriteLine("saved json: " + File.ReadAllText(_path));
+        var s = Settings.Load(_path);
+        Assert.False(s.TrayScrollEnabled);
+        Assert.True(s.ScrollInverted);
+    }
+
     [Fact]
     public void All_fields_roundtrip()
     {
@@ -265,7 +320,9 @@ public class SettingsTests : IDisposable
             Percent: 73, Muted: true, RunAsAdmin: true,
             OsdStyle: "fluent", SkinName: "custom", OsdAnchor: "top-left",
             OsdOffsetX: 10, OsdOffsetY: 20,
-            HideDelaySeconds: 3.0, AnimationEnabled: false, AnimationMs: 300, StepPercent: 5);
+            HideDelaySeconds: 3.0, AnimationEnabled: false, AnimationMs: 300, StepPercent: 5,
+            TrayLeftClick: TrayActions.Settings, TrayMiddleClick: TrayActions.Equalizer,
+            TrayScrollEnabled: false, ScrollInverted: true);
         orig.Save(_path);
         var loaded = Settings.Load(_path);
         Assert.Equal(orig, loaded);

@@ -255,4 +255,34 @@ public class HudPlacementTests
         Assert.Equal(0, r.IntersectionArea(new HudRect(200, 200, 10, 10)));
         Assert.Equal(10 * 50, r.IntersectionArea(new HudRect(100, 0, 200, 200)));
     }
+
+    /// <summary>The point overload is what decides whether a wheel notch belongs to a HUD volume
+    /// widget. HUD widget windows are click-through in live mode, so WPF never sees the wheel over
+    /// one — the low-level hook hit-tests the widget's box itself, in the same physical pixels
+    /// <see cref="HudWidget"/> already stores.</summary>
+    [Fact]
+    public void Rect_contains_a_point_including_its_top_left_but_not_its_far_edges()
+    {
+        var r = new HudRect(10, 20, 100, 50); // covers x 10..109, y 20..69
+
+        Assert.True(r.Contains(10, 20));   // top-left corner is inside
+        Assert.True(r.Contains(109, 69));  // last pixel inside
+        Assert.True(r.Contains(60, 45));   // middle
+
+        // Right/Bottom are one past the last pixel — a point there belongs to the next window,
+        // or two adjacent widgets would both claim the same notch.
+        Assert.False(r.Contains(110, 45));
+        Assert.False(r.Contains(60, 70));
+        Assert.False(r.Contains(9, 45));
+        Assert.False(r.Contains(60, 19));
+    }
+
+    /// <summary>A widget with no window yet reports a zero box (GetWindowRect failed), and a
+    /// zero box must claim nothing — least of all the top-left pixel of the screen.</summary>
+    [Fact]
+    public void An_empty_rect_contains_no_point()
+    {
+        var r = new HudRect(0, 0, 0, 0);
+        Assert.False(r.Contains(0, 0));
+    }
 }

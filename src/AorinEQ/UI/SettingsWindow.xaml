@@ -290,6 +290,57 @@
                         </ui:CardControl.Header>
                     </ui:CardControl>
 
+                    <!-- TRAY ICON. Lives on the Volume page rather than a page of its own: every
+                         one of these settings changes how the icon adjusts the volume, which is
+                         what this page is about. The two combos are filled from TrayActions in
+                         code-behind, so an action added there appears here without touching this
+                         file — and can never appear under its raw persisted name. -->
+                    <ui:TextBlock Style="{StaticResource SectionHeading}" Text="Tray icon" />
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Click the tray icon" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="What a left click does. Right click always opens the menu." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="TrayLeftClickCombo" MinWidth="190"
+                                  SelectionChanged="OnTrayActionChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Middle-click the tray icon" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="What the mouse wheel button does when pressed on the icon." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="TrayMiddleClickCombo" MinWidth="190"
+                                  SelectionChanged="OnTrayActionChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Scroll to adjust volume" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Roll the wheel over the tray icon — or over a HUD volume widget — to change the volume, the way the Windows volume icon works. Hold Ctrl for 1% steps, Shift for 10%." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="TrayScrollBox"
+                                         Checked="OnTrayToggleChanged" Unchecked="OnTrayToggleChanged" />
+                    </ui:CardControl>
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Invert scroll direction" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Scroll down to raise the volume instead of lowering it." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="ScrollInvertedBox"
+                                         Checked="OnTrayToggleChanged" Unchecked="OnTrayToggleChanged" />
+                    </ui:CardControl>
+
                     <!-- Startup lives here rather than in a section of its own: the elevation
                          setting exists only so the volume KEYS keep working while an elevated game
                          has focus, which makes it a volume concern more than a general one. -->

@@ -37,6 +37,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private enum PreviewLayer { Empty, Full, Muted }
     private DragTarget _dragging = DragTarget.None;
     private SkinOsdWindow? _testOsd;
+    /// <summary>The preview OSD's wheel accumulator — see where it is wired for why the studio
+    /// keeps its own rather than sharing App's.</summary>
+    private readonly ScrollStep _previewScroll = new();
     private string? _testFolder;
     private readonly DispatcherTimer _emptyAnimTimer = new();
     private readonly DispatcherTimer _fullAnimTimer = new();
@@ -1067,6 +1070,16 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             _testOsd = new SkinOsdWindow(info);
             _testOsd.ApplyConfig(_currentSettings());
             _testOsd.PercentChangedByUser += p => FillSlider.Value = p; // studio loop: OSD -> slider
+            // The preview drives the designer's own slider rather than the machine's volume, so it
+            // runs the notch through its own accumulator instead of App's. Same rules — whole
+            // notches only, Ctrl/Shift steps, the user's scroll direction — so what the studio
+            // shows is what the real OSD will do.
+            _testOsd.VolumeScrolled += n =>
+            {
+                var s = _currentSettings();
+                int step = ScrollStep.StepFor(n.Ctrl, n.Shift, s.StepPercent);
+                FillSlider.Value += _previewScroll.Feed(n.RawDelta, step, s.ScrollInverted);
+            };
             _testOsd.ShowVolume((int)FillSlider.Value, MuteCheck.IsChecked == true, interactive: true);
             StatusText.Text = "Showing on desktop — click/drag/scroll it like the real OSD.";
         }

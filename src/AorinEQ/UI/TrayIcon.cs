@@ -32,11 +32,16 @@ public sealed class TrayIcon : IDisposable
     // NotifyIcon does not own its ContextMenuStrip, so the tray disposes it itself.
     private readonly ContextMenuStrip _menu;
     private Action? _balloonClickAction;
+    private string _leftClick = TrayActions.VolumeBar;
+    private string _middleClick = TrayActions.Mute;
+    // Screen position of the last mouse move the shell forwarded to the icon — see IsOverIcon.
+    private Point? _lastHoverPoint;
 
-    public event Action? OpenRequested;
-    public event Action? MuteToggleRequested;
-    public event Action? SettingsRequested;
-    public event Action? EqualizerRequested;
+    /// <summary>A bindable action was asked for, by <see cref="TrayActions"/> name. Both the
+    /// context menu and the mouse buttons come through here, so the app has one switch rather
+    /// than one event per action plus a parallel mapping for the buttons.</summary>
+    public event Action<string>? ActionRequested;
+
     public event Action? ExitRequested;
 
     /// <summary>An EQ preset was picked from the tray submenu, by name.</summary>
@@ -66,7 +71,7 @@ public sealed class TrayIcon : IDisposable
         ContextMenuStrip? menu = null;
         try
         {
-            _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => MuteToggleRequested?.Invoke());
+            _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => ActionRequested?.Invoke(TrayActions.Mute));
             _eqPresetMenu = new ToolStripMenuItem("EQ preset");
 
             // "Arrange widgets" rather than "Edit mode": the switch exists so the widgets can be
@@ -83,12 +88,15 @@ public sealed class TrayIcon : IDisposable
             _hudMenu = new ToolStripMenuItem("HUD widgets");
 
             menu = new ContextMenuStrip();
-            menu.Items.Add(new ToolStripMenuItem("Open volume slider", null, (_, _) => OpenRequested?.Invoke()));
+            menu.Items.Add(new ToolStripMenuItem("Open volume slider", null,
+                (_, _) => ActionRequested?.Invoke(TrayActions.VolumeBar)));
             menu.Items.Add(_muteItem);
-            menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null, (_, _) => EqualizerRequested?.Invoke()));
+            menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null,
+                (_, _) => ActionRequested?.Invoke(TrayActions.Equalizer)));
             menu.Items.Add(_eqPresetMenu);
             menu.Items.Add(_hudMenu);
-            menu.Items.Add(new ToolStripMenuItem("Settings…", null, (_, _) => SettingsRequested?.Invoke()));
+            menu.Items.Add(new ToolStripMenuItem("Settings…", null,
+                (_, _) => ActionRequested?.Invoke(TrayActions.Settings)));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
             menu.Opening += (_, _) => MenuOpening?.Invoke();
@@ -102,8 +110,21 @@ public sealed class TrayIcon : IDisposable
             };
             icon.MouseClick += (_, e) =>
             {
-                if (e.Button == MouseButtons.Left) OpenRequested?.Invoke();
+                // Right is the context menu, which NotifyIcon shows itself. There is deliberately
+                // no double-click binding: WinForms raises MouseClick before MouseDoubleClick, so
+                // giving the two different actions would mean delaying every single click by the
+                // double-click timeout — making the common action feel broken to serve a rare one.
+                var action = e.Button switch
+                {
+                    MouseButtons.Left => _leftClick,
+                    MouseButtons.Middle => _middleClick,
+                    _ => TrayActions.None,
+                };
+                if (action != TrayActions.None) ActionRequested?.Invoke(action);
             };
+            // The shell forwards mouse moves to an icon's owner even though it never forwards the
+            // wheel — which is exactly what makes IsOverIcon possible.
+            icon.MouseMove += (_, _) => _lastHoverPoint = Cursor.Position;
             // One handler for the lifetime of the icon; each balloon sets (or clears) the action so
             // a click on a stale balloon can never fire a newer balloon's action.
             icon.BalloonTipClicked += (_, _) => _balloonClickAction?.Invoke();
@@ -125,6 +146,38 @@ public sealed class TrayIcon : IDisposable
             _renderer.Dispose();
             throw;
         }
+    }
+
+    /// <summary>Which action each mouse button runs. Applied at startup and again whenever the
+    /// user changes it in Settings.</summary>
+    public void ApplyConfig(Settings s)
+    {
+        _leftClick = s.TrayLeftClick;
+        _middleClick = s.TrayMiddleClick;
+    }
+
+    /// <summary>Whether a screen point is over this icon — the gate the wheel hook asks before it
+    /// claims a notch.
+    ///
+    /// There is no clean way to ask the shell. <c>Shell_NotifyIconGetRect</c> would answer exactly,
+    /// but it needs the icon's window handle and id, which WinForms keeps private: reaching them
+    /// means reflecting into <see cref="NotifyIcon"/>'s internals, which change between .NET
+    /// releases and would fail silently on an upgrade — turning a supported API into a landmine.
+    ///
+    /// So the answer comes from the last mouse move the shell forwarded to us, which it only ever
+    /// does while the cursor is ON the icon. A point within one icon's width of that is over it;
+    /// the tolerance is the icon size itself, the tightest bound that can never reject a genuine
+    /// hover (the recorded point could be at one edge and the cursor at the other). It works the
+    /// same when the icon is in the overflow flyout, since the shell forwards moves there too.
+    ///
+    /// The known cost: leave the icon quickly and scroll within an icon's width of where you left,
+    /// and this still says yes. That range is the neighbouring icon, so the worst case is a notch
+    /// of our volume instead of nothing at all.</summary>
+    public bool IsOverIcon(int x, int y)
+    {
+        if (_lastHoverPoint is not { } p) return false; // never hovered: nothing to compare against
+        var size = SystemInformation.SmallIconSize;
+        return Math.Abs(x - p.X) <= size.Width && Math.Abs(y - p.Y) <= size.Height;
     }
 
     /// <summary>Volume state is visible three ways: the glyph itself (arc count, or a cross while

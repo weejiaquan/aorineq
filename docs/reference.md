@@ -56,6 +56,28 @@ Plug in headphones, get the level you last used on them; unplug, get the speaker
 Device switches update the tray silently — no OSD, matching Windows' own behaviour. Settings shows
 how many devices are remembered.
 
+### The tray icon
+
+Settings → Volume → **Tray icon**.
+
+**Scroll to adjust volume** (on by default) rolls the wheel over the tray icon to change the
+volume, the way you can over the Windows volume icon. Hold **Ctrl** for 1 % steps or **Shift** for
+10 %; without a modifier it moves by your configured step size, one step per wheel detent. It also
+works over a HUD volume widget, and **Invert scroll direction** flips it if you scroll the other
+way round.
+
+Windows does not offer this to third-party tray icons — the shell forwards clicks and mouse moves
+to an icon's owner but keeps wheel input for its own system icons, which is why the Windows volume
+icon can do it out of the box and nothing else can. AorinEQ gets there with a low-level mouse
+hook, installed only while the setting is on, that claims a wheel notch when the cursor is over its
+own icon and passes every other mouse message straight through.
+
+**Click** and **middle-click** are bindable: open the volume slider (the default, and what a left
+click has always done), open Settings, open the equalizer, mute/unmute, or do nothing. Right click
+always opens the menu. There is no double-click binding on purpose — Windows raises a single click
+before a double one, so having both would mean delaying every single click by the double-click
+timeout.
+
 ## Volume model
 
 `0% = mute (−120 dB)` · `1% = −50 dB` · `100% = 0 dB`, linear in dB (≈0.5 dB per %) in Equalizer

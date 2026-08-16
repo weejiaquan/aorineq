@@ -62,6 +62,9 @@
 * **`aorineq://` links** — one click installs a skin or applies an EQ preset from a web page,
   always behind a dialog that shows you what it is first.
 * **Auto-update** — checks GitHub Releases, verifies the SHA-256, swaps itself in place.
+* **A tray icon you can actually use** — scroll the wheel over it to change the volume the way you
+  can over the Windows one (Ctrl for 1 % steps, Shift for 10 %), middle-click to mute, and pick
+  what a left click does.
 * **Windows 11 Fluent UI** — Mica, rounded corners, follows your light/dark theme, and a tray
   icon drawn at runtime that tracks your volume.
 

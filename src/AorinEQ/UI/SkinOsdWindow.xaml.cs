@@ -6,6 +6,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AorinEQ.Core;
+using AorinEQ.Input;
 
 namespace AorinEQ.UI;
 
@@ -32,12 +33,13 @@ public partial class SkinOsdWindow : Window
     private TimeSpan _fadeDuration = TimeSpan.FromMilliseconds(150);
 
     private bool _dragging;
-    private int _lastPercent;
-
-    /// <summary>Percent step applied per wheel notch; kept in sync via ApplyConfig.</summary>
-    public int StepPercent { get; set; } = 2;
 
     public event Action<int>? PercentChangedByUser;
+
+    /// <summary>A raw wheel notch over an OPAQUE pixel of the skin. Raised rather than applied
+    /// here for the same reason <see cref="OsdWindow.VolumeScrolled"/> is: one accumulator and one
+    /// mute policy for every surface that scrolls.</summary>
+    public event Action<WheelNotch>? VolumeScrolled;
 
     public SkinOsdWindow(SkinInfo info)
     {
@@ -119,12 +121,10 @@ public partial class SkinOsdWindow : Window
         _animationEnabled = s.AnimationEnabled;
         _fadeDuration = TimeSpan.FromMilliseconds(s.AnimationMs);
         _hideTimer.Interval = TimeSpan.FromSeconds(s.HideDelaySeconds);
-        StepPercent = s.StepPercent;
     }
 
     public void ShowVolume(int percent, bool muted, bool interactive)
     {
-        _lastPercent = percent;
         _view.SetVolume(percent, muted);
 
         var wa = SystemParameters.WorkArea;
@@ -187,12 +187,17 @@ public partial class SkinOsdWindow : Window
         ReleaseMouseCapture();
     }
 
+    /// <summary>Per-pixel as ever — a notch over a transparent pixel belongs to whatever is behind
+    /// the window, not to us. What changed is what happens after: the notch goes up to the one
+    /// accumulator instead of being treated as a whole step here, which a high-resolution wheel
+    /// sends several of per detent.</summary>
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        var pos = e.GetPosition(this);
-        if (!IsOpaqueAt(pos)) return;
-        int next = Math.Clamp(_lastPercent + (e.Delta > 0 ? StepPercent : -StepPercent), 0, 100);
-        PercentChangedByUser?.Invoke(next);
+        if (!IsOpaqueAt(e.GetPosition(this))) return;
+        VolumeScrolled?.Invoke(new WheelNotch(
+            e.Delta,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)));
     }
 
     /// <summary>Stops the view's animation timers on the way out. A DispatcherTimer left running

@@ -19,6 +19,15 @@ public partial class App : System.Windows.Application
     private bool _ownsMutex;
     private EventWaitHandle? _showEvent;
     private KeyboardHook? _hook;
+    /// <summary>Installed only while <see cref="Settings.TrayScrollEnabled"/> is on — a
+    /// WH_MOUSE_LL hook sits in front of every mouse message on the machine, so the app does not
+    /// keep one for a feature the user has switched off. See <see cref="MouseWheelHook"/>.</summary>
+    private MouseWheelHook? _wheelHook;
+    /// <summary>THE app's wheel accumulator, shared by every surface that scrolls (the tray icon,
+    /// the OSD, the HUD volume widget). One instance, because a partial notch carried from one
+    /// surface belongs to the same physical wheel as the next message — and because the user is
+    /// only ever scrolling one of them at a time.</summary>
+    private readonly ScrollStep _scrollStep = new();
     private AppTheme? _appTheme;
     private ApoWriter? _writer;
     private EndpointVolume? _endpointVolume;
@@ -390,14 +399,11 @@ public partial class App : System.Windows.Application
 
             _osd = new OsdWindow();
             _osd.PercentChangedByUser += OnOsdPercentChanged;
+            _osd.VolumeScrolled += OnVolumeWheel;
 
             _tray = new TrayIcon();
-            // Opening the slider changes no state, so it only shows the OSD — a full Render here
-            // would pointlessly rewrite aorineq.txt and re-persist settings on every tray click.
-            _tray.OpenRequested += () => ShowOsd(interactive: true);
-            _tray.MuteToggleRequested += () => { ActiveState.ToggleMute(); Render(interactive: false); };
-            _tray.SettingsRequested += OpenSettings;
-            _tray.EqualizerRequested += OpenEqEditor;
+            _tray.ActionRequested += RunTrayAction;
+            _tray.ApplyConfig(settings);
             _tray.MenuOpening += RefreshTrayEqPresets;
             _tray.MenuOpening += RefreshTrayHudMenu;
             _tray.EqPresetSelected += OnTrayEqPresetSelected;
@@ -473,6 +479,11 @@ public partial class App : System.Windows.Application
             AdoptEndpointState();
         RenderEqConfig();
         _tray!.Update(ActiveState.Percent, ActiveState.Muted);
+
+        // Outside the fail-fast above, deliberately. A dead keyboard hook means the app has no
+        // purpose; a dead wheel hook means one convenience is missing, and killing the app over
+        // it would be the worse bug. ApplyTrayScroll warns and carries on.
+        ApplyTrayScroll(_settings.TrayScrollEnabled);
 
         SetupEapoHealthMonitor();
         RefreshActiveDeviceName();
@@ -836,6 +847,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.CheckUpdatesRequested += () => _ = RunUpdateCheckAsync(interactive: true);
             _settingsWindow.VolumeModeChanged += OnVolumeModeChanged;
             _settingsWindow.OsdSettingsChanged += OnOsdSettingsChanged;
+            _settingsWindow.TrayBehaviourChanged += OnTrayBehaviourChanged;
             _settingsWindow.SkinDesignerRequested += OpenSkinDesigner;
             _settingsWindow.SetupGuideRequested += OpenOnboarding;
             _settingsWindow.EqualizerRequested += OpenEqEditor;
@@ -2116,6 +2128,93 @@ public partial class App : System.Windows.Application
         SaveSettings();
     }
 
+    /// <summary>Runs one <see cref="TrayActions"/> binding. Every tray click and every tray menu
+    /// item that isn't Exit lands here, so the menu and the mouse buttons can never drift apart.
+    ///
+    /// Opening a window changes no state, so those branches deliberately do NOT call
+    /// <see cref="Render"/> — that would rewrite aorineq.txt and re-persist settings on every
+    /// click of the tray icon.</summary>
+    private void RunTrayAction(string action)
+    {
+        switch (action)
+        {
+            case TrayActions.VolumeBar:
+                ShowOsd(interactive: true);
+                break;
+            case TrayActions.Settings:
+                OpenSettings();
+                break;
+            case TrayActions.Equalizer:
+                OpenEqEditor();
+                break;
+            case TrayActions.Mute:
+                ActiveState.ToggleMute();
+                Render(interactive: false);
+                break;
+            case TrayActions.None:
+                break;
+        }
+    }
+
+    /// <summary>The one place a mouse-driven volume change lands — the tray wheel, the OSD wheel
+    /// and the HUD widget's wheel all come through here, so they cannot disagree about mute or
+    /// about clamping.
+    ///
+    /// Mute follows the volume KEYS exactly: <see cref="VolumeState.Up"/> unmutes and
+    /// <see cref="VolumeState.Down"/> does not, which is also how the Windows flyout behaves when
+    /// you move its slider. <see cref="VolumeState.SetPercent"/> unmutes on any positive result,
+    /// so a downward move has to put the mute back.</summary>
+    private void ApplyVolumeDelta(int deltaPercent)
+    {
+        if (deltaPercent == 0) return;
+        bool wasMuted = ActiveState.Muted;
+        ActiveState.SetPercent(ActiveState.Percent + deltaPercent);
+        if (wasMuted && deltaPercent < 0) ActiveState.SetMuted(true);
+        Render(interactive: false);
+    }
+
+    /// <summary>One wheel notch that a surface has decided belongs to the volume. Resolves the
+    /// step from the modifiers held at the time, feeds the accumulator, and applies whatever whole
+    /// notches came out (usually none, on a high-resolution wheel).</summary>
+    private void OnVolumeWheel(WheelNotch notch)
+    {
+        int step = ScrollStep.StepFor(notch.Ctrl, notch.Shift, _settings.StepPercent);
+        ApplyVolumeDelta(_scrollStep.Feed(notch.RawDelta, step, _settings.ScrollInverted));
+    }
+
+    /// <summary>Installs or removes the wheel hook to match the setting. Idempotent, because it is
+    /// called at startup AND on every change of the tray settings — turning any other tray option
+    /// on and off must not stack up hooks.
+    ///
+    /// A failed install is reported and then forgotten: the hook is a convenience, and the
+    /// alternative (the fail-fast dialog the keyboard hook gets) would take the whole app down
+    /// over a feature that isn't why anyone installed it.</summary>
+    private void ApplyTrayScroll(bool enabled)
+    {
+        if (enabled == (_wheelHook is not null)) return;
+        if (!enabled)
+        {
+            _wheelHook!.Dispose();
+            _wheelHook = null;
+            return;
+        }
+        try
+        {
+            // The hit-test is asked synchronously, on this thread — see MouseWheelHook. Both
+            // surfaces the shell will not give us wheel input for: the tray icon (Explorer keeps
+            // the wheel for its own icons) and a HUD volume widget (click-through, so WPF sees no
+            // mouse input at all). The OSD needs neither, being an ordinary window of our own.
+            _wheelHook = new MouseWheelHook((x, y) =>
+                (_tray?.IsOverIcon(x, y) ?? false) || (_hud?.IsOverVolumeWidget(x, y) ?? false));
+            _wheelHook.Scrolled += OnVolumeWheel;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            _wheelHook = null;
+            _tray?.ShowWarning($"Scrolling the tray icon is unavailable: {ex.Message}");
+        }
+    }
+
     /// <summary>Creates the Windows endpoint-volume backend (idempotent) and marshals its
     /// external-change events onto the dispatcher, same pattern as KeyboardHook.</summary>
     private void SetupEndpointVolume()
@@ -2591,6 +2690,26 @@ public partial class App : System.Windows.Application
         ShowOsd(interactive: false);
     }
 
+    /// <summary>The tray controls changed. Merged the same way OSD settings are — a `with` over
+    /// the persisted record, never a fresh one — so a volume change landing while the Settings
+    /// window is open isn't clobbered by this snapshot.
+    ///
+    /// No OSD is shown: unlike a step-size change there is nothing here whose effect the user
+    /// could see in one.</summary>
+    private void OnTrayBehaviourChanged(TrayBehaviour t)
+    {
+        _settings = _settings with
+        {
+            TrayLeftClick = t.LeftClick,
+            TrayMiddleClick = t.MiddleClick,
+            TrayScrollEnabled = t.ScrollEnabled,
+            ScrollInverted = t.ScrollInverted,
+        };
+        _tray?.ApplyConfig(_settings);
+        ApplyTrayScroll(_settings.TrayScrollEnabled);
+        SaveSettings();
+    }
+
     /// <summary>
     /// Applies OSD style/position/behavior settings and decides which window renders volume
     /// changes: the standard <see cref="OsdWindow"/> (always kept up to date via ApplyConfig), or
@@ -2644,6 +2763,7 @@ public partial class App : System.Windows.Application
                 _skinOsd?.Close(); // real teardown, unlike OsdWindow's Close-cancels-and-Hides pattern
                 _skinOsd = next;
                 _skinOsd.PercentChangedByUser += OnOsdPercentChanged;
+                _skinOsd.VolumeScrolled += OnVolumeWheel;
                 _loadedSkinFolder = info.Folder;
                 _loadedSkinStamp = stamp;
             }
@@ -2882,6 +3002,7 @@ public partial class App : System.Windows.Application
     protected override void OnExit(ExitEventArgs e)
     {
         _hook?.Dispose();
+        _wheelHook?.Dispose();
         // The health monitor goes FIRST, and for the reason documented on SetupEapoHealthMonitor:
         // its two SystemEvents handlers run on a system thread, and _healthEventsSubscribed is
         // what stops one already in flight from posting to a dispatcher that is draining. Clearing

@@ -62,6 +62,10 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// snapshot into its persisted Settings — see <see cref="OsdSettings"/>'s remarks.</summary>
     public event Action<OsdSettings>? OsdSettingsChanged;
 
+    /// <summary>Any of the four tray controls changed; all four are sent together, the same way
+    /// the OSD controls are, so App merges one snapshot rather than four separate edits.</summary>
+    public event Action<TrayBehaviour>? TrayBehaviourChanged;
+
     /// <summary>Raised when the user clicks "Skin designer…" — App owns the designer window.</summary>
     public event Action? SkinDesignerRequested;
 
@@ -117,7 +121,11 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
+        PopulateTrayActions(TrayLeftClickCombo);
+        PopulateTrayActions(TrayMiddleClickCombo);
+
         ApplyOsdSettings(settings);
+        ApplyTrayBehaviour(settings);
         ApplyVolumeMode(settings);
         ApplyDeviceVolumes(settings);
         PopulateSkins(settings.SkinName);
@@ -449,6 +457,30 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _initializing = false;
     }
 
+    /// <summary>Fills the two click combos from <see cref="TrayActions"/>. Called once, from the
+    /// constructor: the vocabulary is fixed at build time, unlike the skin list.
+    ///
+    /// The Tag is the persisted name and the label comes from TrayActions, so the two can never
+    /// drift and an action added later needs no change here.</summary>
+    private static void PopulateTrayActions(System.Windows.Controls.ComboBox combo)
+    {
+        foreach (var action in TrayActions.All)
+            combo.Items.Add(new ComboBoxItem { Content = TrayActions.DisplayName(action), Tag = action });
+    }
+
+    /// <summary>Populates every tray control. Safe to call while _initializing is true (the guard
+    /// is only checked when raising TrayBehaviourChanged).</summary>
+    private void ApplyTrayBehaviour(Settings settings)
+    {
+        SelectByTag(TrayLeftClickCombo, settings.TrayLeftClick);
+        SelectByTag(TrayMiddleClickCombo, settings.TrayMiddleClick);
+        TrayScrollBox.IsChecked = settings.TrayScrollEnabled;
+        ScrollInvertedBox.IsChecked = settings.ScrollInverted;
+        // A direction for a wheel nobody is reading is a setting that does nothing, so it follows
+        // the switch above it.
+        ScrollInvertedBox.IsEnabled = settings.TrayScrollEnabled;
+    }
+
     /// <summary>Syncs the Volume control radios. Safe while _initializing (the guard is only
     /// checked when raising VolumeModeChanged).</summary>
     private void ApplyVolumeMode(Settings settings)
@@ -722,6 +754,26 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private void OnStepChanged(object sender, SelectionChangedEventArgs e) => RaiseOsdSettingsChanged();
+
+    private void OnTrayActionChanged(object sender, SelectionChangedEventArgs e) => RaiseTrayBehaviourChanged();
+
+    private void OnTrayToggleChanged(object sender, RoutedEventArgs e) => RaiseTrayBehaviourChanged();
+
+    /// <summary>All four tray controls raise one snapshot, the same way the OSD controls do. The
+    /// invert switch's enabled state is kept in step here rather than only in
+    /// <see cref="ApplyTrayBehaviour"/>, so it follows the scroll switch immediately instead of
+    /// waiting for the window to be reopened.</summary>
+    private void RaiseTrayBehaviourChanged()
+    {
+        if (_initializing) return;
+        bool scroll = TrayScrollBox.IsChecked == true;
+        ScrollInvertedBox.IsEnabled = scroll;
+        TrayBehaviourChanged?.Invoke(new TrayBehaviour(
+            LeftClick: SelectedTag(TrayLeftClickCombo) ?? TrayActions.VolumeBar,
+            MiddleClick: SelectedTag(TrayMiddleClickCombo) ?? TrayActions.Mute,
+            ScrollEnabled: scroll,
+            ScrollInverted: ScrollInvertedBox.IsChecked == true));
+    }
 
     private void RaiseOsdSettingsChanged()
     {

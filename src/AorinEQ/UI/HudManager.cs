@@ -315,6 +315,21 @@ internal sealed class HudManager : IDisposable
         LayoutChanged?.Invoke(_store.Layout);
     }
 
+    /// <summary>Whether a visible volume widget covers this SCREEN PIXEL — the gate the wheel hook
+    /// asks before it gives a notch to the volume.
+    ///
+    /// The hook has to do this hit-test, rather than the widget handling MouseWheel itself,
+    /// because a widget is click-through (WS_EX_TRANSPARENT) in live mode: WPF never sees any
+    /// mouse input over one, and making it hit-testable would stop clicks reaching the game
+    /// underneath, which is the entire point of a HUD. Going through the hook keeps the widget
+    /// transparent to everything except the wheel.
+    ///
+    /// Unlike the tray's <c>IsOverIcon</c> this is exact — <see cref="HudWidgetWindow.Box"/> comes
+    /// from GetWindowRect, in the same physical pixels the hook reports.</summary>
+    public bool IsOverVolumeWidget(int x, int y) =>
+        _windows.Values.Any(w =>
+            w.Widget.Type == HudWidgetTypes.Volume && w.IsVisible && w.Box.Contains(x, y));
+
     public void SetVisible(string id, bool visible)
     {
         if (_store.Layout.Find(id) is not { } widget) return;

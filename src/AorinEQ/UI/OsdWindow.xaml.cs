@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using AorinEQ.Core;
+using AorinEQ.Input;
 
 namespace AorinEQ.UI;
 
@@ -33,10 +34,6 @@ public partial class OsdWindow : Window
     private bool _animationEnabled = true;
     private TimeSpan _fadeDuration = TimeSpan.FromMilliseconds(150);
 
-    /// <summary>Percent step applied per wheel notch; kept in sync with VolumeState.StepPercent
-    /// via ApplyConfig so the OSD's wheel handling and the global hotkeys agree.</summary>
-    public int StepPercent { get; set; } = 2;
-
     // Cache key for the fluent style's theme-dependent brushes: ApplyFluentTheme runs on every
     // ShowVolume while fluent is active, but the brushes only need rebuilding when the system
     // theme or accent color actually changed — not on every volume keypress.
@@ -44,6 +41,12 @@ public partial class OsdWindow : Window
     private System.Windows.Media.Color? _fluentAccent;
 
     public event Action<int>? PercentChangedByUser;
+
+    /// <summary>A raw wheel notch over the OSD. Raised rather than applied here so every surface
+    /// that scrolls — this window, the skin OSD, the tray icon, the HUD volume widget — goes
+    /// through <c>App</c>'s one accumulator and one mute policy, instead of each re-deciding what
+    /// a notch means.</summary>
+    public event Action<WheelNotch>? VolumeScrolled;
 
     public OsdWindow()
     {
@@ -93,7 +96,6 @@ public partial class OsdWindow : Window
         _animationEnabled = s.AnimationEnabled;
         _fadeDuration = TimeSpan.FromMilliseconds(s.AnimationMs);
         _hideTimer.Interval = TimeSpan.FromSeconds(s.HideDelaySeconds);
-        StepPercent = s.StepPercent;
 
         ApplyStyle();
     }
@@ -185,20 +187,16 @@ public partial class OsdWindow : Window
         PercentChangedByUser?.Invoke((int)Math.Round(e.NewValue));
     }
 
-    private void OnMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        // Not marked as updating-from-code: the change flows through ValueChanged like any
-        // other user edit, and the slider itself clamps to its 0..100 range. Only the slider
-        // for the currently active style is nudged, so the other (collapsed) ones don't also
-        // fire PercentChangedByUser for the same wheel notch.
-        var slider = _style switch
-        {
-            OsdStyles.MinimalBar => MinimalSlider,
-            OsdStyles.Fluent => FluentSlider,
-            _ => VolumeSlider,
-        };
-        slider.Value += e.Delta > 0 ? StepPercent : -StepPercent;
-    }
+    /// <summary>Hands the notch up rather than nudging a slider. Nudging the slider treated every
+    /// wheel MESSAGE as a whole notch, which a high-resolution wheel (any precision touchpad, and
+    /// plenty of mice) sends several of per detent — one flick used to walk the volume to 100. It
+    /// also moved whichever slider was on screen instead of the volume state itself, so a stale
+    /// slider could undo a change that had landed elsewhere.</summary>
+    private void OnMouseWheel(object sender, MouseWheelEventArgs e) =>
+        VolumeScrolled?.Invoke(new WheelNotch(
+            e.Delta,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)));
 
     /// <summary>Re-reads the system theme/accent (cheap registry reads; no watcher — this runs
     /// on every <see cref="ShowVolume"/> while the fluent style is active) and repaints the

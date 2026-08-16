@@ -41,7 +41,11 @@ public sealed record Settings(
     Dictionary<string, DeviceVolumeSetting>? DeviceVolumes = null,
     Dictionary<string, EqScopeSetting>? DeviceEq = null,
     EqScopeSetting? GlobalEq = null,
-    string EqEditorMode = EqEditorModes.Unset)
+    string EqEditorMode = EqEditorModes.Unset,
+    string TrayLeftClick = TrayActions.VolumeBar,
+    string TrayMiddleClick = TrayActions.Mute,
+    bool TrayScrollEnabled = true,
+    bool ScrollInverted = false)
 {
     public static Settings Default { get; } = new(50, false);
 
@@ -78,6 +82,11 @@ public sealed record Settings(
             // "" is meaningful here (never chosen), so an unknown value normalizes to it rather
             // than to a fixed face — EqEditorModes.Resolve then picks from the user's own chains.
             EqEditorMode = EqEditorModes.Normalize(s.EqEditorMode),
+            // Each button falls back to its OWN default, not a shared one: left-click has always
+            // opened the volume bar and must keep doing so for everyone upgrading into this
+            // setting, while the middle button is new and mutes.
+            TrayLeftClick = TrayActions.Normalize(s.TrayLeftClick, TrayActions.VolumeBar),
+            TrayMiddleClick = TrayActions.Normalize(s.TrayMiddleClick, TrayActions.Mute),
             DeviceVolumes = s.DeviceVolumes?
                 .Where(kv => !string.IsNullOrEmpty(kv.Key) && kv.Value is not null)
                 .ToDictionary(kv => kv.Key,
