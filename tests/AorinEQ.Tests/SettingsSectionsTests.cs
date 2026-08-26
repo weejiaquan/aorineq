@@ -21,8 +21,8 @@ public class SettingsSectionsTests
             new[]
             {
                 SettingsSections.Volume, SettingsSections.Osd, SettingsSections.Skins,
-                SettingsSections.Equalizer, SettingsSections.Hud, SettingsSections.Updates,
-                SettingsSections.About,
+                SettingsSections.Equalizer, SettingsSections.AirPlay, SettingsSections.Hud,
+                SettingsSections.Updates, SettingsSections.About,
             },
             SettingsSections.All);
     }
