@@ -20,6 +20,9 @@ public sealed class LoopbackCapture : IDisposable
     private const int ShareModeShared = 0;                 // AUDCLNT_SHAREMODE_SHARED
     private const int StreamFlagsLoopback = 0x00020000;    // AUDCLNT_STREAMFLAGS_LOOPBACK
     private const int StreamFlagsEventCallback = 0x00040000;
+    // AUTOCONVERTPCM has the sign bit set; unchecked so it fits the int the interop uses.
+    private const int StreamFlagsAutoConvertPcm = unchecked((int)0x80000000);
+    private const int StreamFlagsSrcDefaultQuality = 0x08000000;
     private const long BufferDuration100ns = 2_000_000;    // 200 ms device buffer
     private const uint BufferFlagsSilent = 0x2;            // AUDCLNT_BUFFERFLAGS_SILENT
 
@@ -33,17 +36,38 @@ public sealed class LoopbackCapture : IDisposable
     private EventWaitHandle? _event;
     private volatile bool _running;
     private bool _disposed;
+    private string? _endpointId;
+    private int _requestedRate;
 
     /// <summary>Mix-format sample rate while capturing, 0 when stopped.</summary>
     public int SampleRate { get; private set; }
+
+    /// <summary>The endpoint this capture was asked to attach to, or null for "whatever is
+    /// default at Start time". Remembered so <see cref="Restart"/> re-attaches to the same
+    /// place — a stream following a chosen device must not silently migrate on a default-device
+    /// change the way the visualizers deliberately do.</summary>
+    public string? EndpointId
+    {
+        get { lock (_lock) return _endpointId; }
+    }
 
     /// <summary>One captured block as (left, right) float samples, raised on the capture
     /// thread. Mono endpoints duplicate the channel; silent packets arrive as zeros.</summary>
     public event Action<float[], float[]>? SamplesAvailable;
 
-    /// <summary>Attaches to the CURRENT default render endpoint and starts capturing.
-    /// False (with everything released) when no endpoint is available or init fails.</summary>
-    public bool Start()
+    /// <summary>Attaches and starts capturing. False (with everything released) when the
+    /// endpoint is unavailable or init fails.
+    ///
+    /// <paramref name="endpointId"/> null keeps the original behaviour — the CURRENT default
+    /// render endpoint — which is what the visualizers want. Naming an endpoint pins the
+    /// capture to it regardless of which device Windows considers default; that is what an
+    /// AirPlay stream needs, since its source is a deliberate choice rather than "whatever you
+    /// are listening to".
+    ///
+    /// <paramref name="requestedSampleRate"/> non-zero asks the audio engine to convert to that
+    /// rate (float32 stereo) instead of handing over the raw mix format. RAOP needs 44100 and
+    /// this is how you get it without writing a resampler.</summary>
+    public bool Start(string? endpointId = null, int requestedSampleRate = 0)
     {
         lock (_lock)
         {
@@ -51,6 +75,8 @@ public sealed class LoopbackCapture : IDisposable
                 return false;
             if (_running)
                 return true;
+            _endpointId = endpointId;
+            _requestedRate = requestedSampleRate;
             try
             {
                 return StartLocked();
@@ -68,11 +94,19 @@ public sealed class LoopbackCapture : IDisposable
         }
     }
 
-    /// <summary>Full teardown then a fresh attach — the default-device-change path.</summary>
+    /// <summary>Full teardown then a fresh attach — the default-device-change path. Re-attaches
+    /// with the SAME arguments the last <see cref="Start"/> used.</summary>
     public bool Restart()
     {
+        string? endpointId;
+        int rate;
+        lock (_lock)
+        {
+            endpointId = _endpointId;
+            rate = _requestedRate;
+        }
         Stop();
-        return Start();
+        return Start(endpointId, rate);
     }
 
     public void Stop()
@@ -106,9 +140,12 @@ public sealed class LoopbackCapture : IDisposable
         var enumerator = (AudioEndpoint.IMMDeviceEnumerator)new AudioEndpoint.MMDeviceEnumerator();
         try
         {
-            if (enumerator.GetDefaultAudioEndpoint(
-                    AudioEndpoint.EDataFlow.Render, AudioEndpoint.ERole.Multimedia, out var device) < 0
-                || device is null)
+            AudioEndpoint.IMMDevice? device;
+            int hr = _endpointId is { Length: > 0 } id
+                ? enumerator.GetDevice(id, out device)
+                : enumerator.GetDefaultAudioEndpoint(
+                    AudioEndpoint.EDataFlow.Render, AudioEndpoint.ERole.Multimedia, out device);
+            if (hr < 0 || device is null)
                 return false;
             try
             {
@@ -138,18 +175,30 @@ public sealed class LoopbackCapture : IDisposable
         bool isFloat;
         try
         {
-            if (ParseMixFormat(formatPtr) is not { } format)
+            // Ask the engine to resample for us when a rate was requested. If it refuses, fall
+            // back to the mix format rather than failing the whole capture: the caller sees the
+            // rate it actually got in SampleRate and can convert itself.
+            if (_requestedRate > 0
+                && TryInitializeConverted(_requestedRate, out sampleRate, out channels, out bits,
+                    out isFloat))
             {
-                StopLocked();
-                return false;
+                // initialized at the requested rate
             }
-            (sampleRate, channels, bits, isFloat) = format;
-            var session = Guid.Empty;
-            if (_client.Initialize(ShareModeShared, StreamFlagsLoopback | StreamFlagsEventCallback,
-                    BufferDuration100ns, 0, formatPtr, ref session) < 0)
+            else
             {
-                StopLocked();
-                return false;
+                if (ParseMixFormat(formatPtr) is not { } format)
+                {
+                    StopLocked();
+                    return false;
+                }
+                (sampleRate, channels, bits, isFloat) = format;
+                var session = Guid.Empty;
+                if (_client.Initialize(ShareModeShared, StreamFlagsLoopback | StreamFlagsEventCallback,
+                        BufferDuration100ns, 0, formatPtr, ref session) < 0)
+                {
+                    StopLocked();
+                    return false;
+                }
             }
         }
         finally
@@ -189,6 +238,50 @@ public sealed class LoopbackCapture : IDisposable
         _thread = thread;
         thread.Start();
         return true;
+    }
+
+    /// <summary>Initializes the client at <paramref name="rate"/> in float32 stereo, letting the
+    /// audio engine convert from the device's mix format.
+    ///
+    /// This is what spares the sender a resampler. AUTOCONVERTPCM is documented for shared-mode
+    /// streams and loopback is one, but drivers vary, so a refusal here is not fatal — the
+    /// caller falls back to the mix format and converts itself.</summary>
+    private bool TryInitializeConverted(int rate, out int sampleRate, out int channels,
+        out int bits, out bool isFloat)
+    {
+        sampleRate = rate;
+        channels = 2;
+        bits = 32;
+        isFloat = true;
+
+        const int waveFormatExBytes = 18;
+        var format = Marshal.AllocCoTaskMem(waveFormatExBytes);
+        try
+        {
+            const short formatIeeeFloat = 3;
+            short blockAlign = (short)(channels * (bits / 8));
+            Marshal.WriteInt16(format, 0, formatIeeeFloat);
+            Marshal.WriteInt16(format, 2, (short)channels);
+            Marshal.WriteInt32(format, 4, rate);
+            Marshal.WriteInt32(format, 8, rate * blockAlign);   // nAvgBytesPerSec
+            Marshal.WriteInt16(format, 12, blockAlign);
+            Marshal.WriteInt16(format, 14, (short)bits);
+            Marshal.WriteInt16(format, 16, 0);                  // cbSize
+
+            var session = Guid.Empty;
+            int flags = StreamFlagsLoopback | StreamFlagsEventCallback
+                      | StreamFlagsAutoConvertPcm | StreamFlagsSrcDefaultQuality;
+            return _client!.Initialize(ShareModeShared, flags, BufferDuration100ns, 0,
+                format, ref session) >= 0;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(format);
+        }
     }
 
     /// <summary>Caller must hold <see cref="_lock"/> with the capture thread already gone (or
