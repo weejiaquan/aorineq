@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Windows.Threading;
 using AorinEQ.Core;
+using AorinEQ.Core.Raop;
 using Microsoft.Win32;
 
 namespace AorinEQ.UI;
@@ -27,6 +28,10 @@ public sealed class TrayIcon : IDisposable
     private readonly ToolStripMenuItem _muteItem;
     private readonly ToolStripMenuItem _eqPresetMenu;
     private readonly ToolStripMenuItem _hudMenu;
+    private readonly ToolStripMenuItem _airPlayMenu;
+    private readonly ToolStripMenuItem _airPlayRefreshItem;
+    private readonly ToolStripMenuItem _airPlayDisconnectItem;
+    private readonly Dictionary<ToolStripMenuItem, string> _airPlayItemIds = new();
     private readonly ToolStripMenuItem _hudEditItem;
     private readonly ToolStripMenuItem _hudAddMenu;
     // NotifyIcon does not own its ContextMenuStrip, so the tray disposes it itself.
@@ -60,6 +65,15 @@ public sealed class TrayIcon : IDisposable
     /// submenu here so it always shows the current preset files and active selection.</summary>
     public event Action? MenuOpening;
 
+    /// <summary>A discovered AirPlay receiver was chosen from the tray — its device id.</summary>
+    public event Action<string>? AirPlayDeviceChosen;
+
+    public event Action? AirPlayDisconnectRequested;
+
+    /// <summary>The user asked the tray to rescan. Discovery takes a few seconds, so it is never
+    /// run just because the menu opened.</summary>
+    public event Action? AirPlayRefreshRequested;
+
     /// <summary>Construction takes native resources — the renderer's first icon handle, then the
     /// shell's notification-area entry — and creating the NotifyIcon can fail (Win32Exception if
     /// the shell isn't accepting icons). Everything is therefore unwound on the way out, so a
@@ -87,6 +101,14 @@ public sealed class TrayIcon : IDisposable
             }
             _hudMenu = new ToolStripMenuItem("HUD widgets");
 
+            _airPlayRefreshItem = new ToolStripMenuItem("Search for receivers", null,
+                (_, _) => AirPlayRefreshRequested?.Invoke());
+            _airPlayDisconnectItem = new ToolStripMenuItem("Disconnect", null,
+                (_, _) => AirPlayDisconnectRequested?.Invoke()) { Visible = false };
+            _airPlayMenu = new ToolStripMenuItem("AirPlay");
+            _airPlayMenu.DropDownItems.Add(_airPlayRefreshItem);
+            _airPlayMenu.DropDownItems.Add(_airPlayDisconnectItem);
+
             menu = new ContextMenuStrip();
             menu.Items.Add(new ToolStripMenuItem("Open volume slider", null,
                 (_, _) => ActionRequested?.Invoke(TrayActions.VolumeBar)));
@@ -94,6 +116,7 @@ public sealed class TrayIcon : IDisposable
             menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null,
                 (_, _) => ActionRequested?.Invoke(TrayActions.Equalizer)));
             menu.Items.Add(_eqPresetMenu);
+            menu.Items.Add(_airPlayMenu);
             menu.Items.Add(_hudMenu);
             menu.Items.Add(new ToolStripMenuItem("Settings…", null,
                 (_, _) => ActionRequested?.Invoke(TrayActions.Settings)));
@@ -259,6 +282,61 @@ public sealed class TrayIcon : IDisposable
             item.Click += (_, _) => EqPresetSelected?.Invoke(chosen);
             _eqPresetMenu.DropDownItems.Add(item);
         }
+    }
+
+    /// <summary>Rebuilds the AirPlay submenu: one checkable item per discovered receiver, the
+    /// connected one checked, above the persistent Search and Disconnect items.
+    ///
+    /// Rebuilt on demand rather than on every menu open, unlike the EQ presets: discovery costs
+    /// seconds of listening on the network and must never be triggered just because somebody
+    /// right-clicked the tray.</summary>
+    public void SetAirPlayDevices(IReadOnlyList<AirPlayDevice> devices, string? connectedId)
+    {
+        // DropDownItems.Clear() only unparents; discarded items are disposed after the Clear,
+        // never before — an item is still owned by the collection until it is removed. The two
+        // items this class owns for the tray's whole life are kept.
+        var discarded = _airPlayMenu.DropDownItems.Cast<ToolStripItem>()
+            .Where(i => !ReferenceEquals(i, _airPlayRefreshItem)
+                     && !ReferenceEquals(i, _airPlayDisconnectItem))
+            .ToArray();
+        _airPlayMenu.DropDownItems.Clear();
+        foreach (var item in discarded) item.Dispose();
+        _airPlayItemIds.Clear();
+
+        foreach (var device in devices)
+        {
+            var item = new ToolStripMenuItem(device.DisplayName)
+            {
+                Checked = device.Id == connectedId,
+            };
+            string chosen = device.Id;
+            item.Click += (_, _) => AirPlayDeviceChosen?.Invoke(chosen);
+            _airPlayMenu.DropDownItems.Add(item);
+            // The menu shows room names; identity is the mDNS instance name. Kept side by side
+            // so the tick can be moved later without matching on display text.
+            _airPlayItemIds[item] = device.Id;
+        }
+
+        if (devices.Count > 0)
+            _airPlayMenu.DropDownItems.Add(new ToolStripSeparator());
+        _airPlayMenu.DropDownItems.Add(_airPlayRefreshItem);
+        _airPlayMenu.DropDownItems.Add(_airPlayDisconnectItem);
+    }
+
+    /// <summary>Shows or hides Disconnect and moves the tick to whichever receiver is live.</summary>
+    public void SetAirPlayStreaming(bool streaming, string? connectedId)
+    {
+        _airPlayDisconnectItem.Visible = streaming;
+        foreach (var item in _airPlayMenu.DropDownItems.OfType<ToolStripMenuItem>())
+        {
+            if (ReferenceEquals(item, _airPlayRefreshItem)
+                || ReferenceEquals(item, _airPlayDisconnectItem)) continue;
+            item.Checked = false;
+        }
+        if (!streaming || connectedId is null) return;
+
+        foreach (var (item, id) in _airPlayItemIds)
+            if (id == connectedId) item.Checked = true;
     }
 
     /// <summary>Rebuilds the HUD submenu: the arrange switch, one checkable item per widget the

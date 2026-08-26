@@ -128,6 +128,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ApplyTrayBehaviour(settings);
         ApplyVolumeMode(settings);
         ApplyDeviceVolumes(settings);
+        ApplyAirPlay(settings);
         PopulateSkins(settings.SkinName);
         SetEapoHealth(health, settings.VolumeMode, EapoDependency.Applies(settings));
 
@@ -150,6 +151,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             (SettingsSections.Osd, SectionOsd),
             (SettingsSections.Skins, SectionSkins),
             (SettingsSections.Equalizer, SectionEqualizer),
+            (SettingsSections.AirPlay, SectionAirPlay),
             (SettingsSections.Hud, SectionHud),
             (SettingsSections.Updates, SectionUpdates),
             (SettingsSections.About, SectionAbout),
@@ -210,6 +212,18 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         var item = NavItemFor(section);
         foreach (var other in NavItems()) other.IsActive = ReferenceEquals(other, item);
 
+        // The AirPlay page shows a live session; nothing else here polls anything, so the timer
+        // only runs while that page is the one being looked at.
+        if (section == SettingsSections.AirPlay)
+        {
+            StartAirPlayPolling();
+            if (AirPlayDeviceCombo.Items.Count == 0) OnAirPlayRefresh(this, new RoutedEventArgs());
+        }
+        else
+        {
+            StopAirPlayPolling();
+        }
+
         if (focusPrimary) FocusPrimaryControl(section);
     }
 
@@ -236,7 +250,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private IEnumerable<Wpf.Ui.Controls.NavigationViewItem> NavItems() =>
-        new[] { NavVolume, NavOsd, NavSkins, NavEqualizer, NavHud, NavUpdates, NavAbout };
+        new[] { NavVolume, NavOsd, NavSkins, NavEqualizer, NavAirPlay, NavHud, NavUpdates, NavAbout };
 
     private Wpf.Ui.Controls.NavigationViewItem? NavItemFor(string section) =>
         NavItems().FirstOrDefault(i => i.TargetPageTag == section);

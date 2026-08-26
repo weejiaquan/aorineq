@@ -322,7 +322,12 @@ public class SettingsTests : IDisposable
             OsdOffsetX: 10, OsdOffsetY: 20,
             HideDelaySeconds: 3.0, AnimationEnabled: false, AnimationMs: 300, StepPercent: 5,
             TrayLeftClick: TrayActions.Settings, TrayMiddleClick: TrayActions.Equalizer,
-            TrayScrollEnabled: false, ScrollInverted: true);
+            TrayScrollEnabled: false, ScrollInverted: true,
+            // Set explicitly because Normalize materialises the default for a file that has no
+            // AirPlay block — deliberately, so the UI never has to null-guard it. A test named
+            // "all fields" must therefore name this one too.
+            AirPlay: new AirPlaySetting(true, "Bedroom", "BE4DBCD7755B@Bedroom", "",
+                AirPlayModes.Buffered, 1500, 55, false));
         orig.Save(_path);
         var loaded = Settings.Load(_path);
         Assert.Equal(orig, loaded);

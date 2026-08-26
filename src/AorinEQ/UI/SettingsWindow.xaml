@@ -165,6 +165,8 @@
                                        Icon="{ui:SymbolIcon Color24}" />
                 <ui:NavigationViewItem x:Name="NavEqualizer" Content="Equalizer" TargetPageTag="equalizer"
                                        Icon="{ui:SymbolIcon Options24}" />
+                <ui:NavigationViewItem x:Name="NavAirPlay" Content="AirPlay" TargetPageTag="airplay"
+                                       Icon="{ui:SymbolIcon Cast24}" />
                 <ui:NavigationViewItem x:Name="NavHud" Content="HUD widgets" TargetPageTag="hud"
                                        Icon="{ui:SymbolIcon DataHistogram24}" />
             </ui:NavigationView.MenuItems>
@@ -729,6 +731,107 @@
                         <ui:Button x:Name="OpenEqualizerButton" Content="Open equalizer"
                                    Icon="{ui:SymbolIcon Options24}" Click="OnOpenEqualizer" />
                     </ui:CardControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ============================ AIRPLAY ============================ -->
+            <ScrollViewer x:Name="SectionAirPlay" VerticalScrollBarVisibility="Auto" Padding="28,20,28,28">
+                <StackPanel>
+                    <ui:TextBlock Style="{StaticResource PageTitle}" Text="AirPlay" />
+                    <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
+                                  Text="Stream this PC's audio to a HomePod, Apple TV or other AirPlay receiver. Experimental." />
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Receiver" />
+                                <ui:TextBlock x:Name="AirPlayStatusText" Style="{StaticResource RowSubtitle}"
+                                              Text="Not streaming." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox x:Name="AirPlayDeviceCombo" MinWidth="190"
+                                      SelectionChanged="OnAirPlayDeviceChanged" />
+                            <ui:Button x:Name="AirPlayRefreshButton" Margin="8,0,0,0" Content="Refresh"
+                                       Icon="{ui:SymbolIcon ArrowClockwise24}" Click="OnAirPlayRefresh" />
+                            <ui:Button x:Name="AirPlayConnectButton" Margin="8,0,0,0" Content="Connect"
+                                       Appearance="Primary" Icon="{ui:SymbolIcon Play24}"
+                                       Click="OnAirPlayConnect" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Source" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Which playback device is captured and sent. Pick a virtual device to stream without your speakers also playing it." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="AirPlaySourceCombo" MinWidth="240"
+                                  SelectionChanged="OnAirPlaySourceChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Playback mode" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="How much audio is queued ahead. Less delay means more chance of a dropout — watch the resend figure below." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ComboBox x:Name="AirPlayModeCombo" MinWidth="150"
+                                      SelectionChanged="OnAirPlayModeChanged">
+                                <ComboBoxItem Content="Real-time" Tag="realtime" />
+                                <ComboBoxItem Content="Normal" Tag="normal" />
+                                <ComboBoxItem Content="Buffered" Tag="buffered" />
+                                <ComboBoxItem Content="Custom" Tag="custom" />
+                            </ComboBox>
+                            <ui:TextBox x:Name="AirPlayCustomMsBox" Margin="8,0,0,0" Width="90"
+                                        PlaceholderText="ms" LostFocus="OnAirPlayCustomMsChanged" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Receiver volume" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="The AirPlay device's own level. Set it to 100% and let the volume keys do the work." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Slider x:Name="AirPlayVolumeSlider" Width="180" Minimum="0" Maximum="100"
+                                    TickFrequency="1" IsSnapToTickEnabled="True"
+                                    ValueChanged="OnAirPlayVolumeChanged" />
+                            <ui:TextBlock x:Name="AirPlayVolumeText" Margin="12,0,0,0" Width="44"
+                                          VerticalAlignment="Center" Text="70%" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Volume keys drive the receiver" />
+                                <ui:TextBlock x:Name="AirPlayRetargetNote" Style="{StaticResource RowSubtitle}"
+                                              Text="While streaming, the volume keys set the AirPlay device's level instead of Windows'." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AirPlayRetargetBox" Click="OnAirPlayRetargetChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardExpander Margin="{StaticResource RowMargin}" IsExpanded="False">
+                        <ui:CardExpander.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Session details" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="What is actually going over the wire." />
+                            </StackPanel>
+                        </ui:CardExpander.Header>
+                        <ui:TextBlock x:Name="AirPlayDiagnosticsText" FontFamily="Consolas"
+                                      TextWrapping="Wrap" Text="Not streaming." />
+                    </ui:CardExpander>
                 </StackPanel>
             </ScrollViewer>
 

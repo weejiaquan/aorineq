@@ -411,6 +411,7 @@ public partial class App : System.Windows.Application
             _tray.MenuOpening += RefreshTrayEqPresets;
             _tray.MenuOpening += RefreshTrayHudMenu;
             _tray.EqPresetSelected += OnTrayEqPresetSelected;
+            WireAirPlayTray();
             _tray.HudModeToggled += OnHudModeToggled;
             _tray.HudWidgetToggled += OnHudWidgetToggled;
             _tray.HudWidgetAdded += OnHudWidgetAdded;
@@ -463,8 +464,20 @@ public partial class App : System.Windows.Application
             // Hook construction can fail (e.g. another process/policy blocks WH_KEYBOARD_LL);
             // kept inside this try so that failure hits the same friendly fail-fast dialog below.
             _hook = new KeyboardHook();
-            _hook.VolumeUp += () => { ActiveState.Up(); Render(interactive: false); };
-            _hook.VolumeDown += () => { ActiveState.Down(); Render(interactive: false); };
+            // TryApplyAirPlayVolume answers false unless a stream is running AND the volume mode
+            // is one where retargeting is correct, so the normal path is untouched otherwise.
+            _hook.VolumeUp += () =>
+            {
+                if (TryApplyAirPlayVolume(ActiveState.StepPercent)) return;
+                ActiveState.Up();
+                Render(interactive: false);
+            };
+            _hook.VolumeDown += () =>
+            {
+                if (TryApplyAirPlayVolume(-ActiveState.StepPercent)) return;
+                ActiveState.Down();
+                Render(interactive: false);
+            };
             _hook.MuteToggle += () => { ActiveState.ToggleMute(); Render(interactive: false); };
         }
         catch (Exception ex) when (ex is DirectoryNotFoundException or InvalidOperationException or IOException
@@ -874,6 +887,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.HudWidgetAdded += OnHudWidgetAdded;
             _settingsWindow.HudWidgetToggled += OnHudWidgetToggled;
             _settingsWindow.HudWidgetRemoved += id => _hud?.Remove(id);
+            WireAirPlay(_settingsWindow);
         }
         else if (version == _stateSyncVersion) // an in-flight toggle sync supersedes this open
         {
@@ -2180,6 +2194,7 @@ public partial class App : System.Windows.Application
     private void ApplyVolumeDelta(int deltaPercent)
     {
         if (deltaPercent == 0) return;
+        if (TryApplyAirPlayVolume(deltaPercent)) return;
         bool wasMuted = ActiveState.Muted;
         ActiveState.SetPercent(ActiveState.Percent + deltaPercent);
         if (wasMuted && deltaPercent < 0) ActiveState.SetMuted(true);
@@ -2526,6 +2541,9 @@ public partial class App : System.Windows.Application
             HandMuteBackToPreamp();
         }
         SaveSettings();
+        // Whether the AirPlay volume-retarget switch means anything depends on the mode, so the
+        // page's explanation of itself is refreshed rather than left stale until reopened.
+        _settingsWindow?.SetAirPlayVolumeMode(mode);
         // Flushed, not just posted: everything above has already happened to the audio chain (the
         // preamp is parked or re-applied, on disk, through the writer's own Flush), so leaving the
         // mode itself 50 ms behind in the coalescer is the one window where settings.json and the
@@ -2659,12 +2677,20 @@ public partial class App : System.Windows.Application
     /// <summary>Shows the currently active OSD window (skin-driven or the standard OsdWindow) for
     /// the current volume state. Shared by Render (volume/mute changes) and OnOsdSettingsChanged
     /// (so an OSD-only settings change is immediately visible without needing a volume keypress).</summary>
-    private void ShowOsd(bool interactive)
+    private void ShowOsd(bool interactive) =>
+        ShowOsdLevel(ActiveState.Percent, ActiveState.Muted, interactive);
+
+    /// <summary>Shows an explicit level rather than the active device's.
+    ///
+    /// Exists because an AirPlay stream in system volume mode has its own level, held by the
+    /// receiver rather than by <see cref="ActiveState"/> — and a volume key that gives no
+    /// feedback would defeat the point of this app.</summary>
+    private void ShowOsdLevel(int percent, bool muted, bool interactive)
     {
         if (_useSkinOsd && _skinOsd is not null)
-            _skinOsd.ShowVolume(ActiveState.Percent, ActiveState.Muted, interactive);
+            _skinOsd.ShowVolume(percent, muted, interactive);
         else
-            _osd!.ShowVolume(ActiveState.Percent, ActiveState.Muted, interactive);
+            _osd!.ShowVolume(percent, muted, interactive);
     }
 
     /// <summary>Shared handler for both OsdWindow's and SkinOsdWindow's PercentChangedByUser —
@@ -3030,6 +3056,10 @@ public partial class App : System.Windows.Application
         // which raises on a system thread, and a theme change arriving mid-teardown must not find
         // a dispatcher that has begun shutting down.
         _appTheme?.Dispose();
+        // Before the pipeline for the same ordering reason the HUD is: this owns a WASAPI client
+        // and a live network session, and a TEARDOWN sent while the dispatcher drains is better
+        // than leaving the receiver holding a session nobody is feeding.
+        DisposeAirPlay();
         // The HUD before the pipeline: its windows hold the audio registration, and the pipeline
         // must not be torn down while a registration is still outstanding.
         _hud?.Dispose();
