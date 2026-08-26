@@ -80,6 +80,10 @@ public partial class App : System.Windows.Application
     private bool _relaunchAfterUpdate;
     /// <summary>Guards <see cref="ReportFatal"/> against a crash raised while reporting a crash.</summary>
     private bool _reportingFatal;
+    /// <summary>Open read handles on this build's unpacked native DLLs, held for the whole session
+    /// so a temp-file cleaner cannot delete one while the app sits idle in the tray. See
+    /// <see cref="BundlePin"/> for the sweep that made this necessary.</summary>
+    private BundlePin? _bundlePin;
     /// <summary>Equalizer APO health: one tracker, fed from four triggers (default-device change,
     /// session unlock, resume from sleep, and a slow timer). See <see cref="SetupEapoHealthMonitor"/>.</summary>
     private readonly EapoHealthTracker _eapoHealth = new();
@@ -488,6 +492,15 @@ public partial class App : System.Windows.Application
         SetupEapoHealthMonitor();
         RefreshActiveDeviceName();
         SetupHud();
+
+        // Here, and not earlier, because it locates the folder the single-file host unpacked this
+        // build into by looking at the native modules already loaded — and by now WPF has loaded
+        // its own. The delay costs nothing: the window this closes is measured in days, not
+        // milliseconds. A tray app sits idle while temp cleaners run, and on 2026-08-25 one of
+        // them deleted PenImc_cor3.dll from under a live session; the next volume key press died
+        // on DllNotFoundException. See BundlePin. Never throws, and pins nothing in a build that
+        // has no extraction folder.
+        _bundlePin = BundlePin.AcquireForCurrentProcess();
 
         // Protocol links + auto-update, both post-init: neither may block or fail startup.
         try
@@ -3042,6 +3055,11 @@ public partial class App : System.Windows.Application
         // event and runs WPF's own teardown, which is code this process has not necessarily
         // executed before. It must happen while the bundle is still readable.
         base.OnExit(e);
+        // BELOW base.OnExit for the same reason base.OnExit sits where it does: WPF's own teardown
+        // is code this process may not have run before, and it must not be the thing that finds a
+        // native DLL missing. Releasing the handles here rather than leaving them to process exit
+        // keeps the ownership honest — everything else in this method is disposed explicitly too.
+        _bundlePin?.Dispose();
         // GENUINELY LAST, and see its remarks for why the order is not negotiable: it replaces the
         // file this process's own assemblies are read from, so nothing that might need to load one
         // may run after it. It is also why it sits below the mutex release — the successor it
