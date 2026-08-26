@@ -23,6 +23,10 @@ public partial class OsdWindow : Window
     private const double DefaultMargin = 12; // matches OsdPosition.Compute's own default
 
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+    /// <summary>Which fade-out is still allowed to hide this window. Cancelling a fade does not
+    /// cancel its Completed event — see <see cref="OsdFade"/>. Identical to SkinOsdWindow's,
+    /// because both windows fade out the same way and hit the same bug.</summary>
+    private readonly OsdFade _fade = new();
     private bool _updatingFromCode;
 
     // Behavior config, pushed in from Settings via ApplyConfig; sensible defaults match
@@ -63,8 +67,9 @@ public partial class OsdWindow : Window
                 Hide(); // instant hide, no fade
                 return;
             }
+            var token = _fade.Begin();
             var fade = new DoubleAnimation(1, 0, _fadeDuration);
-            fade.Completed += (_, _) => Hide();
+            fade.Completed += (_, _) => { if (_fade.MayHide(token)) Hide(); };
             BeginAnimation(OpacityProperty, fade);
         };
         SourceInitialized += (_, _) => MakeNoActivate();
@@ -74,8 +79,7 @@ public partial class OsdWindow : Window
         // stays). Harmless when no fade is running — the timer restart just extends the delay.
         MouseEnter += (_, _) =>
         {
-            BeginAnimation(OpacityProperty, null);
-            Opacity = 1;
+            CancelFade();
             if (IsVisible)
             {
                 _hideTimer.Stop();
@@ -154,11 +158,21 @@ public partial class OsdWindow : Window
         Left = left;
         Top = top;
 
-        BeginAnimation(OpacityProperty, null); // cancel any running fade-out
-        Opacity = 1;
+        CancelFade();
         Show();
         _hideTimer.Stop();
         _hideTimer.Start(); // both paths auto-hide; IsMouseOver blocks the tick while hovered
+    }
+
+    /// <summary>Stops a fade-out and restores full opacity, so the window this rescues stays up.
+    /// The <see cref="OsdFade.Cancel"/> is what makes it stick: removing an animation with
+    /// <c>BeginAnimation(OpacityProperty, null)</c> leaves its Completed handler to fire anyway,
+    /// and that handler hides the window. See <see cref="OsdFade"/>.</summary>
+    private void CancelFade()
+    {
+        _fade.Cancel();
+        BeginAnimation(OpacityProperty, null);
+        Opacity = 1;
     }
 
     /// <summary>Swaps the visible root (dark-pill vs. minimal-bar) and, for minimal-bar, the
