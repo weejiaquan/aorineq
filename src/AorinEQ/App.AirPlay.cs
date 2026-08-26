@@ -45,10 +45,16 @@ public partial class App
     private async Task RefreshAirPlayDevicesAsync(SettingsWindow window)
     {
         var devices = await MdnsBrowser.DiscoverAsync(TimeSpan.FromSeconds(3));
-        _airPlayDevices = devices;
-        // Discovery completes on a thread-pool thread; the window is WPF.
-        window.Dispatcher.Invoke(() => window.SetAirPlayDevices(devices));
-        _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id);
+        // Both the Settings page and the tray's NotifyIcon are affine to the UI thread. The
+        // continuation usually lands there already (this is raised from a UI event), but that
+        // depends on the caller's synchronisation context, and a tray menu rebuilt from a
+        // thread-pool thread is the kind of bug that only shows up on someone else's machine.
+        Dispatcher.Invoke(() =>
+        {
+            _airPlayDevices = devices;
+            window.SetAirPlayDevices(devices);
+            _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id);
+        });
     }
 
     private bool ConnectAirPlay(AirPlayDevice device)
@@ -139,8 +145,11 @@ public partial class App
     private async Task RefreshAirPlayForTrayAsync()
     {
         var devices = await MdnsBrowser.DiscoverAsync(TimeSpan.FromSeconds(3));
-        _airPlayDevices = devices;
-        Dispatcher.BeginInvoke(() => _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id));
+        Dispatcher.Invoke(() =>
+        {
+            _airPlayDevices = devices;
+            _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id);
+        });
     }
 
     private void DisposeAirPlay()
