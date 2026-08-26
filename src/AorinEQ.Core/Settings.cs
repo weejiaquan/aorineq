@@ -45,7 +45,8 @@ public sealed record Settings(
     string TrayLeftClick = TrayActions.VolumeBar,
     string TrayMiddleClick = TrayActions.Mute,
     bool TrayScrollEnabled = true,
-    bool ScrollInverted = false)
+    bool ScrollInverted = false,
+    AirPlaySetting? AirPlay = null)
 {
     public static Settings Default { get; } = new(50, false);
 
@@ -95,8 +96,21 @@ public sealed record Settings(
                 .Where(kv => !string.IsNullOrEmpty(kv.Key) && kv.Value is not null)
                 .ToDictionary(kv => kv.Key, kv => NormalizeScope(kv.Value)),
             GlobalEq = s.GlobalEq is null ? null : NormalizeScope(s.GlobalEq),
+            // Absent for everyone upgrading into this feature, so a missing block becomes the
+            // default (disabled) rather than a null the UI has to guard on everywhere.
+            AirPlay = NormalizeAirPlay(s.AirPlay ?? AirPlaySetting.Default),
         };
     }
+
+    private static AirPlaySetting NormalizeAirPlay(AirPlaySetting a) => a with
+    {
+        DeviceName = a.DeviceName ?? "",
+        DeviceId = a.DeviceId ?? "",
+        SourceEndpointId = a.SourceEndpointId ?? "",
+        Mode = AirPlayModes.Normalize(a.Mode, AirPlayModes.Normal),
+        CustomQueueMs = Math.Clamp(a.CustomQueueMs, AirPlayModes.MinQueueMs, AirPlayModes.MaxQueueMs),
+        VolumePercent = Math.Clamp(a.VolumePercent, 0, 100),
+    };
 
     public static Settings Load(string path)
     {
