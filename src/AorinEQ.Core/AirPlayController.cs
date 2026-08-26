@@ -20,6 +20,9 @@ public sealed class AirPlayController : IDisposable
     private AirPlayDevice? _current;
     private short[] _scratch = [];
     private bool _disposed;
+    private EndpointVolume? _localVolume;
+    private bool _localWasMuted;
+    private bool _localMutedByUs;
     private int _volumePercent = AirPlaySetting.Default.VolumePercent;
 
     /// <summary>Raised when the stream starts, stops or fails. Fires on a background thread —
@@ -62,16 +65,19 @@ public sealed class AirPlayController : IDisposable
     /// <summary>Starts streaming <paramref name="sourceEndpointId"/> (empty = the default render
     /// endpoint) to <paramref name="device"/>. False when the capture or the handshake fails;
     /// <see cref="Snapshot"/> then carries the reason.</summary>
-    public bool Start(AirPlayDevice device, string? sourceEndpointId, string mode, int customQueueMs)
+    public bool Start(AirPlayDevice device, AirPlaySetting setting)
     {
         lock (_gate)
         {
             if (_disposed) return false;
             StopLocked();
 
-            int queueMs = AirPlayModes.QueueMs(mode, customQueueMs);
-            var session = new RaopSession(device, queueMs);
+            string? sourceEndpointId = setting.SourceEndpointId;
+            int queueMs = AirPlayModes.QueueMs(setting.Mode, setting.CustomQueueMs);
+            var session = new RaopSession(device, queueMs, setting.DitheredSilence,
+                setting.EffectiveIdleSeconds);
             session.Failed += OnSessionFailed;
+            session.WentIdle += OnSessionIdle;
 
             if (!session.Connect())
             {
@@ -104,6 +110,7 @@ public sealed class AirPlayController : IDisposable
             _session = session;
             _current = device;
             session.SetVolume(AirPlayVolume.ToDb(_volumePercent));
+            if (setting.MuteLocalWhileStreaming) MuteLocalLocked();
         }
         StateChanged?.Invoke();
         return true;
@@ -119,8 +126,43 @@ public sealed class AirPlayController : IDisposable
         StateChanged?.Invoke();
     }
 
+    /// <summary>Silences the local speakers while the stream runs, restoring whatever the user
+    /// had when it stops.
+    ///
+    /// Only meaningful when tapping the DEFAULT endpoint. Whether endpoint mute reaches the
+    /// loopback tap depends on the device having hardware mute, which Microsoft documents as not
+    /// contractual — on a device without it this mutes the AirPlay stream too. That is why the
+    /// setting is off by default and says so, and why choosing a virtual source device is the
+    /// reliable way to get the same result.</summary>
+    private void MuteLocalLocked()
+    {
+        try
+        {
+            _localVolume ??= new EndpointVolume();
+            if (_localVolume.TryRead() is not { } state) return;
+            _localWasMuted = state.Muted;
+            if (state.Muted) return;              // already silent; nothing of ours to undo
+            _localMutedByUs = _localVolume.SetMuted(true);
+        }
+        catch (InvalidOperationException) { /* no endpoint; streaming continues regardless */ }
+    }
+
+    /// <summary>Puts the local mute back exactly as it was. Never unmutes something the user had
+    /// muted themselves before the stream started.</summary>
+    private void RestoreLocalLocked()
+    {
+        if (!_localMutedByUs) return;
+        _localMutedByUs = false;
+        try
+        {
+            if (!_localWasMuted) _localVolume?.SetMuted(false);
+        }
+        catch (InvalidOperationException) { }
+    }
+
     private void StopLocked()
     {
+        RestoreLocalLocked();
         if (_capture is not null)
         {
             _capture.SamplesAvailable -= OnSamples;
@@ -130,6 +172,7 @@ public sealed class AirPlayController : IDisposable
         if (_session is not null)
         {
             _session.Failed -= OnSessionFailed;
+            _session.WentIdle -= OnSessionIdle;
             _session.Disconnect();
             _session.Dispose();
             _session = null;
@@ -185,6 +228,13 @@ public sealed class AirPlayController : IDisposable
     private static short ToPcm(float sample) =>
         (short)Math.Clamp(sample * 32767f, short.MinValue, short.MaxValue);
 
+    /// <summary>The source went quiet for longer than the idle timeout. A clean stop, not a
+    /// failure — nothing went wrong, there was simply nothing to send.</summary>
+    private void OnSessionIdle()
+    {
+        Stop();
+    }
+
     private void OnSessionFailed(string reason)
     {
         lock (_gate)
@@ -197,6 +247,7 @@ public sealed class AirPlayController : IDisposable
                 _capture.Dispose();
                 _capture = null;
             }
+            RestoreLocalLocked();
         }
         StateChanged?.Invoke();
     }
@@ -208,6 +259,8 @@ public sealed class AirPlayController : IDisposable
             if (_disposed) return;
             _disposed = true;
             StopLocked();
+            _localVolume?.Dispose();
+            _localVolume = null;
         }
     }
 }

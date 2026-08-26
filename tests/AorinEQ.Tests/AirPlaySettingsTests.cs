@@ -110,6 +110,89 @@ public class AirPlaySettingsTests
 
     // ---- settings integration -----------------------------------------------------------
 
+    // ---- standby / dither / mute-local ---------------------------------------------------
+
+    [Fact]
+    public void Standby_means_no_idle_timeout_at_all()
+    {
+        var standby = AirPlaySetting.Default with { StandbyEnabled = true, IdleDisconnectSeconds = 60 };
+        _out.WriteLine($"standby on, timeout field {standby.IdleDisconnectSeconds}s "
+                     + $"-> effective {standby.EffectiveIdleSeconds}s");
+
+        // Staying connected IS having no timeout; the stored number is remembered for when the
+        // user turns standby back off, but must not take effect while it is on.
+        Assert.Equal(0, standby.EffectiveIdleSeconds);
+    }
+
+    [Fact]
+    public void Turning_standby_off_applies_the_stored_timeout()
+    {
+        var hangUp = AirPlaySetting.Default with { StandbyEnabled = false, IdleDisconnectSeconds = 60 };
+        _out.WriteLine($"standby off -> effective {hangUp.EffectiveIdleSeconds}s");
+        Assert.Equal(60, hangUp.EffectiveIdleSeconds);
+    }
+
+    [Theory]
+    [InlineData(0, AirPlayIdle.MinSeconds)]
+    [InlineData(5, AirPlayIdle.MinSeconds)]
+    [InlineData(600, 600)]
+    [InlineData(99999, AirPlayIdle.MaxSeconds)]
+    public void Idle_timeout_is_clamped(int requested, int expected)
+    {
+        var setting = AirPlaySetting.Default with
+        {
+            StandbyEnabled = false,
+            IdleDisconnectSeconds = requested,
+        };
+        _out.WriteLine($"{requested}s -> {setting.EffectiveIdleSeconds}s");
+        Assert.Equal(expected, setting.EffectiveIdleSeconds);
+    }
+
+    [Fact]
+    public void Defaults_favour_staying_connected_and_keeping_the_receiver_awake()
+    {
+        var d = AirPlaySetting.Default;
+        _out.WriteLine($"standby={d.StandbyEnabled} dither={d.DitheredSilence} "
+                     + $"muteLocal={d.MuteLocalWhileStreaming}");
+
+        Assert.True(d.StandbyEnabled, "reconnecting costs a handshake plus a buffer refill");
+        Assert.True(d.DitheredSilence, "digital silence lets receivers sleep and clip the next track");
+        // Off by default on purpose: whether endpoint mute reaches the loopback tap is a
+        // hardware lottery, and on the losing side it mutes the AirPlay stream too.
+        Assert.False(d.MuteLocalWhileStreaming);
+    }
+
+    [Fact]
+    public void The_new_switches_survive_a_round_trip()
+    {
+        var original = Settings.Default with
+        {
+            AirPlay = AirPlaySetting.Default with
+            {
+                DitheredSilence = false,
+                StandbyEnabled = false,
+                IdleDisconnectSeconds = 45,
+                MuteLocalWhileStreaming = true,
+            },
+        };
+        string path = Path.Combine(Path.GetTempPath(), $"aorineq-airplay-{Guid.NewGuid():N}.json");
+        try
+        {
+            original.Save(path);
+            var loaded = Settings.Load(path).AirPlay!;
+            _out.WriteLine(JsonSerializer.Serialize(loaded));
+
+            Assert.False(loaded.DitheredSilence);
+            Assert.False(loaded.StandbyEnabled);
+            Assert.Equal(45, loaded.IdleDisconnectSeconds);
+            Assert.True(loaded.MuteLocalWhileStreaming);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
     [Fact]
     public void Airplay_is_a_settings_section()
     {
