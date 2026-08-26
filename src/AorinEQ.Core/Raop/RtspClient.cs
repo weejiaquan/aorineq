@@ -58,6 +58,25 @@ public sealed class RtspClient : IDisposable
         _stream = _tcp.GetStream();
     }
 
+    /// <summary>Whether the control connection is still open.
+    ///
+    /// A socket that polls readable with nothing available has been closed by the peer — the
+    /// standard way to notice a half-closed TCP connection without writing to it.</summary>
+    public bool IsConnected
+    {
+        get
+        {
+            try
+            {
+                var socket = _tcp.Client;
+                if (socket is null || !socket.Connected) return false;
+                return !(socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0);
+            }
+            catch (SocketException) { return false; }
+            catch (ObjectDisposedException) { return false; }
+        }
+    }
+
     /// <summary>This machine's address on the interface that actually reached the receiver —
     /// the value that must appear in the SDP.</summary>
     public string LocalAddress

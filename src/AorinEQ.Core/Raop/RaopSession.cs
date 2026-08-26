@@ -30,16 +30,31 @@ public sealed class RaopSession : IDisposable
     private const int MaxQueuedFrames = SampleRate;      // one second of slack, then drop
     private static readonly TimeSpan SyncInterval = TimeSpan.FromSeconds(1);
 
+    /// <summary>How often to poke the RTSP connection so the receiver keeps the session.
+    ///
+    /// MEASURED, not guessed: this receiver closes the control connection and stops asking for
+    /// timing after roughly 30 seconds of RTSP silence, while UDP audio keeps being accepted
+    /// into a void. Ten seconds is comfortably inside that window.</summary>
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long the receiver may go without asking us for the time before the
+    /// session is declared dead. It polls every two seconds or so while playing, so this is
+    /// generous — it exists to turn a silent failure into a reported one.</summary>
+    private static readonly TimeSpan TimingSilenceTimeout = TimeSpan.FromSeconds(15);
+
     private readonly AirPlayDevice _device;
     private readonly int _queueMs;
     private readonly object _gate = new();
+    // Guards every RtspClient.Send. Separate from _gate because an RTSP round trip blocks on
+    // TCP; lock order is always _gate -> _rtspGate, never the reverse.
+    private readonly object _rtspGate = new();
     private readonly ResendBuffer _resend = new(ResendCapacity);
     private readonly Stopwatch _clock = new();
 
     private RtspClient? _rtsp;
     private UdpClient? _audio, _control, _timing;
     private IPEndPoint? _serverAudio, _serverControl;
-    private Thread? _sendThread, _timingThread, _controlThread;
+    private Thread? _sendThread, _timingThread, _controlThread, _keepAliveThread;
     private string _uri = "";
 
     // The pending-audio ring. Written by the capture thread, drained by the send thread.
@@ -55,6 +70,7 @@ public sealed class RaopSession : IDisposable
     private int _receiverLatency;
     private long _packetsSent, _bytesSent, _retransmitRequests, _retransmitsServed;
     private long _retransmitsMissed, _timingReplies, _syncsSent, _silentPackets;
+    private DateTime _lastTimingRequest;
 
     /// <summary>Raised when the session ends because something went wrong, with a reason
     /// suitable for showing to a person. Raised on a background thread.</summary>
@@ -68,6 +84,17 @@ public sealed class RaopSession : IDisposable
 
     public bool IsStreaming => _running;
     public AirPlayDevice Device => _device;
+
+    /// <summary>Whether the receiver still has the RTSP control connection open. Diagnostic:
+    /// distinguishes a receiver that has torn the session down from one that has merely gone
+    /// quiet on the UDP channels.</summary>
+    public bool ControlConnectionAlive => _rtsp?.IsConnected == true;
+
+    /// <summary>Seconds since the receiver last asked us for the time. It polls steadily while
+    /// it is playing, so this going stale is the earliest sign the stream has died at the far
+    /// end — long before anything on this side notices.</summary>
+    public double SecondsSinceLastTimingRequest =>
+        _lastTimingRequest == default ? -1 : (DateTime.UtcNow - _lastTimingRequest).TotalSeconds;
 
     private int LatencySamples => Math.Max(0, _queueMs) * SampleRate / 1000;
 
@@ -174,6 +201,7 @@ public sealed class RaopSession : IDisposable
             Priority = ThreadPriority.AboveNormal,
         };
         _sendThread.Start();
+        StartKeepAlive();
         return true;
     }
 
@@ -221,7 +249,10 @@ public sealed class RaopSession : IDisposable
 
     public void SetVolume(double db)
     {
-        lock (_gate)
+        // _rtspGate, not _gate: an RTSP round trip can block for the socket timeout, and holding
+        // the session lock for that long would stall Disconnect. Lock order is always
+        // _gate -> _rtspGate, never the reverse.
+        lock (_rtspGate)
         {
             if (_rtsp is null || !_running) return;
             try
@@ -231,9 +262,72 @@ public sealed class RaopSession : IDisposable
                 _rtsp.Send("SET_PARAMETER", _uri, contentType: "text/parameters",
                     body: Encoding.ASCII.GetBytes(body));
             }
-            catch (SocketException) { /* the send loop will notice and fail the session */ }
+            catch (SocketException) { /* the keepalive will notice and fail the session */ }
             catch (IOException) { }
         }
+    }
+
+    /// <summary>Keeps the RTSP session from expiring, and notices when it has anyway.
+    ///
+    /// Without this the receiver closes the control connection after about 30 seconds and stops
+    /// playing, while the sender carries on pushing UDP audio into a void reporting "streaming"
+    /// — measured directly: audio stops between 30 and 60 seconds with nothing on this side
+    /// registering a problem.
+    ///
+    /// Runs on its own thread rather than on the send loop, because an RTSP round trip is a
+    /// blocking TCP exchange and doing that on the pacing thread would be an audible dropout
+    /// every ten seconds.</summary>
+    private void StartKeepAlive()
+    {
+        _keepAliveThread = new Thread(() =>
+        {
+            var lastPoke = DateTime.UtcNow;
+            while (_running)
+            {
+                // Short slices so Disconnect is not waited on for the whole interval.
+                Thread.Sleep(250);
+                if (!_running) return;
+
+                // The receiver polls us for the time about every two seconds while it is
+                // playing. Going quiet for far longer than that means it has stopped, whatever
+                // the sender thinks — fail loudly rather than stream to nobody.
+                if (SecondsSinceLastTimingRequest > TimingSilenceTimeout.TotalSeconds)
+                {
+                    FailAsync("the receiver stopped responding (no timing requests for "
+                            + $"{SecondsSinceLastTimingRequest:F0}s) — the session was dropped");
+                    return;
+                }
+
+                if (DateTime.UtcNow - lastPoke < KeepAliveInterval) continue;
+                lastPoke = DateTime.UtcNow;
+
+                lock (_rtspGate)
+                {
+                    if (_rtsp is null || !_running) return;
+                    try
+                    {
+                        var response = _rtsp.Send("OPTIONS", "*");
+                        if (!response.Ok)
+                        {
+                            FailAsync($"keep-alive refused ({response.Status})");
+                            return;
+                        }
+                    }
+                    catch (SocketException e)
+                    {
+                        FailAsync($"control connection lost: {e.SocketErrorCode}");
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        FailAsync("control connection closed by the receiver");
+                        return;
+                    }
+                }
+            }
+        })
+        { IsBackground = true, Name = "AorinEQ AirPlay keep-alive" };
+        _keepAliveThread.Start();
     }
 
     // ---- channels ------------------------------------------------------------------------
@@ -317,6 +411,7 @@ public sealed class RaopSession : IDisposable
                 {
                     var request = _timing!.Receive(ref from);
                     ulong received = NtpTime.Now();
+                    _lastTimingRequest = DateTime.UtcNow;
                     int n = RtpPacket.WriteTimingReply(reply, request, received, NtpTime.Now());
                     if (n > 0)
                     {
@@ -429,13 +524,16 @@ public sealed class RaopSession : IDisposable
     {
         _running = false;
 
-        try
+        lock (_rtspGate)
         {
-            if (_rtsp is not null && _uri.Length > 0)
-                _rtsp.Send("TEARDOWN", _uri);
+            try
+            {
+                if (_rtsp is not null && _uri.Length > 0)
+                    _rtsp.Send("TEARDOWN", _uri);
+            }
+            catch (SocketException) { /* already gone */ }
+            catch (IOException) { }
         }
-        catch (SocketException) { /* already gone */ }
-        catch (IOException) { }
 
         // Disposing the sockets is what wakes the blocking Receive calls in the listener
         // threads; they exit on ObjectDisposedException.
@@ -447,10 +545,14 @@ public sealed class RaopSession : IDisposable
         JoinBriefly(_sendThread);
         JoinBriefly(_timingThread);
         JoinBriefly(_controlThread);
-        _sendThread = _timingThread = _controlThread = null;
+        JoinBriefly(_keepAliveThread);
+        _sendThread = _timingThread = _controlThread = _keepAliveThread = null;
 
-        _rtsp?.Dispose();
-        _rtsp = null;
+        lock (_rtspGate)
+        {
+            _rtsp?.Dispose();
+            _rtsp = null;
+        }
         _clock.Stop();
 
         lock (_ring)
