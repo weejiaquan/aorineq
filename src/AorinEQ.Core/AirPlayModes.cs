@@ -105,7 +105,24 @@ public sealed record AirPlaySetting(
     string Mode = AirPlayModes.Normal,
     int CustomQueueMs = 1000,
     int VolumePercent = 70,
-    bool AutoRetargetVolume = true)
+    bool AutoRetargetVolume = true,
+    bool DitheredSilence = true,
+    bool StandbyEnabled = true,
+    int IdleDisconnectSeconds = 300,
+    bool MuteLocalWhileStreaming = false)
 {
     public static AirPlaySetting Default { get; } = new();
+
+    /// <summary>Seconds of continuous silence after which the session is dropped, or 0 to stay
+    /// connected indefinitely. Standby IS staying connected, so enabling it means no timeout.</summary>
+    public int EffectiveIdleSeconds => StandbyEnabled
+        ? 0
+        : Math.Clamp(IdleDisconnectSeconds, AirPlayIdle.MinSeconds, AirPlayIdle.MaxSeconds);
+}
+
+/// <summary>Bounds for the idle-disconnect timeout.</summary>
+public static class AirPlayIdle
+{
+    public const int MinSeconds = 10;
+    public const int MaxSeconds = 3600;
 }

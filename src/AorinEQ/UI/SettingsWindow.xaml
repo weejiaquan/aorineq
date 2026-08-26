@@ -750,7 +750,7 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                         <StackPanel Orientation="Horizontal">
-                            <ComboBox x:Name="AirPlayDeviceCombo" MinWidth="190"
+                            <ComboBox x:Name="AirPlayDeviceCombo" PreviewMouseWheel="OnComboWheel" MinWidth="190"
                                       SelectionChanged="OnAirPlayDeviceChanged" />
                             <ui:Button x:Name="AirPlayRefreshButton" Margin="8,0,0,0" Content="Refresh"
                                        Icon="{ui:SymbolIcon ArrowClockwise24}" Click="OnAirPlayRefresh" />
@@ -768,7 +768,7 @@
                                               Text="Which playback device is captured and sent. Pick a virtual device to stream without your speakers also playing it." />
                             </StackPanel>
                         </ui:CardControl.Header>
-                        <ComboBox x:Name="AirPlaySourceCombo" MinWidth="240"
+                        <ComboBox x:Name="AirPlaySourceCombo" PreviewMouseWheel="OnComboWheel" MinWidth="240"
                                   SelectionChanged="OnAirPlaySourceChanged" />
                     </ui:CardControl>
 
@@ -781,7 +781,7 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                         <StackPanel Orientation="Horizontal">
-                            <ComboBox x:Name="AirPlayModeCombo" MinWidth="150"
+                            <ComboBox x:Name="AirPlayModeCombo" PreviewMouseWheel="OnComboWheel" MinWidth="150"
                                       SelectionChanged="OnAirPlayModeChanged">
                                 <ComboBoxItem Content="Real-time" Tag="realtime" />
                                 <ComboBoxItem Content="Normal" Tag="normal" />
@@ -819,6 +819,43 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                         <ui:ToggleSwitch x:Name="AirPlayRetargetBox" Click="OnAirPlayRetargetChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Mute this PC while streaming" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Silences your speakers so the sound only comes from the receiver. Unreliable on some DACs — it can mute the stream too. Choosing a virtual device as the source above is the dependable way." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AirPlayMuteLocalBox" Click="OnAirPlayMuteLocalChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Dithered silence" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Sends an inaudible noise floor instead of digital silence, so the receiver's output stage does not sleep and clip the first instant of the next track." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AirPlayDitherBox" Click="OnAirPlayDitherChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="Stay connected when nothing is playing" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="Keeps the session open through silence, so playback resumes instantly. Turn it off to hang up after a period of quiet." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:TextBox x:Name="AirPlayIdleSecondsBox" Width="80" Margin="0,0,8,0"
+                                        PlaceholderText="sec" LostFocus="OnAirPlayIdleSecondsChanged" />
+                            <ui:ToggleSwitch x:Name="AirPlayStandbyBox" Click="OnAirPlayStandbyChanged" />
+                        </StackPanel>
                     </ui:CardControl>
 
                     <ui:CardExpander Margin="{StaticResource RowMargin}" IsExpanded="False">

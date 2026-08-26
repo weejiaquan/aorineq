@@ -44,6 +44,10 @@ public sealed class RaopSession : IDisposable
 
     private readonly AirPlayDevice _device;
     private readonly int _queueMs;
+    private readonly bool _ditheredSilence;
+    private readonly int _idleDisconnectSeconds;
+    private uint _ditherState = 0x1234_5678;
+    private long _consecutiveSilentPackets;
     private readonly object _gate = new();
     // Guards every RtspClient.Send. Separate from _gate because an RTSP round trip blocks on
     // TCP; lock order is always _gate -> _rtspGate, never the reverse.
@@ -76,11 +80,23 @@ public sealed class RaopSession : IDisposable
     /// suitable for showing to a person. Raised on a background thread.</summary>
     public event Action<string>? Failed;
 
-    public RaopSession(AirPlayDevice device, int queueMs)
+    /// <param name="ditheredSilence">Fill silent packets with a dither floor instead of digital
+    /// zero. Receivers power down their output stage on true silence and clip the first instant
+    /// of audio when it returns; a sub-LSB noise floor keeps them awake and is inaudible.</param>
+    /// <param name="idleDisconnectSeconds">Drop the session after this many seconds of unbroken
+    /// silence, or 0 to stay connected indefinitely (standby).</param>
+    public RaopSession(AirPlayDevice device, int queueMs, bool ditheredSilence = true,
+        int idleDisconnectSeconds = 0)
     {
         _device = device;
         _queueMs = queueMs;
+        _ditheredSilence = ditheredSilence;
+        _idleDisconnectSeconds = idleDisconnectSeconds;
     }
+
+    /// <summary>Raised when the session ends because the source went quiet for longer than the
+    /// configured idle timeout. Not a failure — the caller stops cleanly.</summary>
+    public event Action? WentIdle;
 
     public bool IsStreaming => _running;
     public AirPlayDevice Device => _device;
@@ -355,7 +371,28 @@ public sealed class RaopSession : IDisposable
                 }
 
                 if (!TakeSamples(pcm))
+                {
                     Interlocked.Increment(ref _silentPackets);
+                    long silentRun = Interlocked.Increment(ref _consecutiveSilentPackets);
+                    if (_ditheredSilence) FillWithDither(pcm);
+
+                    // Standby (0) keeps the session up through any amount of quiet, which is the
+                    // point: reconnecting costs a handshake plus the receiver's buffer refill
+                    // before the first note is heard.
+                    if (_idleDisconnectSeconds > 0
+                        && silentRun * AlacFrame.FramesPerPacket
+                            >= (long)_idleDisconnectSeconds * SampleRate)
+                    {
+                        _state = "idle";
+                        _running = false;
+                        WentIdle?.Invoke();
+                        return;
+                    }
+                }
+                else
+                {
+                    Interlocked.Exchange(ref _consecutiveSilentPackets, 0);
+                }
 
                 int payloadLength = AlacFrame.PackUncompressed(pcm, AlacFrame.FramesPerPacket, payload);
                 uint timestamp = _startTimestamp + (uint)(index * AlacFrame.FramesPerPacket);
@@ -380,6 +417,25 @@ public sealed class RaopSession : IDisposable
         }
         catch (SocketException e) { FailAsync($"audio send failed: {e.SocketErrorCode}"); }
         catch (ObjectDisposedException) { /* Disconnect raced the loop */ }
+    }
+
+    /// <summary>Writes a +/-1 LSB noise floor over a silent packet.
+    ///
+    /// Digital silence lets a receiver's output stage sleep, which clips the first instant of
+    /// audio when playback resumes. One least-significant bit is about -90 dBFS: inaudible, and
+    /// enough to keep the far end awake. xorshift rather than Random because this runs on the
+    /// pacing thread every 8 ms and must not allocate or lock.</summary>
+    private void FillWithDither(short[] pcm)
+    {
+        uint x = _ditherState;
+        for (int i = 0; i < pcm.Length; i++)
+        {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            pcm[i] = (short)((x & 1) == 0 ? -1 : 1);
+        }
+        _ditherState = x;
     }
 
     private void SendSync(bool first)

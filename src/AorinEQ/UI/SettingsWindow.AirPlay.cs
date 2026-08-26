@@ -47,6 +47,11 @@ public partial class SettingsWindow
         AirPlayVolumeSlider.Value = _airPlay.VolumePercent;
         AirPlayVolumeText.Text = $"{_airPlay.VolumePercent}%";
         AirPlayRetargetBox.IsChecked = _airPlay.AutoRetargetVolume;
+        AirPlayMuteLocalBox.IsChecked = _airPlay.MuteLocalWhileStreaming;
+        AirPlayDitherBox.IsChecked = _airPlay.DitheredSilence;
+        AirPlayStandbyBox.IsChecked = _airPlay.StandbyEnabled;
+        AirPlayIdleSecondsBox.Text = _airPlay.IdleDisconnectSeconds.ToString();
+        AirPlayIdleSecondsBox.IsEnabled = !_airPlay.StandbyEnabled;
 
         ApplyRetargetAvailability();
         UpdateAirPlayButtons(streaming: false);
@@ -250,6 +255,62 @@ public partial class SettingsWindow
     {
         if (_initializing) return;
         RaiseAirPlay(_airPlay with { AutoRetargetVolume = AirPlayRetargetBox.IsChecked == true });
+    }
+
+    private void OnAirPlayMuteLocalChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        RaiseAirPlay(_airPlay with
+        {
+            MuteLocalWhileStreaming = AirPlayMuteLocalBox.IsChecked == true,
+        });
+    }
+
+    private void OnAirPlayDitherChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        RaiseAirPlay(_airPlay with { DitheredSilence = AirPlayDitherBox.IsChecked == true });
+    }
+
+    private void OnAirPlayStandbyChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        bool standby = AirPlayStandbyBox.IsChecked == true;
+        // The timeout box only means anything when standby is off - staying connected IS having
+        // no timeout, so showing an editable number beside it would be a contradiction.
+        AirPlayIdleSecondsBox.IsEnabled = !standby;
+        RaiseAirPlay(_airPlay with { StandbyEnabled = standby });
+    }
+
+    private void OnAirPlayIdleSecondsChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        if (!int.TryParse(AirPlayIdleSecondsBox.Text, out int seconds))
+        {
+            AirPlayIdleSecondsBox.Text = _airPlay.IdleDisconnectSeconds.ToString();
+            return;
+        }
+        seconds = Math.Clamp(seconds, AirPlayIdle.MinSeconds, AirPlayIdle.MaxSeconds);
+        AirPlayIdleSecondsBox.Text = seconds.ToString();
+        RaiseAirPlay(_airPlay with { IdleDisconnectSeconds = seconds });
+    }
+
+    /// <summary>Stops a closed ComboBox from eating the mouse wheel and changing its own value.
+    ///
+    /// WPF's default is that scrolling over a combo cycles its selection. On a settings page
+    /// that means scrolling down the page silently changes whatever setting the pointer happens
+    /// to pass over — found by doing exactly that and switching the playback mode by accident.
+    /// The wheel is handed to the ScrollViewer instead, which is what the user meant.</summary>
+    private void OnComboWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ComboBox { IsDropDownOpen: true }) return;
+        e.Handled = true;
+        var bubbled = new System.Windows.Input.MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = sender,
+        };
+        (((System.Windows.FrameworkElement)sender).Parent as UIElement)?.RaiseEvent(bubbled);
     }
 
     private void RaiseAirPlay(AirPlaySetting updated)

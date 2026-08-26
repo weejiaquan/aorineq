@@ -110,6 +110,8 @@ public sealed record Settings(
         Mode = AirPlayModes.Normalize(a.Mode, AirPlayModes.Normal),
         CustomQueueMs = Math.Clamp(a.CustomQueueMs, AirPlayModes.MinQueueMs, AirPlayModes.MaxQueueMs),
         VolumePercent = Math.Clamp(a.VolumePercent, 0, 100),
+        IdleDisconnectSeconds =
+            Math.Clamp(a.IdleDisconnectSeconds, AirPlayIdle.MinSeconds, AirPlayIdle.MaxSeconds),
     };
 
     public static Settings Load(string path)

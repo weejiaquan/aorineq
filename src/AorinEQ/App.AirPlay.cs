@@ -60,8 +60,7 @@ public partial class App
     private bool ConnectAirPlay(AirPlayDevice device)
     {
         var setting = _settings.AirPlay ?? AirPlaySetting.Default;
-        bool started = AirPlay.Start(device, setting.SourceEndpointId, setting.Mode,
-            setting.CustomQueueMs);
+        bool started = AirPlay.Start(device, setting);
 
         // Remember what was chosen even when the attempt failed: the user is more likely to
         // retry the same receiver than to want the selection reset.
