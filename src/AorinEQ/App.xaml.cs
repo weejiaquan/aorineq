@@ -828,6 +828,43 @@ public partial class App : System.Windows.Application
     /// <summary>Handles the SettingsWindow AutostartChanged event: applies the change and
     /// re-syncs the checkbox against the actual resulting state, so a failed enable (e.g. no
     /// elevation yet for the scheduled task) un-checks the box instead of leaving it stuck on.</summary>
+    /// <summary>Whether each Discover feature is currently doing anything, and a word about how.
+    ///
+    /// Lives here rather than in Core because every line reads live app state - the connected
+    /// receiver, the loaded skin, how many widgets exist. That is exactly what keeps
+    /// FeatureCatalogue itself pure and unit-testable.</summary>
+    private FeatureState DescribeFeature(Feature feature) => feature.Key switch
+    {
+        // Always on: the volume keys ARE the app. The detail names which mode, because that is the
+        // single most consequential choice in the whole application.
+        "volume" => new(true, Loc.T(_settings.VolumeMode == VolumeModes.Eapo
+            ? "settings.eapo-mode.title"
+            : "settings.system-mode.title")),
+        "osd" => new(true, _settings.SkinName),
+        "skins" => new(_settings.SkinName.Length > 0, _settings.SkinName),
+        "equalizer" => new(_settings.GlobalEq is not null || _settings.DeviceEq is { Count: > 0 }, ""),
+        "airplay" => new(_airPlay?.IsStreaming == true, _settings.AirPlay?.DeviceName ?? ""),
+        "hud" => new(_hud?.Layout.Widgets.Count > 0, ""),
+        _ => new(false, ""),
+    };
+
+    /// <summary>The language picker changed. Loc has already been repointed by the window, so every
+    /// bound string has repainted; this only has to persist the choice.</summary>
+    private void OnLanguageChanged(string language)
+    {
+        _settings = _settings with { Language = language };
+        _settings.Save(_settingsPath);
+    }
+
+    /// <summary>Discover has been seen. Persisted so the one-time nudge never fires again, and so
+    /// the window lands on Volume from now on.</summary>
+    private void OnDiscoverSeen()
+    {
+        if (_settings.HasSeenDiscover) return;
+        _settings = _settings with { HasSeenDiscover = true };
+        _settings.Save(_settingsPath);
+    }
+
     private async void OnAutostartToggled(bool on)
     {
         // Same reentrancy concern as OnRunAsAdminToggled: guard against a second checkbox
@@ -883,6 +920,9 @@ public partial class App : System.Windows.Application
             _settingsWindow = new SettingsWindow(
                 autostartEnabled, _settings.RunAsAdmin, Elevation.IsElevated, GetVersionString(),
                 _settings, _eapoHealth.Current);
+            _settingsWindow.FeatureStateProvider = DescribeFeature;
+            _settingsWindow.LanguageChanged += OnLanguageChanged;
+            _settingsWindow.DiscoverSeen += OnDiscoverSeen;
             _settingsWindow.AutostartChanged += OnAutostartToggled;
             _settingsWindow.RunAsAdminChanged += OnRunAsAdminToggled;
             _settingsWindow.ProtocolLinksChanged += OnProtocolLinksToggled;
