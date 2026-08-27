@@ -1,4 +1,5 @@
 <Window x:Class="AorinEQ.UI.OsdWindow"
+        xmlns:loc="clr-namespace:AorinEQ.UI"
         FontFamily="{StaticResource AppFontFamily}"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -19,7 +20,7 @@
                     <ColumnDefinition Width="48" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="GlyphText" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18"
-                           Foreground="White" VerticalAlignment="Center" Text="&#xE767;" />
+                           Foreground="White" VerticalAlignment="Center" Text="{loc:T osd.glyph.text}" />
                 <Slider x:Name="VolumeSlider" Grid.Column="1" Minimum="0" Maximum="100"
                         IsMoveToPointEnabled="True" VerticalAlignment="Center"
                         ValueChanged="OnSliderValueChanged" />
@@ -72,7 +73,7 @@
                     <ColumnDefinition Width="48" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="FluentGlyphText" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18"
-                           VerticalAlignment="Center" Text="&#xE767;" />
+                           VerticalAlignment="Center" Text="{loc:T osd.fluent-glyph.text}" />
                 <Grid x:Name="FluentTrackHost" Grid.Column="1" VerticalAlignment="Center" Height="14">
                     <Border x:Name="FluentTrackTail" Height="4" VerticalAlignment="Center" CornerRadius="2" />
                     <Border x:Name="FluentTrackFill" Height="4" Width="0" VerticalAlignment="Center"

@@ -37,17 +37,17 @@ public class LocBundleTests
     public void T_returns_the_value_for_the_active_language()
     {
         using var _ = new LocScope(Languages.En);
-        Assert.Equal("Volume", Loc.T("settings.nav.volume"));
+        Assert.Equal("Volume", Loc.T("settings.nav-volume.label"));
     }
 
     [Fact]
     public void T_returns_a_different_value_when_the_language_changes()
     {
         using var _ = new LocScope(Languages.En);
-        var english = Loc.T("settings.nav.volume");
+        var english = Loc.T("settings.nav-volume.label");
 
         Loc.Language = Languages.Ja;
-        Assert.NotEqual(english, Loc.T("settings.nav.volume"));
+        Assert.NotEqual(english, Loc.T("settings.nav-volume.label"));
     }
 
     [Fact]
