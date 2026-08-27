@@ -164,7 +164,22 @@ public partial class SettingsWindow
         App.ApplyLanguage(setting);
         LanguageChanged?.Invoke(setting);
 
-        // Bound strings repaint themselves; these two are built in code and have to be rebuilt.
+        // Bound strings repaint themselves; these are built in code and have to be redone.
+        // PopulateLanguages included: "Follow Windows" is itself a translated string, so without
+        // this the picker keeps the name it had in the language you just left.
+        //
+        // _initializing guards the rebuild, because clearing and refilling the combo raises
+        // SelectionChanged again and would re-enter this handler.
+        _initializing = true;
+        try
+        {
+            PopulateLanguages();
+        }
+        finally
+        {
+            _initializing = false;
+        }
+
         UpdateCorrectionLink();
         BuildFeatureCards();
     }

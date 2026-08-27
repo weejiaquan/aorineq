@@ -101,7 +101,10 @@ public static class HelpDecorator
             // in the XAML already carry a comment about.
             Foreground = Brush("TextFillColorSecondaryBrush"),
         };
-        AutomationProperties.SetName(toggle, Loc.T("help.affordance.name", topic.Title));
+        // Bound, not assigned: both halves of "Help for <title>" are localised, so a language
+        // switch has to move both or the sentence ends up half in each language.
+        LocBinding.SetFormatted(toggle, AutomationProperties.NameProperty,
+            "help.affordance.name", topic.TitleKey);
 
         var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
         titleRow.Children.Add(title);
@@ -115,26 +118,28 @@ public static class HelpDecorator
             Margin = new Thickness(0, 8, 0, 2),
         };
 
-        panel.Children.Add(new TextBlock
+        var bodyText = new TextBlock
         {
-            Text = topic.Body,
             TextWrapping = TextWrapping.Wrap,
             // Stated explicitly, like every other text style in this window. A ui:TextBlock that is
             // not inside a themed container falls back to BLACK and measures 1.41:1 on this
             // window's Mica - a defect this project shipped once and had to pixel-sample to find.
             Foreground = Brush("TextFillColorSecondaryBrush"),
-        });
+        };
+        LocBinding.Set(bodyText, TextBlock.TextProperty, $"help.{topic.Key}.body");
+        panel.Children.Add(bodyText);
 
         if (topic.DocsAnchor is { } anchor)
         {
-            panel.Children.Add(new HyperlinkButton
+            var learnMore = new HyperlinkButton
             {
-                Content = Loc.T("help.learn-more"),
                 NavigateUri = DocsUrl + anchor,
                 Margin = new Thickness(0, 4, 0, 0),
                 Padding = new Thickness(0),
                 Foreground = Brush("TextFillColorPrimaryBrush"),
-            });
+            };
+            LocBinding.Set(learnMore, System.Windows.Controls.ContentControl.ContentProperty, "help.learn-more");
+            panel.Children.Add(learnMore);
         }
 
         header.Children.Add(panel);
@@ -148,18 +153,21 @@ public static class HelpDecorator
     {
         var stack = new StackPanel { MaxWidth = 320 };
 
-        stack.Children.Add(new TextBlock
+        var title = new TextBlock
         {
-            Text = topic.Title,
             FontTypography = FontTypography.BodyStrong,
             TextWrapping = TextWrapping.Wrap,
-        });
-        stack.Children.Add(new TextBlock
+        };
+        LocBinding.Set(title, TextBlock.TextProperty, topic.TitleKey);
+        stack.Children.Add(title);
+
+        var body = new TextBlock
         {
-            Text = topic.Body,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 4, 0, 0),
-        });
+        };
+        LocBinding.Set(body, TextBlock.TextProperty, $"help.{topic.Key}.body");
+        stack.Children.Add(body);
 
         element.ToolTip = new ToolTip { Content = stack };
         ToolTipService.SetInitialShowDelay(element, 400);
@@ -167,7 +175,7 @@ public static class HelpDecorator
 
         // A tooltip is invisible to someone driving the app from the keyboard, so the same words go
         // where a screen reader will actually find them.
-        AutomationProperties.SetHelpText(element, $"{topic.Title}. {topic.Body}");
+        LocBinding.Set(element, AutomationProperties.HelpTextProperty, $"help.{topic.Key}.body");
     }
 
     /// <summary>The WinForms menus have no attached properties, so their help is applied in code -

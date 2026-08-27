@@ -181,7 +181,7 @@
                         BorderThickness="1" CornerRadius="6" Padding="2">
                     <ListBox x:Name="HelpSearchResults" MaxHeight="320"
                              Background="Transparent" BorderThickness="0"
-                             SelectionChanged="OnHelpResultChosen"
+                             PreviewMouseLeftButtonUp="OnHelpResultClicked"
                              KeyDown="OnHelpResultsKeyDown" />
                 </Border>
             </Popup>
