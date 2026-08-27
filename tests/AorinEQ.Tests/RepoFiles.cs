@@ -26,8 +26,18 @@ public static class RepoFiles
                  .OrderBy(p => p, StringComparer.Ordinal)
                  .ToList();
 
+    /// <summary>Reads a repository file with line endings normalised to "\n".
+    ///
+    /// Not cosmetic. These tests match with multiline regexes, and in .NET `$` matches before the
+    /// `\n` - which means it sits AFTER the `\r` of a CRLF file. A pattern ending `\)$` then never
+    /// matches, so a table-of-contents check silently finds no entries at all.
+    ///
+    /// This working tree is LF and CI checks out CRLF, so the failure appears only on CI, which is
+    /// the worst place to discover it. Normalising here fixes every file-reading test at once
+    /// rather than sprinkling `\r?` through each pattern.</summary>
     public static string ReadText(string relativePath) =>
-        File.ReadAllText(Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        File.ReadAllText(Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar)))
+            .Replace("\r\n", "\n");
 
     /// <summary>xunit needs the file list as TheoryData so a failure names the file it came from,
     /// rather than one test failing for eleven possible reasons.</summary>
