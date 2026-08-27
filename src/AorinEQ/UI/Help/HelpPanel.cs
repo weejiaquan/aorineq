@@ -33,47 +33,52 @@ public static class HelpPanel
         var stack = new StackPanel { Margin = new Thickness(20) };
         var anchors = new Dictionary<string, FrameworkElement>(StringComparer.Ordinal);
 
-        stack.Children.Add(new TextBlock
+        var heading = new TextBlock
         {
-            Text = HelpSurfaces.DisplayName(surface),
             FontTypography = FontTypography.Title,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 16),
             // Every text style states its own Foreground. A ui:TextBlock outside a themed container
             // falls back to black, which on Mica is the 1.41:1 defect this project already shipped.
             Foreground = Brush("TextFillColorPrimaryBrush"),
-        });
+        };
+        LocBinding.Set(heading, TextBlock.TextProperty, $"surface.{surface}.name");
+        stack.Children.Add(heading);
 
         foreach (var topic in topics)
         {
             var block = new StackPanel { Margin = new Thickness(0, 0, 0, 18) };
 
-            block.Children.Add(new TextBlock
+            var topicTitle = new TextBlock
             {
-                Text = topic.Title,
                 FontTypography = FontTypography.BodyStrong,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Brush("TextFillColorPrimaryBrush"),
-            });
+            };
+            LocBinding.Set(topicTitle, TextBlock.TextProperty, topic.TitleKey);
+            block.Children.Add(topicTitle);
 
-            block.Children.Add(new TextBlock
+            var topicBody = new TextBlock
             {
-                Text = topic.Body,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 0),
                 Foreground = Brush("TextFillColorSecondaryBrush"),
-            });
+            };
+            LocBinding.Set(topicBody, TextBlock.TextProperty, $"help.{topic.Key}.body");
+            block.Children.Add(topicBody);
 
             if (topic.DocsAnchor is { } anchor)
             {
-                block.Children.Add(new HyperlinkButton
+                var learnMore = new HyperlinkButton
                 {
-                    Content = Loc.T("help.learn-more"),
                     NavigateUri = DocsUrl + anchor,
                     Margin = new Thickness(0, 4, 0, 0),
                     Padding = new Thickness(0),
                     Foreground = Brush("TextFillColorPrimaryBrush"),
-                });
+                };
+                LocBinding.Set(learnMore, System.Windows.Controls.ContentControl.ContentProperty,
+                    "help.learn-more");
+                block.Children.Add(learnMore);
             }
 
             stack.Children.Add(block);
@@ -82,7 +87,7 @@ public static class HelpPanel
 
         var window = new FluentWindow
         {
-            Title = Loc.T("help.panel.title"),
+            Title = Loc.T("help.panel.title"),   // a window CAPTION cannot be rebound live
             Owner = owner,
             Width = 460,
             Height = 620,
@@ -108,7 +113,8 @@ public static class HelpPanel
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var titleBar = new TitleBar { Title = Loc.T("help.panel.title") };
+        var titleBar = new TitleBar();
+        LocBinding.Set(titleBar, TitleBar.TitleProperty, "help.panel.title");
         Grid.SetRow(titleBar, 0);
         grid.Children.Add(titleBar);
 

@@ -503,7 +503,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _initializing = true;
         AutostartBox.IsChecked = autostartEnabled;
         RunAsAdminBox.IsChecked = runAsAdmin;
-        ElevationStateText.Text = isElevated ? "Currently running elevated."
+        ElevationStateText.Text = isElevated ? Loc.T("settings.currently-running-elevated")
             : runAsAdmin ? Loc.T("settings.not-elevated-in-this-session-restart")
             : Loc.T("settings.currently-running-without-elevation");
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;

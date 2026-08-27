@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using MouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
 using Key = System.Windows.Input.Key;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -67,22 +68,41 @@ public partial class SettingsWindow
         }
     }
 
+    /// <summary>Enter commits, Escape backs out.
+    ///
+    /// Escape has to be handled HERE as well as on the box: once Down moves focus into the list,
+    /// the box's handler stops seeing keys, and without this there is no way back out of the
+    /// results except the mouse - on a control the user reached with the keyboard.</summary>
     private void OnHelpResultsKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.Enter) return;
+        switch (e.Key)
+        {
+            case Key.Enter:
+                GoTo(HelpSearchResults.SelectedItem as HelpSearchResult);
+                e.Handled = true;
+                break;
 
-        GoTo(HelpSearchResults.SelectedItem as HelpSearchResult);
-        e.Handled = true;
+            case Key.Escape:
+                CloseSearch();
+                // Focus goes back where it came from, not nowhere: the popup is closing and the
+                // element that had focus is inside it.
+                HelpSearchBox.Focus();
+                e.Handled = true;
+                break;
+        }
     }
 
-    private void OnHelpResultChosen(object sender, SelectionChangedEventArgs e)
+    /// <summary>A click on a result commits it.
+    ///
+    /// Deliberately NOT SelectionChanged. Moving the highlight with the arrow keys also changes the
+    /// selection, so committing there meant pressing Down navigated away instantly and the list
+    /// could never be browsed from the keyboard - the very thing the Down handler exists to allow.</summary>
+    private void OnHelpResultClicked(object sender, MouseButtonEventArgs e)
     {
-        // Only a real click or an arrow-key move; rebuilding the list also raises this with
-        // nothing selected.
-        if (e.AddedItems.Count == 0) return;
-        if (!HelpSearchPopup.IsOpen) return;
+        if (e.OriginalSource is not DependencyObject source) return;
 
-        GoTo(e.AddedItems[0] as HelpSearchResult);
+        var item = ItemsControl.ContainerFromElement(HelpSearchResults, source) as ListBoxItem;
+        if (item?.DataContext is HelpSearchResult result) GoTo(result);
     }
 
     private void GoTo(HelpSearchResult? result)

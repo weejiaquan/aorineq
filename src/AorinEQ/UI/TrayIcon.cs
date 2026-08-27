@@ -99,6 +99,7 @@ public sealed class TrayIcon : IDisposable
                 var item = Localised($"hud.widget.{chosen}.name", (_, _) => HudWidgetAdded?.Invoke(chosen));
                 // Four bare nouns otherwise. The hover text says what each widget actually shows.
                 HelpDecorator.Apply(item, $"hud.widget.{chosen}");
+                _helpedItems.Add((item, $"hud.widget.{chosen}"));
                 _hudAddMenu.DropDownItems.Add(item);
             }
             _hudMenu = Localised("tray.menu.hud");
@@ -217,6 +218,11 @@ public sealed class TrayIcon : IDisposable
     /// second, hand-maintained list that would drift the first time an item was renamed.</summary>
     private readonly List<(ToolStripMenuItem Item, string Key)> _localisedItems = [];
 
+    /// <summary>Menu items carrying a help TOPIC as hover text, with the topic key. Separate from
+    /// _localisedItems because the two are different strings on the same item - the label and the
+    /// paragraph - and both have to follow a language change.</summary>
+    private readonly List<(ToolStripMenuItem Item, string TopicKey)> _helpedItems = [];
+
     /// <summary>Creates a menu item whose text is looked up now and re-looked-up on every language
     /// change.</summary>
     private ToolStripMenuItem Localised(string key, EventHandler? onClick = null)
@@ -231,6 +237,10 @@ public sealed class TrayIcon : IDisposable
     {
         foreach (var (item, key) in _localisedItems)
             item.Text = Loc.T(key);
+
+        // WinForms has no binding, so the help text on these has to be re-applied by hand too.
+        foreach (var (item, topicKey) in _helpedItems)
+            HelpDecorator.Apply(item, topicKey);
 
         Update(_percent, _muted);   // the icon tooltip is built from the table too
     }
