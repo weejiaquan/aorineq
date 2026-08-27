@@ -14,6 +14,10 @@ contract and the share payload. The website carries the same material in a frien
 - [Skins](#skins)
 - [Skin designer](#skin-designer)
 - [Equalizer](#equalizer)
+- [AirPlay](#airplay)
+- [HUD widgets](#hud-widgets)
+- [Finding your way around](#finding-your-way-around)
+- [Languages](#languages)
 - [`aorineq://` links](#aorineq-links)
 - [Auto-update](#auto-update)
 - [Files AorinEQ owns](#files-aorineq-owns)
@@ -323,6 +327,169 @@ band. **EQ enabled** bypasses the scope.
 
 **Meters** show the post-EQ output level (L/R RMS with peak ticks) and a latching clip indicator,
 from a WASAPI loopback capture of the device you are listening on.
+
+## AirPlay
+
+Sends this PC's audio to a HomePod, an Apple TV, or any other AirPlay receiver on your network.
+Built in, so a second application is not needed. Settings -> AirPlay.
+
+It needs nothing but the receiver and a shared network. There is no pairing step, no Apple account
+and no AirPlay 2 - AorinEQ speaks the original unencrypted RAOP protocol, which every AirPlay
+receiver still accepts.
+
+**Experimental.** It works, and it has been run for sustained sessions against real hardware, but it
+has had far less exposure than the rest of the app.
+
+### Receiver
+
+Receivers are discovered automatically over mDNS. Press **Refresh** if yours is not listed - some
+devices take a few seconds to answer the first query.
+
+**Connect** takes roughly half a second, and the window does not respond while it happens. That is
+the RTSP handshake running on the UI thread; a known rough edge rather than a hang.
+
+### Source
+
+Which of this PC's playback devices is captured and sent.
+
+Left on the default, whatever you are already listening to is what gets streamed - so it plays in
+both places at once. To hear it **only** on the receiver, install a virtual audio device, select it
+here, and play into it. That is the dependable route; see "Mute this PC while streaming" below for
+why the obvious alternative is not.
+
+### Playback modes
+
+How much audio is queued ahead of the receiver:
+
+| Mode | Queue |
+|---|---|
+| Real-time | 250 ms |
+| Normal | 1000 ms |
+| Buffered | 2000 ms |
+| Custom | whatever you type |
+
+**These numbers are uncalibrated.** They are reasoned guesses, not measurements. The receiver
+reports `Audio-Latency: 1886` (about 43 ms at 44.1 kHz), which is demonstrably not what it actually
+buffers, so there is no honest way to derive the real figures from the protocol - they need
+measuring by ear. On a healthy network the modes can be hard to tell apart, because the resend rate
+is 0% even at 250 ms.
+
+Watch the **resends** figure in Session details. A number that climbs means the network is not
+keeping up, and a longer queue is the fix.
+
+### Volume, and which device the keys drive
+
+The stream is captured from a loopback tap that sits **after** Equalizer APO. That inverts what you
+would expect:
+
+- **In Equalizer APO preamp mode**, the preamp is upstream of the tap, so the volume keys already
+  attenuate the audio before it is packetised. Set the receiver to 100% and the existing preamp
+  controls it, exactly like a DAC. Retargeting the keys at the receiver as well would attenuate
+  twice, so the setting greys itself out and says so rather than silently disappearing.
+- **In Windows volume mode**, endpoint volume reaches the tap only on devices without hardware
+  volume, which Microsoft documents as not contractual. Since it is unsafe to rely on in either
+  direction, AorinEQ drives the receiver's own volume explicitly.
+
+### Dithered silence
+
+Writes a plus/minus 1 LSB noise floor over otherwise-silent packets. Some receivers put their output
+stage to sleep during digital silence and clip the first instant of the next track; an inaudible
+noise floor keeps it awake. On by default, and it does not touch the music itself.
+
+### Standby and idle hang-up
+
+Keeps the session open through silence so playback resumes instantly. The cost is that the receiver
+stays claimed by this PC and another device cannot take it over, so there is an optional idle
+timeout that hangs up after a period of quiet.
+
+### Mute this PC while streaming
+
+Silences the local endpoint so sound comes only from the receiver. **Off by default, deliberately.**
+Whether endpoint mute reaches the loopback tap is a hardware lottery: on the losing side it mutes
+the AirPlay stream too, and you get silence everywhere. Choosing a virtual device as the Source is
+the route that always works.
+
+### Session details
+
+Live counters for the running session - queue depth, resends requested/served/missed, and the number
+of packets that carried no source audio. Silent packets at the very start are normal: they are the
+gap before WASAPI delivers its first buffer.
+
+### Limitations
+
+- **No multi-room.** One receiver at a time.
+- **No simultaneous local + AirPlay with independent EQ chains.** That is an audio-router problem,
+  not an AirPlay one.
+- **No AirPlay 2**, and no pairing-based receivers.
+- Connecting blocks the UI for the duration of the handshake.
+
+## HUD widgets
+
+Small always-on-top panels that show your own audio. Settings -> HUD widgets.
+
+Four kinds:
+
+- **Spectrum** - the frequencies in what you are hearing, taken *after* your EQ, so a bass boost
+  shows up here.
+- **Levels** - output level and how close it is to clipping. Worth watching after raising any EQ
+  band: if it lights up, lower the preamp rather than the volume.
+- **EQ curve** - your current tuning as a single line, without opening the editor.
+- **Volume** - a permanent read-out; scroll on it to change the volume if scrolling is enabled.
+
+They stay out of the way: never in Alt+Tab, never focused, and click-through - a click over one
+reaches whatever is underneath. Turn on **Arrange widgets** to make them solid so you can drag,
+resize and right-click them, then turn it back off.
+
+**Hide while a fullscreen app is in front** is on by default. Overlays over exclusive-fullscreen
+games either flicker or do not draw at all, so hiding them beats showing them badly. Turn it off if
+your games run borderless-windowed.
+
+One timer drives every widget, so the refresh rate is the total cost regardless of how many you
+have.
+
+## Finding your way around
+
+AorinEQ has more in it than fits on one screen, so three things exist to make that findable.
+
+**Discover** is the first page in Settings. One card per feature - what it is, whether it is
+currently doing anything, and a button that takes you to it. It is where Settings opens until you
+have seen it once, after which Settings opens on Volume.
+
+**The (?) beside a setting** opens a paragraph explaining what that setting does, when you would
+want it, and what happens if you get it wrong. Every settings row has one. Controls in the EQ editor
+and skin designer carry the same text as a tooltip instead, and both windows have a (?) in their
+title bar listing every topic for that window.
+
+**The search box** above the sidebar searches the help text, not just labels - so "homepod" finds
+the AirPlay receiver row even though no visible label contains that word. It searches your language
+and English at the same time, because most audio documentation online is in English.
+
+## Languages
+
+AorinEQ ships in English, Simplified Chinese, Traditional Chinese, Japanese and Korean. The picker
+is the first card on the Discover page, and switching applies immediately - no restart.
+
+The default, **Follow Windows**, resolves from your Windows display language. Chinese resolves by
+*script*, not country: `zh-TW`, `zh-HK` and `zh-MO` get Traditional, and everything else Chinese
+gets Simplified. Any language AorinEQ does not ship falls back to English.
+
+### The four translations are machine-drafted
+
+Only the English is written by a native speaker. The other four are machine-drafted and shipped that
+way on purpose - an unreviewed translation is more useful than no translation, and audio terminology
+is exactly where it goes wrong.
+
+**Corrections are welcome and easy.** Every non-English language card carries a *Suggest a
+correction* link that opens a prefilled GitHub issue with your version, language and Windows build
+already filled in. If you would rather fix it directly:
+
+1. Edit `src/AorinEQ.Core/Strings/strings.<code>.json` - `zh-Hans`, `zh-Hant`, `ja` or `ko`.
+2. The keys match `strings.en.json` exactly. Change values, never keys.
+3. Keep the `{0}`, `{1}` placeholders: they are substituted at runtime, and dropping one loses an
+   argument or throws.
+
+No C# is involved, and the build fails if a key goes missing or a placeholder does not match its
+English original.
 
 ## `aorineq://` links
 
