@@ -4,7 +4,7 @@
 
 <h1 align="center">AorinEQ</h1>
 
-<h4 align="center">Working volume keys, a skin you draw yourself, and a real parametric EQ — one small tray app for Windows.</h4>
+<h4 align="center">Working volume keys, a skin you draw yourself, a real parametric EQ, and AirPlay to a HomePod — one small tray app for Windows.</h4>
 
 <p align="center">
   <a href="https://github.com/weejiaquan/aorineq/releases/latest">
@@ -59,15 +59,20 @@
   isn't. Same bands underneath.
 * **Presets and AutoEq** — presets are plain Equalizer APO `.txt` files, and AutoEq profiles
   import byte-for-byte, straight from its published index.
+* **AirPlay, built in** — play this PC's sound on a HomePod, an Apple TV or any AirPlay speaker
+  without a second application. Receivers are found on the network by themselves; pick one and
+  press Connect. Four latency modes, its own volume, dithered silence so the receiver's output
+  stage never sleeps through the start of a track, and standby that keeps the session alive
+  between tracks. No pairing, no Apple account, no AirPlay 2 needed.
 * **`aorineq://` links** — one click installs a skin or applies an EQ preset from a web page,
   always behind a dialog that shows you what it is first.
-* **AirPlay, built in** — send this PC's audio to a HomePod, an Apple TV or any AirPlay receiver
-  without a second application. Receiver picker, four latency modes, dithered silence, standby.
-* **It explains itself** — a Discover page listing what the app can do, a (?) on every setting
-  saying when you would want it, and a search box that finds any of it by what it does rather than
-  by what it is labelled.
+* **It explains itself** — a Discover page that lists what the app can actually do, a **(?)** on
+  every setting saying when you would want it and what happens if you get it wrong, and a search
+  box that finds things by what they do: type *homepod* and you get the AirPlay receiver row, even
+  though that word is on no label in the app.
 * **Five languages** — English, 简体中文, 繁體中文, 日本語, 한국어. Follows your Windows language
-  by default, and switches without a restart.
+  by default and switches with no restart. The four non-English tables are machine-drafted and
+  corrections are one click away.
 * **Auto-update** — checks GitHub Releases, verifies the SHA-256, swaps itself in place.
 * **A tray icon you can actually use** — scroll the wheel over it to change the volume the way you
   can over the Windows one (Ctrl for 1 % steps, Shift for 10 %), middle-click to mute, and pick
@@ -100,6 +105,12 @@
 4. **Open the equalizer.** Tray → *Open equalizer…*. Start in Simple mode, or go Advanced and
    drag the curve. Import an [AutoEq](https://github.com/jaakkopasanen/AutoEq) profile for your
    headphones in two clicks.
+5. **Send it to a HomePod.** Settings → *AirPlay*, pick a receiver, press Connect. If you want the
+   sound to come out of the speaker *only* rather than both places at once, choose a virtual audio
+   device as the Source — the AirPlay page explains why that is the dependable route.
+6. **Wonder what something does?** Settings opens on **Discover**, which lists every feature and
+   whether it is currently on. Every setting has a **(?)** next to it, and the search box at the
+   top finds things by what they do rather than by what they are called.
 
 > **Using an Equalizer APO preamp for volume?** Set your DAC's physical volume to your maximum
 > comfortable loudness once — from then on the keyboard works digitally below that ceiling.
