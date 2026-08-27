@@ -214,7 +214,7 @@ public sealed class TrayIcon : IDisposable
     {
         _percent = percent;
         _muted = muted;
-        _icon.Text = muted ? "AorinEQ: muted" : $"AorinEQ: {percent}%";
+        _icon.Text = muted ? Loc.T("app.tray.tooltip.muted") : Loc.T("app.tray.tooltip.level", percent);
         _icon.Icon = CurrentIcon();
         _muteItem.Checked = muted;
     }
