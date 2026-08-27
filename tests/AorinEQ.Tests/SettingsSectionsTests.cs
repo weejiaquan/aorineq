@@ -20,6 +20,7 @@ public class SettingsSectionsTests
         Assert.Equal(
             new[]
             {
+                SettingsSections.Discover,
                 SettingsSections.Volume, SettingsSections.Osd, SettingsSections.Skins,
                 SettingsSections.Equalizer, SettingsSections.AirPlay, SettingsSections.Hud,
                 SettingsSections.Updates, SettingsSections.About,
@@ -37,7 +38,7 @@ public class SettingsSectionsTests
     /// <c>designer</c> open windows of their own and never route here.</summary>
     [Theory]
     [InlineData(ProtocolPages.Skins, SettingsSections.Skins)]
-    [InlineData(ProtocolPages.Settings, SettingsSections.Volume)] // bare "settings" lands on the first section
+    [InlineData(ProtocolPages.Settings, SettingsSections.Discover)] // bare "settings" lands on the first section
     public void ProtocolPagesRouteToTheirSection(string page, string expected)
     {
         _out.WriteLine($"page={page} -> section={expected}");
@@ -46,7 +47,12 @@ public class SettingsSectionsTests
 
     /// <summary>An unrecognised page must still open Settings somewhere sane rather than throwing
     /// or leaving the window blank — the app's routing already treats unknown pages as "just open
-    /// Settings", and the section picker has to agree.</summary>
+    /// Settings", and the section picker has to agree.
+    ///
+    /// That landing place became Discover in 3.7.0, when Discover took first position in the
+    /// sidebar. It is a deliberate consequence rather than a side effect: someone who followed a
+    /// link that named a page this build does not have is exactly the person best served by the
+    /// page that says what the app can do.</summary>
     [Theory]
     [InlineData("widgets")]
     [InlineData("")]
@@ -54,7 +60,7 @@ public class SettingsSectionsTests
     public void UnknownProtocolPagesFallBackToTheFirstSection(string page)
     {
         _out.WriteLine($"page='{page}' -> section={SettingsSections.ForProtocolPage(page)}");
-        Assert.Equal(SettingsSections.Volume, SettingsSections.ForProtocolPage(page));
+        Assert.Equal(SettingsSections.Discover, SettingsSections.ForProtocolPage(page));
     }
 
     /// <summary>Every section the sidebar shows must be a valid navigation target, or a deep link
@@ -70,4 +76,23 @@ public class SettingsSectionsTests
         Assert.False(SettingsSections.IsSection("widgets"));
         Assert.False(SettingsSections.IsSection(""));
     }
+
+    /// <summary>Discover is the landing page exactly once.
+    ///
+    /// Both directions matter. Never landing there means a new user has to notice a sidebar item
+    /// to learn what the app does, which is the problem this release exists to fix; always landing
+    /// there means a returning user is shown an explainer every time they open Settings to change
+    /// one thing.</summary>
+    [Fact]
+    public void DiscoverIsTheLandingSectionOnlyUntilItHasBeenSeen()
+    {
+        Assert.Equal(SettingsSections.Discover, SettingsSections.LandingSection(hasSeenDiscover: false));
+        Assert.Equal(SettingsSections.Volume, SettingsSections.LandingSection(hasSeenDiscover: true));
+    }
+
+    /// <summary>Discover being FIRST is what makes it the fallback for an unknown deep link, so
+    /// the two facts are pinned together rather than one silently drifting.</summary>
+    [Fact]
+    public void DiscoverIsFirstInTheSidebar() =>
+        Assert.Equal(SettingsSections.Discover, SettingsSections.All[0]);
 }
