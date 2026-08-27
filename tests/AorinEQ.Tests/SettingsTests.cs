@@ -323,6 +323,7 @@ public class SettingsTests : IDisposable
             HideDelaySeconds: 3.0, AnimationEnabled: false, AnimationMs: 300, StepPercent: 5,
             TrayLeftClick: TrayActions.Settings, TrayMiddleClick: TrayActions.Equalizer,
             TrayScrollEnabled: false, ScrollInverted: true,
+            Language: Languages.Ja, HasSeenDiscover: true,
             // Set explicitly because Normalize materialises the default for a file that has no
             // AirPlay block — deliberately, so the UI never has to null-guard it. A test named
             // "all fields" must therefore name this one too.
@@ -331,5 +332,44 @@ public class SettingsTests : IDisposable
         orig.Save(_path);
         var loaded = Settings.Load(_path);
         Assert.Equal(orig, loaded);
+    }
+
+    /// <summary>The language setting stores an INTENT, not a resolved table.
+    ///
+    /// "auto" is the default and is resolved through Languages.Resolve at startup, so a user who
+    /// later changes their Windows display language gets AorinEQ's along with it. Storing the
+    /// resolved table instead would freeze the app to whatever language Windows happened to be in
+    /// on first run.</summary>
+    [Fact]
+    public void Language_defaults_to_auto_and_discover_starts_unseen()
+    {
+        Assert.Equal(Languages.Auto, Settings.Default.Language);
+        Assert.False(Settings.Default.HasSeenDiscover);
+    }
+
+    /// <summary>settings.json is a plain file people edit by hand, and this repo has already had a
+    /// release blocked by a settings value the app could not cope with. A language nobody ships
+    /// must fall back, not throw: this runs before the first window exists.</summary>
+    [Fact]
+    public void A_hand_edited_nonsense_language_normalises_back_to_auto()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, """{"Percent":50,"Muted":false,"Language":"klingon"}""");
+        Assert.Equal(Languages.Auto, Settings.Load(_path).Language);
+    }
+
+    /// <summary>Every existing 3.6.0 settings.json predates both fields. They must arrive at their
+    /// defaults rather than as nulls, because HasSeenDiscover=false is what triggers the one-time
+    /// nudge for exactly the population that has never seen Discover.</summary>
+    [Fact]
+    public void A_settings_file_from_before_this_release_gets_the_defaults()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, """{"Percent":50,"Muted":false,"VolumeMode":"eapo"}""");
+
+        var loaded = Settings.Load(_path);
+
+        Assert.Equal(Languages.Auto, loaded.Language);
+        Assert.False(loaded.HasSeenDiscover);
     }
 }
