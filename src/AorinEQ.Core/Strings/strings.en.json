@@ -596,5 +596,9 @@
   "language.ja.endonym": "日本語",
   "language.ko.endonym": "한국어",
   "language.zh-hans.endonym": "简体中文",
-  "language.zh-hant.endonym": "繁體中文"
+  "language.zh-hant.endonym": "繁體中文",
+  "help.hud.widget.spectrum.body": "Draws the frequencies in whatever you are listening to, from bass on one side to treble on the other, moving in time with the sound. It shows the audio AFTER your equalizer, so if you boost the bass you will see that boost here. Useful for seeing what a track is actually doing, or for checking that an EQ change did what you expected.",
+  "help.hud.widget.levels.body": "Shows how loud the signal is and, more importantly, how close it is to the maximum the system can carry. If it hits the top the sound clips, which is the harsh crackle you get from too much EQ boost. Watch this one after raising any band: if it lights up, lower the preamp rather than turning the volume down.",
+  "help.hud.widget.eqcurve.body": "Draws your current equalizer settings as a single line, so you can see the shape of your tuning at a glance without opening the editor. It updates as you change bands. Handy while you are tuning by ear and want to keep the editor out of the way.",
+  "help.hud.widget.volume.body": "A permanent read-out of the current volume, for when you want to see the level without pressing anything or hovering the tray icon. You can also scroll on it to change the volume, if scrolling is turned on."
 }
