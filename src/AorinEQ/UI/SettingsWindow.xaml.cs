@@ -115,8 +115,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ElevationStateText.Text = isElevated
             ? "Currently running elevated."
             : runAsAdmin
-                ? "Not elevated in this session — restart the app (or approve the prompt) to apply."
-                : "Currently running without elevation.";
+                ? Loc.T("settings.not-elevated-in-this-session-restart")
+                : Loc.T("settings.currently-running-without-elevation");
         VersionText.Text = "AorinEQ " + version;
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
@@ -260,10 +260,14 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     private void ApplyDeviceVolumes(Settings settings)
     {
         int count = settings.DeviceVolumes?.Count ?? 0;
-        DeviceVolumeText.Text = count == 0
-            ? "AorinEQ remembers a volume per playback device. None seen yet — press a volume key."
-            : $"AorinEQ remembers a volume per playback device, and follows the Windows default. "
-                + $"{count} device{(count == 1 ? "" : "s")} remembered.";
+        // Three strings, not one with an "s" appended: see the note in EqEditorWindow's
+        // SimpleModeHint - English pluralisation does not survive translation.
+        DeviceVolumeText.Text = count switch
+        {
+            0 => Loc.T("settings.device-volume.none"),
+            1 => Loc.T("settings.device-volume.one"),
+            _ => Loc.T("settings.device-volume.many", count),
+        };
     }
 
     /// <summary>Renders the health row and the banner from one reading. Called at construction,
@@ -305,7 +309,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 false => "No",
                 // Another tool had Equalizer APO's config file open for the moment we looked. Not
                 // a fault, and saying "No" would be a lie about the user's setup.
-                null => "Couldn't read it just now",
+                null => Loc.T("settings.couldn-t-read-it-just-now"),
             };
         HealthCheckedValue.Text = health is null
             ? "—"
@@ -323,7 +327,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         bool canRepair = health is { ActiveOnDevice: false } && _repairUnavailableReason is null;
         RepairEapoButton.IsEnabled = canRepair;
         RepairEapoButton.ToolTip = canRepair
-            ? "Switch Equalizer APO back on for the device you're using now."
+            ? Loc.T("settings.switch-equalizer-apo-back-on-for")
             : _repairUnavailableReason;
 
         ApplyEapoBanner();
@@ -455,8 +459,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         AutostartBox.IsChecked = autostartEnabled;
         RunAsAdminBox.IsChecked = runAsAdmin;
         ElevationStateText.Text = isElevated ? "Currently running elevated."
-            : runAsAdmin ? "Not elevated in this session — restart the app (or approve the prompt) to apply."
-            : "Currently running without elevation.";
+            : runAsAdmin ? Loc.T("settings.not-elevated-in-this-session-restart")
+            : Loc.T("settings.currently-running-without-elevation");
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
@@ -521,7 +525,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         AnimationCheckBox.IsChecked = settings.AnimationEnabled;
         AnimationDurationSlider.Value = settings.AnimationMs;
-        AnimationDurationLabel.Text = $"{settings.AnimationMs}ms";
+        AnimationDurationLabel.Text = Loc.T("settings.animation-duration.ms", settings.AnimationMs);
 
         SelectByTag(StepCombo, settings.StepPercent.ToString());
     }
@@ -677,7 +681,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Filter = "Skin zip (*.zip)|*.zip",
-            Title = "Import a shared skin",
+            Title = Loc.T("settings.import-a-shared-skin"),
         };
         if (dialog.ShowDialog(this) != true) return;
 
@@ -687,14 +691,14 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             if (SkinWriter.ValidateName(name) is { } nameError)
             {
                 System.Windows.MessageBox.Show(
-                    $"The zip filename can't be used as the skin name: {nameError}",
+                    Loc.T("settings.the-zip-filename-can-t-be", nameError),
                     "AorinEQ", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             if (Directory.Exists(Path.Combine(ApoPaths.GetSkinsRoot(), name)))
             {
                 var choice = System.Windows.MessageBox.Show(
-                    $"A skin named '{name}' already exists. Overwrite it?",
+                    Loc.T("settings.a-skin-named-already-exists-overwrite", name),
                     "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (choice != MessageBoxResult.Yes) return;
             }
@@ -763,7 +767,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnAnimationDurationChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        AnimationDurationLabel.Text = $"{(int)e.NewValue}ms";
+        AnimationDurationLabel.Text = Loc.T("settings.animation-duration.ms", (int)e.NewValue);
         RaiseOsdSettingsChanged();
     }
 

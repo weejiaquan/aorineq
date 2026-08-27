@@ -60,6 +60,18 @@ public partial class App : System.Windows.Application
     // serializes it — SaveSettings must never build a fresh Settings from a handful of fields, or
     // every change clobbers the rest of what's on disk.
     private Settings _settings = Settings.Default;
+
+    /// <summary>Points <see cref="Loc"/> at the table a settings value asks for.
+    ///
+    /// The setting stores an INTENT - "auto", or one of the five codes - and this is the single
+    /// place that turns it into an active table. Keeping the resolution here rather than in Loc
+    /// means Loc never has to know what CultureInfo is, which is what keeps it unit-testable
+    /// without a Windows UI language to stand in.</summary>
+    internal static void ApplyLanguage(string setting) =>
+        Loc.Language = setting == Languages.Auto
+            ? Languages.Resolve(System.Globalization.CultureInfo.CurrentUICulture.Name)
+            : setting;
+
     private bool _uacDeclined;
     private bool _togglingRunAsAdmin;
     private bool _togglingAutostart;
@@ -151,9 +163,8 @@ public partial class App : System.Windows.Application
         try
         {
             System.Windows.MessageBox.Show(
-                $"AorinEQ hit an unexpected error and has to close.\n\n" +
-                $"{exception.GetType().Name}: {exception.Message}\n\n" +
-                (logPath is null ? "" : $"Details were written to:\n{logPath}"),
+                Loc.T("app.aorineq-hit-an-unexpected-error-and", exception.GetType().Name, exception.Message) +
+                (logPath is null ? "" : Loc.T("app.details-were-written-to", logPath)),
                 "AorinEQ", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         catch (Exception)
@@ -233,6 +244,12 @@ public partial class App : System.Windows.Application
         bool firstRun = !File.Exists(_settingsPath); // brand-new install: mode-choice onboarding below
         var settings = Settings.Load(_settingsPath);
         _settings = settings;
+
+        // Before ANY window is built, because a window resolves its strings as it is constructed
+        // and there is nothing here that re-runs that for the startup wizard. "auto" - the default,
+        // and what every upgrading user has - resolves from the Windows UI language, so a Japanese
+        // Windows gets a Japanese AorinEQ without the user finding a setting first.
+        ApplyLanguage(_settings.Language);
 
         // Cheap probe so a second launch doesn't pay for a pointless UAC prompt via the
         // elevated bounce below: if an instance is already running, its named event exists
@@ -420,7 +437,7 @@ public partial class App : System.Windows.Application
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
 
             if (_uacDeclined)
-                _tray.ShowWarning("Not elevated — volume keys won't work in elevated games.");
+                _tray.ShowWarning(Loc.T("app.not-elevated-volume-keys-won-t"));
 
             MigrateLegacyAutostart();
 
@@ -526,7 +543,7 @@ public partial class App : System.Windows.Application
         }
         SetupAutoUpdate();
         if (e.Args.Contains("--updated"))
-            _tray!.ShowInfo($"Updated to AorinEQ {GetVersionString()}.");
+            _tray!.ShowInfo(Loc.T("app.updated-to-aorineq", GetVersionString()));
 
         // Fresh-launch flags only (also used by E2E automation): when an instance is already
         // running, a second launch signals the OSD as usual — these are not IPC commands.
@@ -634,7 +651,7 @@ public partial class App : System.Windows.Application
     private void ShowInstanceConflictDialogAndShutdown()
     {
         System.Windows.MessageBox.Show(
-            "AorinEQ appears to be running under a different account or security context in this session.",
+            Loc.T("app.aorineq-appears-to-be-running-under"),
             "AorinEQ", MessageBoxButton.OK, MessageBoxImage.Error);
         Shutdown(1);
     }
@@ -779,7 +796,7 @@ public partial class App : System.Windows.Application
                 if (!Elevation.IsElevated)
                 {
                     var choice = System.Windows.MessageBox.Show(
-                        "Restart AorinEQ elevated now?", "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                        Loc.T("app.restart-aorineq-elevated-now"), "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (choice == MessageBoxResult.Yes && TryRelaunchElevatedAndShutdown())
                         return;
                 }
@@ -796,7 +813,7 @@ public partial class App : System.Windows.Application
 
                 if (Elevation.IsElevated)
                     System.Windows.MessageBox.Show(
-                        "Restart AorinEQ without elevation for this change to take full effect.",
+                        Loc.T("app.restart-aorineq-without-elevation-for-this"),
                         "AorinEQ", MessageBoxButton.OK, MessageBoxImage.Information);
             }
 
@@ -969,8 +986,7 @@ public partial class App : System.Windows.Application
             _eqEditor.EditorModeChanged += OnEqEditorModeChanged;
             _eqEditor.Closed += (_, _) => _eqEditor = null;
             if (_writer is null)
-                _tray?.ShowWarning("Equalizer APO isn't set up (or its config folder isn't "
-                    + "writable) — EQ changes won't reach your audio until it is. See Settings → Setup guide.");
+                _tray?.ShowWarning(Loc.T("app.equalizer-apo-isn-t-set-up"));
             _eqEditor.Show();
         }
         _eqEditor.Activate();
@@ -1037,7 +1053,7 @@ public partial class App : System.Windows.Application
     {
         if (PresetStore.Load(ApoPaths.GetPresetsRoot(), name) is not { } preset)
         {
-            _tray?.ShowWarning($"Preset '{name}' couldn't be loaded.");
+            _tray?.ShowWarning(Loc.T("app.preset-couldn-t-be-loaded", name));
             return;
         }
         var current = ActiveTrayEqScope();
@@ -1152,7 +1168,7 @@ public partial class App : System.Windows.Application
         var result = ProtocolLink.Parse(raw);
         if (result.Status == ProtocolParseStatus.UnknownAction)
         {
-            _tray?.ShowWarning("This link needs a newer version of AorinEQ.");
+            _tray?.ShowWarning(Loc.T("app.this-link-needs-a-newer-version"));
             return;
         }
         if (result.Status != ProtocolParseStatus.Ok)
@@ -1260,7 +1276,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            _tray?.ShowWarning($"Couldn't save the preset: {ex.Message}");
+            _tray?.ShowWarning(Loc.T("app.couldn-t-save-the-preset", ex.Message));
             return;
         }
 
@@ -1272,7 +1288,7 @@ public partial class App : System.Windows.Application
             OnEqScopeChanged(deviceId, new EqScopeSetting(
                 link.Name, preset.PreampDb, current?.Enabled ?? true, preset.Bands.ToArray()));
             _eqEditor?.RefreshFromApp();
-            _tray?.ShowInfo($"EQ preset '{link.Name}' applied to {scopeDescription}.");
+            _tray?.ShowInfo(Loc.T("app.eq-preset-applied-to", link.Name, scopeDescription));
         }
         else
         {
@@ -1298,7 +1314,7 @@ public partial class App : System.Windows.Application
             // Strict: the whole block parses or nothing is applied.
             if (!EqPreset.TryParse(link.Name, text, out var preset, out var parseError))
                 throw new InvalidOperationException(
-                    $"That link didn't contain a usable Equalizer APO preset. {parseError}");
+                    Loc.T("app.that-link-didn-t-contain-a", parseError));
             if (preset.Bands.Count == 0)
                 throw new InvalidOperationException("That link contains no filters.");
             return preset;
@@ -1323,12 +1339,12 @@ public partial class App : System.Windows.Application
     private (string? DeviceId, string Description) ResolveEqLinkScope(string scope)
     {
         if (scope == EqLinkScopes.Global)
-            return (null, "the global EQ (every device)");
+            return (null, Loc.T("app.the-global-eq-every-device"));
         if (_deviceStates.ActiveId is not { } activeId)
-            return (null, "the global EQ (no active playback device right now)");
+            return (null, Loc.T("app.the-global-eq-no-active-playback"));
         var name = AudioEndpoint.GetRenderEndpoints()
             .FirstOrDefault(e => e.Id == activeId)?.FriendlyName;
-        return (activeId, name is null ? "the current playback device" : $"'{name}'");
+        return (activeId, name is null ? Loc.T("app.the-current-playback-device") : $"'{name}'");
     }
 
     /// <summary>An <c>open</c> link: bring up the named window. Nothing changes state, which is
@@ -1403,8 +1419,7 @@ public partial class App : System.Windows.Application
         if (EapoRepairBackup.Load(EapoRepair.BackupPath) is { IsInterrupted: true })
         {
             _tray?.ShowActionableWarning(
-                "An Equalizer APO repair didn't finish last time. Open Settings to undo it if your sound "
-                + "isn't right.",
+                Loc.T("app.an-equalizer-apo-repair-didn-t"),
                 () => _ = OpenSettingsAsync(SettingsSections.Volume));
         }
     }
@@ -1549,7 +1564,7 @@ public partial class App : System.Windows.Application
         if (!held)
         {
             EapoRepair.SaveResult(new EapoRepairResult(EapoRepairOutcome.Refused,
-                "AorinEQ is already changing this PC's audio settings. Wait for that to finish.", token));
+                Loc.T("app.aorineq-is-already-changing-this-pc"), token));
             return 1;
         }
         try
@@ -1571,20 +1586,19 @@ public partial class App : System.Windows.Application
                 result = !EapoRepair.IsTrustworthyStateFile(EapoRepair.BackupPath)
                     ? new EapoRepairResult(EapoRepairOutcome.Refused,
                         File.Exists(EapoRepair.BackupPath)
-                            ? "AorinEQ won't undo from a record that something else on this PC could have "
-                              + "changed. Equalizer APO's own Configurator can reset this device."
-                            : "There's nothing to undo — AorinEQ has no record of changing this PC's audio settings.")
+                            ? Loc.T("app.aorineq-won-t-undo-from-a")
+                            : Loc.T("app.there-s-nothing-to-undo-aorineq"))
                     : EapoRepairBackup.Load(EapoRepair.BackupPath) is { } backup
                         ? EapoRepair.Undo(backup, Restart)
                         : new EapoRepairResult(EapoRepairOutcome.Refused,
-                            "There's nothing to undo — AorinEQ has no record of changing this PC's audio settings.");
+                            Loc.T("app.there-s-nothing-to-undo-aorineq"));
             }
             else
             {
                 var guid = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId());
                 result = guid is null
                     ? new EapoRepairResult(EapoRepairOutcome.Refused,
-                        "Windows isn't reporting a playback device right now, so there's nothing to repair.")
+                        Loc.T("app.windows-isn-t-reporting-a-playback"))
                     : EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid));
             }
 
@@ -1598,7 +1612,7 @@ public partial class App : System.Windows.Application
             // launcher could only report as "it failed". Recorded instead, so the user gets a
             // reason — and the backup file is still on disk, which is what makes it recoverable.
             EapoRepair.SaveResult(new EapoRepairResult(EapoRepairOutcome.FailedAndNotReverted,
-                "The repair helper failed unexpectedly: " + ex.Message, token));
+                Loc.T("app.the-repair-helper-failed-unexpectedly") + ex.Message, token));
             return 2;
         }
         finally
@@ -1658,9 +1672,7 @@ public partial class App : System.Windows.Application
     private async void OnEapoUndoRepairRequested()
     {
         if (System.Windows.MessageBox.Show(
-                "AorinEQ will put this playback device's settings back exactly as they were before the "
-                + "repair, and restart Windows audio again. Equalizer APO will stop processing this "
-                + "device.\n\nUndo the repair?",
+                Loc.T("app.aorineq-will-put-this-playback-device"),
                 "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
         await RunEapoRepairHelperAsync("--undo-eapo-repair", "Undoing…");
@@ -1688,13 +1700,13 @@ public partial class App : System.Windows.Application
             catch (System.ComponentModel.Win32Exception)
             {
                 _settingsWindow?.SetEapoRepairStatus(
-                    "Administrator permission is needed to change a playback device's settings. Nothing was changed.",
+                    Loc.T("app.administrator-permission-is-needed-to-change"),
                     busy: false);
                 return;
             }
             if (proc is null)
             {
-                _settingsWindow?.SetEapoRepairStatus("Couldn't start the repair helper. Nothing was changed.", busy: false);
+                _settingsWindow?.SetEapoRepairStatus(Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
                 return;
             }
             await proc.WaitForExitAsync();
@@ -1705,7 +1717,7 @@ public partial class App : System.Windows.Application
             _settingsWindow?.SetEapoRepairStatus(
                 result?.Message ?? NoVerdictMessage(proc.ExitCode), busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
-                _tray?.ShowInfo("Equalizer APO is switched on for your playback device again.");
+                _tray?.ShowInfo(Loc.T("app.equalizer-apo-is-switched-on-for"));
         }
         finally
         {
@@ -1728,11 +1740,8 @@ public partial class App : System.Windows.Application
     {
         var backup = EapoRepairBackup.Load(EapoRepair.BackupPath);
         if (backup is null)
-            return $"The repair stopped before it reported anything (code {exitCode}), and it had not "
-                + "changed any settings by then.";
-        return $"The repair stopped before it reported anything (code {exitCode}), and it had already "
-            + "saved a record of your settings — so this device may have been changed. Use \"Undo repair\" "
-            + "to put it back exactly as it was.";
+            return Loc.T("app.the-repair-stopped-before-it-reported", exitCode);
+        return Loc.T("app.the-repair-stopped-before-it-reported-2", exitCode);
     }
 
     /// <summary>The health banner's "Switch to Windows volume mode" button: the same live
@@ -1868,7 +1877,7 @@ public partial class App : System.Windows.Application
                     return;
                 case UpdateStatus.UpToDate:
                     _settingsWindow?.SetUpdateStatus(
-                        $"Latest release: {result.Release!.TagName} — you're up to date.");
+                        Loc.T("app.latest-release-you-re-up-to", result.Release!.TagName));
                     return;
             }
 
@@ -1898,8 +1907,8 @@ public partial class App : System.Windows.Application
         if (!UpdateApplier.CanWriteTo(exeDir))
         {
             _settingsWindow?.SetUpdateStatus(
-                $"{release.TagName} is available, but {exeDir} isn't writable — get it from the release page.");
-            _tray?.ShowNotice($"AorinEQ {release.TagName} is available — click to open the release page.",
+                Loc.T("app.is-available-but-isn-t-writable", release.TagName, exeDir));
+            _tray?.ShowNotice(Loc.T("app.aorineq-is-available-click-to-open", release.TagName),
                 () => OpenUrl(release.HtmlUrl));
             return;
         }
@@ -1912,7 +1921,7 @@ public partial class App : System.Windows.Application
         if (_pendingUpdate is { } ready && ready.TagName == release.TagName
             && File.Exists(ready.StagedExePath))
         {
-            _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — applies when AorinEQ restarts.");
+            _settingsWindow?.SetUpdateStatus(Loc.T("app.is-ready-applies-when-aorineq-restarts", release.TagName));
             return;
         }
 
@@ -1957,7 +1966,7 @@ public partial class App : System.Windows.Application
         if (!interactive && !_settings.AutoUpdate)
         {
             UpdateApplier.TryDeleteStaged(ExePath);
-            _settingsWindow?.SetUpdateStatus($"{release.TagName} was downloaded, then auto-update was turned off.");
+            _settingsWindow?.SetUpdateStatus(Loc.T("app.was-downloaded-then-auto-update-was", release.TagName));
             return;
         }
 
@@ -1968,9 +1977,9 @@ public partial class App : System.Windows.Application
             // Restarting on our own would spring a UAC prompt the user did not ask for. Offering
             // it on a click is not a surprise — and until they take it, nothing has changed on
             // disk, so this session stays exactly as healthy as it was.
-            _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — applies when AorinEQ restarts.");
+            _settingsWindow?.SetUpdateStatus(Loc.T("app.is-ready-applies-when-aorineq-restarts", release.TagName));
             _tray?.ShowNotice(
-                $"AorinEQ {release.TagName} is ready — click to restart now, or it applies the next time AorinEQ starts.",
+                Loc.T("app.aorineq-is-ready-click-to-restart", release.TagName),
                 RestartForUpdate);
             return;
         }
@@ -2053,7 +2062,7 @@ public partial class App : System.Windows.Application
             if (renames)
                 TryRepointExternalReferences(ExePath);
             CrashLog.Write(ApoPaths.GetStateRoot(),
-                new InvalidOperationException($"Update to {pending.TagName} could not be applied: {error}"),
+                new InvalidOperationException(Loc.T("app.update-to-could-not-be-applied", pending.TagName, error)),
                 GetVersionString(), "UpdateOnExit");
             return;
         }
@@ -2239,7 +2248,7 @@ public partial class App : System.Windows.Application
         catch (System.ComponentModel.Win32Exception ex)
         {
             _wheelHook = null;
-            _tray?.ShowWarning($"Scrolling the tray icon is unavailable: {ex.Message}");
+            _tray?.ShowWarning(Loc.T("app.scrolling-the-tray-icon-is-unavailable", ex.Message));
         }
     }
 
@@ -2406,7 +2415,7 @@ public partial class App : System.Windows.Application
             throw;
         }
         writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
-            _tray?.ShowWarning("Volume changes are not reaching Equalizer APO (aorineq.txt is not writable)."));
+            _tray?.ShowWarning(Loc.T("app.volume-changes-are-not-reaching-equalizer")));
         writer.StartIncludeGuard();
         _writer = writer;
     }
@@ -2448,7 +2457,7 @@ public partial class App : System.Windows.Application
                 return false;
             }
             writer.WriteFailing += () => Dispatcher.BeginInvoke(() =>
-                _tray?.ShowWarning("EQ changes are not reaching Equalizer APO (aorineq.txt is not writable)."));
+                _tray?.ShowWarning(Loc.T("app.eq-changes-are-not-reaching-equalizer")));
             writer.StartIncludeGuard();
             _writer = writer;
             return true;
@@ -2533,8 +2542,7 @@ public partial class App : System.Windows.Application
             _settings = _settings with { VolumeMode = mode };
             if (_writer is null && !TryBuildEapoPipeline())
             {
-                _tray?.ShowWarning("Equalizer APO isn't set up yet — volume keys won't change "
-                    + "loudness until the setup guide completes.");
+                _tray?.ShowWarning(Loc.T("app.equalizer-apo-isn-t-set-up-2"));
                 OpenOnboarding();
             }
             RenderEqConfig(); // re-apply the saved per-device volumes to the preamps
@@ -2571,7 +2579,7 @@ public partial class App : System.Windows.Application
             _hud = new HudManager(store, _audioPipeline, SnapshotHudState);
             _hud.LayoutChanged += layout => _settingsWindow?.ApplyHud(layout);
             _hud.MovedToPrimary += () => _tray?.ShowInfo(
-                "A HUD widget's screen is gone — it has been moved to your main display.");
+                Loc.T("app.a-hud-widget-s-screen-is"));
             _hud.SetSkin(_useSkinOsd ? CurrentSkinInfo() : null);
             _hud.ApplyPalette(EqPalette.For(SystemTheme.AppsUseLightTheme()));
             _hud.Apply();
@@ -2583,7 +2591,7 @@ public partial class App : System.Windows.Application
         {
             // A HUD that cannot read its own layout must not stop the app the user actually
             // relies on from starting.
-            _tray?.ShowWarning("The HUD layout could not be loaded: " + ex.Message);
+            _tray?.ShowWarning(Loc.T("app.the-hud-layout-could-not-be") + ex.Message);
         }
     }
 
@@ -2980,7 +2988,7 @@ public partial class App : System.Windows.Application
             proc.WaitForExit();
             if (proc.ExitCode != 0)
                 throw new InvalidOperationException(
-                    "Elevated setup failed — make the Equalizer APO config folder writable and retry.");
+                    Loc.T("app.elevated-setup-failed-make-the-equalizer"));
         }
     }
 

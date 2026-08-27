@@ -63,9 +63,8 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
         SystemModeRadio.IsChecked = preselect != VolumeModes.Eapo;
         EapoModeRadio.IsChecked = preselect == VolumeModes.Eapo;
         Show(Step.ModeChoice,
-            heading: "How should volume keys control loudness?",
-            body: "AorinEQ swallows the volume keys and shows its own OSD either way — pick "
-                + "what the keys actually change. You can switch anytime in Settings.",
+            heading: Loc.T("onboarding.how-should-volume-keys-control-loudness"),
+            body: Loc.T("onboarding.aorineq-swallows-the-volume-keys-and"),
             primary: "Continue",
             secondary: _blocking ? "Exit AorinEQ" : "Close");
         ModePanel.Visibility = Visibility.Visible;
@@ -79,31 +78,25 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
         {
             case EapoStatus.NotInstalled:
                 Show(Step.Explain,
-                    heading: "Set up Equalizer APO",
-                    body: "AorinEQ changes your volume through Equalizer APO, a free, open-source "
-                        + "system-wide audio processor. It isn't installed on this PC yet.\n\n"
-                        + "AorinEQ can download the official installer and start it for you.",
-                    primary: "Download and install…",
+                    heading: Loc.T("onboarding.set-up-equalizer-apo"),
+                    body: Loc.T("onboarding.aorineq-changes-your-volume-through-equalizer"),
+                    primary: Loc.T("onboarding.download-and-install"),
                     secondary: _blocking ? "Exit AorinEQ" : "Close");
                 break;
             case EapoStatus.InstalledInactive:
                 Show(Step.NeedsDevice,
-                    heading: "Almost there — pick your playback device",
-                    body: "Equalizer APO is installed, but it isn't enabled on your current playback "
-                        + "device, so volume changes won't be audible there.\n\n"
-                        + "Open the Configurator, tick the checkbox next to your speakers or "
-                        + "headphones, and click OK.",
-                    primary: "Open Configurator",
+                    heading: Loc.T("onboarding.almost-there-pick-your-playback-device"),
+                    body: Loc.T("onboarding.equalizer-apo-is-installed-but-it"),
+                    primary: Loc.T("onboarding.open-configurator"),
                     secondary: _blocking ? "Exit AorinEQ" : "Close");
                 break;
             case EapoStatus.Active:
                 Show(Step.Success,
-                    heading: initial && !_blocking ? "Everything is set up" : "Equalizer APO is ready",
-                    body: "Equalizer APO is installed and enabled on your current playback device."
-                        + (initial ? "" : "\n\nIf volume changes aren't audible yet, Windows' audio "
-                        + "engine still needs a restart — use the button below (or restart your PC)."),
+                    heading: initial && !_blocking ? Loc.T("onboarding.everything-is-set-up") : Loc.T("onboarding.equalizer-apo-is-ready"),
+                    body: Loc.T("onboarding.equalizer-apo-is-installed-and-enabled")
+                        + (initial ? "" : Loc.T("onboarding.if-volume-changes-aren-t-audible")),
                     primary: _blocking ? "Start AorinEQ" : "Close",
-                    secondary: initial ? null : "Restart audio now");
+                    secondary: initial ? null : Loc.T("onboarding.restart-audio-now"));
                 break;
         }
     }
@@ -169,8 +162,8 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
     private async Task RunDownloadAndInstaller()
     {
         Show(Step.Downloading,
-            heading: "Downloading Equalizer APO…",
-            body: "Fetching the official installer from SourceForge.",
+            heading: Loc.T("onboarding.downloading-equalizer-apo"),
+            body: Loc.T("onboarding.fetching-the-official-installer-from-sourceforge"),
             primary: "Downloading…",
             secondary: "Cancel");
         PrimaryButton.IsEnabled = false;
@@ -198,7 +191,7 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
                 return;
             }
             EnterStateForCurrentDetection(); // back to Explain
-            ErrorText.Text = ex.Message + " You can also install manually from equalizerapo.com.";
+            ErrorText.Text = ex.Message + Loc.T("onboarding.you-can-also-install-manually-from");
             ErrorText.Visibility = Visibility.Visible;
             return;
         }
@@ -209,11 +202,10 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
 
         Show(Step.InstallerRunning,
             heading: "Installer running…",
-            body: "Follow the Equalizer APO installer.",
-            primary: "Waiting for the installer…",
+            body: Loc.T("onboarding.follow-the-equalizer-apo-installer"),
+            primary: Loc.T("onboarding.waiting-for-the-installer"),
             secondary: null,
-            guidance: "When the Configurator window appears, tick the checkbox next to your "
-                + "speakers or headphones, then click OK and finish the installer.");
+            guidance: Loc.T("onboarding.when-the-configurator-window-appears-tick"));
         PrimaryButton.IsEnabled = false;
 
         try
@@ -235,8 +227,7 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
         EnterStateForCurrentDetection();
         if (_step == Step.Explain)
         {
-            ErrorText.Text = "The installer didn't complete. You can try again, or install "
-                + "manually from equalizerapo.com and reopen this guide.";
+            ErrorText.Text = Loc.T("onboarding.the-installer-didn-t-complete-you");
             ErrorText.Visibility = Visibility.Visible;
         }
     }
@@ -280,9 +271,7 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
             // explicitly afterwards in case -Force left it stopped.
             var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
                 "powershell.exe",
-                "-NoProfile -ExecutionPolicy Bypass -Command "
-                + "\"Restart-Service AudioEndpointBuilder -Force -ErrorAction Stop; "
-                + "Start-Service Audiosrv -ErrorAction SilentlyContinue\"")
+                Loc.T("onboarding.noprofile-executionpolicy-bypass-command-restart-service"))
             {
                 UseShellExecute = true,
                 Verb = "runas",
@@ -290,25 +279,25 @@ public partial class OnboardingWindow : Wpf.Ui.Controls.FluentWindow
             });
             if (proc is null)
             {
-                ErrorText.Text = "Couldn't start the elevated helper — restart your PC instead.";
+                ErrorText.Text = Loc.T("onboarding.error.couldn-t-start-the");
                 ErrorText.Visibility = Visibility.Visible;
                 return;
             }
             await proc.WaitForExitAsync();
             if (proc.ExitCode == 0)
             {
-                BodyText.Text = "Audio restarted. Equalizer APO is now processing your playback device.";
+                BodyText.Text = Loc.T("onboarding.body.audio-restarted-equalizer-apo");
             }
             else
             {
-                ErrorText.Text = "The audio services could not be restarted (helper exit code "
-                    + proc.ExitCode + ") — restart your PC instead to finish the setup.";
+                ErrorText.Text = Loc.T("onboarding.the-audio-services-could-not-be")
+                    + proc.ExitCode + Loc.T("onboarding.restart-your-pc-instead-to-finish");
                 ErrorText.Visibility = Visibility.Visible;
             }
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            ErrorText.Text = "Elevation was declined — restart your PC instead to finish the setup.";
+            ErrorText.Text = Loc.T("onboarding.error.elevation-was-declined-restart");
             ErrorText.Visibility = Visibility.Visible;
         }
         finally

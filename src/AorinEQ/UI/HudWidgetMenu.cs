@@ -28,45 +28,45 @@ internal static class HudWidgetMenu
         }
 
         menu.Items.Add(new Separator());
-        menu.Items.Add(Choices("Background", widget.Opacity,
-            [("Transparent", HudWidget.MinOpacity), ("Light", 0.25), ("Medium", 0.55),
-             ("Heavy", 0.8), ("Solid", 1.0)],
+        menu.Items.Add(Choices(Loc.T("hud.menu.background"), widget.Opacity,
+            [(Loc.T("hud.menu.transparent"), HudWidget.MinOpacity), (Loc.T("hud.menu.light"), 0.25), (Loc.T("hud.menu.medium"), 0.55),
+             (Loc.T("hud.menu.heavy"), 0.8), (Loc.T("hud.menu.solid"), 1.0)],
             v => hud.Update(widget with { Opacity = v })));
-        menu.Items.Add(Item("Hide this widget", () => hud.SetVisible(widget.Id, false)));
-        menu.Items.Add(Item("Remove this widget", () => hud.Remove(widget.Id)));
+        menu.Items.Add(Item(Loc.T("hud.menu.hide-this-widget"), () => hud.SetVisible(widget.Id, false)));
+        menu.Items.Add(Item(Loc.T("hud.menu.remove-this-widget"), () => hud.Remove(widget.Id)));
         return menu;
     }
 
     private static void AddSpectrum(ContextMenu menu, HudManager hud, HudWidget w)
     {
-        menu.Items.Add(Choices("Bars", w.BandCount,
+        menu.Items.Add(Choices(Loc.T("hud.menu.bars"), w.BandCount,
             [("16", 16), ("24", 24), ("32", 32), ("48", 48), ("64", 64), ("96", 96), ("128", 128)],
             v => hud.Update(w with { BandCount = v })));
-        menu.Items.Add(Choices("Direction", w.Orientation,
-            [("Left to right", HudOrientations.LeftToRight),
-             ("Right to left", HudOrientations.RightToLeft),
-             ("Vertical", HudOrientations.Vertical),
-             ("Mirrored", HudOrientations.Mirrored)],
+        menu.Items.Add(Choices(Loc.T("hud.menu.direction"), w.Orientation,
+            [(Loc.T("hud.menu.left-to-right"), HudOrientations.LeftToRight),
+             (Loc.T("hud.menu.right-to-left"), HudOrientations.RightToLeft),
+             (Loc.T("hud.menu.vertical"), HudOrientations.Vertical),
+             (Loc.T("hud.menu.mirrored"), HudOrientations.Mirrored)],
             v => hud.Update(w with { Orientation = v })));
-        menu.Items.Add(Choices("Frequency range", (w.MinHz, w.MaxHz),
-            [("20 Hz – 20 kHz (full)", (20.0, 20000.0)),
-             ("20 Hz – 10 kHz", (20.0, 10000.0)),
-             ("40 Hz – 16 kHz", (40.0, 16000.0)),
-             ("20 Hz – 500 Hz (bass)", (20.0, 500.0))],
+        menu.Items.Add(Choices(Loc.T("hud.menu.frequency-range"), (w.MinHz, w.MaxHz),
+            [(Loc.T("hud.menu.20-hz-20-khz-full"), (20.0, 20000.0)),
+             (Loc.T("hud.menu.20-hz-10-khz"), (20.0, 10000.0)),
+             (Loc.T("hud.menu.40-hz-16-khz"), (40.0, 16000.0)),
+             (Loc.T("hud.menu.20-hz-500-hz-bass"), (20.0, 500.0))],
             v => hud.Update(w with { MinHz = v.Item1, MaxHz = v.Item2 })));
-        menu.Items.Add(Choices("Falloff", w.Smoothing,
-            [("None", 0.0), ("Fast", 0.35), ("Medium", 0.6), ("Slow", 0.85)],
+        menu.Items.Add(Choices(Loc.T("hud.menu.falloff"), w.Smoothing,
+            [(Loc.T("hud.menu.none"), 0.0), (Loc.T("hud.menu.fast"), 0.35), (Loc.T("hud.menu.medium"), 0.6), (Loc.T("hud.menu.slow"), 0.85)],
             v => hud.Update(w with { Smoothing = v })));
-        menu.Items.Add(Check("Peak hold", w.PeakHold, v => hud.Update(w with { PeakHold = v })));
-        menu.Items.Add(Choices("Peak decay", w.PeakDecayDbPerSecond,
-            [("Slow (12 dB/s)", 12.0), ("Medium (24 dB/s)", 24.0), ("Fast (48 dB/s)", 48.0)],
+        menu.Items.Add(Check(Loc.T("hud.menu.peak-hold"), w.PeakHold, v => hud.Update(w with { PeakHold = v })));
+        menu.Items.Add(Choices(Loc.T("hud.menu.peak-decay"), w.PeakDecayDbPerSecond,
+            [(Loc.T("hud.menu.slow-12-db-s"), 12.0), (Loc.T("hud.menu.medium-24-db-s"), 24.0), (Loc.T("hud.menu.fast-48-db-s"), 48.0)],
             v => hud.Update(w with { PeakDecayDbPerSecond = v })));
-        menu.Items.Add(Choices("Bar gap", w.BarGap,
-            [("None", 0), ("1 px", 1), ("2 px", 2), ("4 px", 4), ("8 px", 8)],
+        menu.Items.Add(Choices(Loc.T("hud.menu.bar-gap"), w.BarGap,
+            [(Loc.T("hud.menu.none"), 0), (Loc.T("hud.menu.1-px"), 1), (Loc.T("hud.menu.2-px"), 2), (Loc.T("hud.menu.4-px"), 4), (Loc.T("hud.menu.8-px"), 8)],
             v => hud.Update(w with { BarGap = v })));
-        menu.Items.Add(Item("Bar colour (low)…",
+        menu.Items.Add(Item(Loc.T("hud.menu.bar-colour-low"),
             () => PickColour(w.ColorStart, c => hud.Update(w with { ColorStart = c }))));
-        menu.Items.Add(Item("Bar colour (high)…",
+        menu.Items.Add(Item(Loc.T("hud.menu.bar-colour-high"),
             () => PickColour(w.ColorEnd, c => hud.Update(w with { ColorEnd = c }))));
     }
 
@@ -74,23 +74,23 @@ internal static class HudWidgetMenu
     {
         // The clip indicator is reset by clicking it — it is right there on the widget, and a menu
         // item for it would be a second way to do the same thing in a worse place.
-        menu.Items.Add(Header("Click the clip indicator to reset it."));
+        menu.Items.Add(Header(Loc.T("hud.menu.click-the-clip-indicator-to")));
     }
 
     private static void AddEqCurve(ContextMenu menu, HudManager hud, HudWidget w)
     {
-        menu.Items.Add(Check("Band nodes", w.ShowNodes, v => hud.Update(w with { ShowNodes = v })));
-        menu.Items.Add(Check("dB grid", w.ShowGrid, v => hud.Update(w with { ShowGrid = v })));
+        menu.Items.Add(Check(Loc.T("hud.menu.band-nodes"), w.ShowNodes, v => hud.Update(w with { ShowNodes = v })));
+        menu.Items.Add(Check(Loc.T("hud.menu.db-grid"), w.ShowGrid, v => hud.Update(w with { ShowGrid = v })));
     }
 
     private static void AddVolume(ContextMenu menu, HudManager hud, HudWidget w)
     {
-        menu.Items.Add(Choices("Skin zoom", w.Scale,
+        menu.Items.Add(Choices(Loc.T("hud.menu.skin-zoom"), w.Scale,
             [("50%", 0.5), ("75%", 0.75), ("100%", 1.0), ("150%", 1.5), ("200%", 2.0)],
             v => hud.Update(w with { Scale = v })));
-        menu.Items.Add(Check("Show device name", w.ShowDeviceName,
+        menu.Items.Add(Check(Loc.T("hud.menu.show-device-name"), w.ShowDeviceName,
             v => hud.Update(w with { ShowDeviceName = v })));
-        menu.Items.Add(Header("Uses your OSD skin. Pick one in Settings → Skins."));
+        menu.Items.Add(Header(Loc.T("hud.menu.uses-your-osd-skin-pick")));
     }
 
     // ---- item builders ----

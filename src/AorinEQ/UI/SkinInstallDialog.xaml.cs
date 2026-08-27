@@ -1,3 +1,4 @@
+using AorinEQ.Core;
 using System.Windows;
 
 namespace AorinEQ.UI;
@@ -15,7 +16,7 @@ public partial class SkinInstallDialog : Wpf.Ui.Controls.FluentWindow
     private SkinInstallDialog(string skinName, string host, bool overwrites)
     {
         InitializeComponent();
-        HeadingText.Text = $"Install skin '{skinName}' from {host}?";
+        HeadingText.Text = Loc.T("dialog.skininstall.heading.install-skin-from", skinName, host);
         OverwriteText.Visibility = overwrites ? Visibility.Visible : Visibility.Collapsed;
     }
 

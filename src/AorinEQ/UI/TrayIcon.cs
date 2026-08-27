@@ -85,44 +85,49 @@ public sealed class TrayIcon : IDisposable
         ContextMenuStrip? menu = null;
         try
         {
-            _muteItem = new ToolStripMenuItem("Mute", null, (_, _) => ActionRequested?.Invoke(TrayActions.Mute));
-            _eqPresetMenu = new ToolStripMenuItem("EQ preset");
+            _muteItem = Localised("tray.menu.mute", (_, _) => ActionRequested?.Invoke(TrayActions.Mute));
+            _eqPresetMenu = Localised("tray.menu.eq-preset");
 
             // "Arrange widgets" rather than "Edit mode": the switch exists so the widgets can be
             // moved, and naming it after the mode would make the user work out what the mode does.
-            _hudEditItem = new ToolStripMenuItem("Arrange widgets", null,
+            _hudEditItem = Localised("tray.menu.arrange-widgets",
                 (_, _) => HudModeToggled?.Invoke(!_hudEditItem!.Checked));
-            _hudAddMenu = new ToolStripMenuItem("Add widget");
+            _hudAddMenu = Localised("tray.menu.add-widget");
             foreach (var type in HudWidgetTypes.All)
             {
                 var chosen = type;
-                _hudAddMenu.DropDownItems.Add(new ToolStripMenuItem(
-                    HudWidgetTypes.DisplayName(type), null, (_, _) => HudWidgetAdded?.Invoke(chosen)));
+                _hudAddMenu.DropDownItems.Add(
+                    Localised($"hud.widget.{chosen}.name", (_, _) => HudWidgetAdded?.Invoke(chosen)));
             }
-            _hudMenu = new ToolStripMenuItem("HUD widgets");
+            _hudMenu = Localised("tray.menu.hud");
 
-            _airPlayRefreshItem = new ToolStripMenuItem("Search for receivers", null,
+            _airPlayRefreshItem = Localised("tray.menu.airplay-search",
                 (_, _) => AirPlayRefreshRequested?.Invoke());
-            _airPlayDisconnectItem = new ToolStripMenuItem("Disconnect", null,
-                (_, _) => AirPlayDisconnectRequested?.Invoke()) { Visible = false };
-            _airPlayMenu = new ToolStripMenuItem("AirPlay");
+            _airPlayDisconnectItem = Localised("tray.menu.airplay-disconnect",
+                (_, _) => AirPlayDisconnectRequested?.Invoke());
+            _airPlayDisconnectItem.Visible = false;
+            _airPlayMenu = Localised("tray.menu.airplay");
             _airPlayMenu.DropDownItems.Add(_airPlayRefreshItem);
             _airPlayMenu.DropDownItems.Add(_airPlayDisconnectItem);
 
             menu = new ContextMenuStrip();
-            menu.Items.Add(new ToolStripMenuItem("Open volume slider", null,
+            menu.Items.Add(Localised("tray.menu.volume-bar",
                 (_, _) => ActionRequested?.Invoke(TrayActions.VolumeBar)));
             menu.Items.Add(_muteItem);
-            menu.Items.Add(new ToolStripMenuItem("Open equalizer…", null,
+            menu.Items.Add(Localised("tray.menu.equalizer",
                 (_, _) => ActionRequested?.Invoke(TrayActions.Equalizer)));
             menu.Items.Add(_eqPresetMenu);
             menu.Items.Add(_airPlayMenu);
             menu.Items.Add(_hudMenu);
-            menu.Items.Add(new ToolStripMenuItem("Settings…", null,
+            menu.Items.Add(Localised("tray.menu.settings",
                 (_, _) => ActionRequested?.Invoke(TrayActions.Settings)));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitRequested?.Invoke()));
+            menu.Items.Add(Localised("tray.menu.exit", (_, _) => ExitRequested?.Invoke()));
             menu.Opening += (_, _) => MenuOpening?.Invoke();
+
+            // Bound XAML strings repaint themselves through LocSource. These are WinForms
+            // properties, so they have to be re-set by hand - hence the key list.
+            Loc.LanguageChanged += Retranslate;
 
             icon = new NotifyIcon
             {
@@ -201,6 +206,31 @@ public sealed class TrayIcon : IDisposable
         if (_lastHoverPoint is not { } p) return false; // never hovered: nothing to compare against
         var size = SystemInformation.SmallIconSize;
         return Math.Abs(x - p.X) <= size.Width && Math.Abs(y - p.Y) <= size.Height;
+    }
+
+    /// <summary>Every menu item whose text comes from the string table, with the key it came from.
+    ///
+    /// WinForms has no binding equivalent to LocSource, so a language switch has to walk this list
+    /// and re-set each Text. Keeping the key beside the item is what makes that possible without a
+    /// second, hand-maintained list that would drift the first time an item was renamed.</summary>
+    private readonly List<(ToolStripMenuItem Item, string Key)> _localisedItems = [];
+
+    /// <summary>Creates a menu item whose text is looked up now and re-looked-up on every language
+    /// change.</summary>
+    private ToolStripMenuItem Localised(string key, EventHandler? onClick = null)
+    {
+        var item = new ToolStripMenuItem(Loc.T(key), null, onClick);
+        _localisedItems.Add((item, key));
+        return item;
+    }
+
+    /// <summary>Re-applies every string this type sets from code. Called on a language change.</summary>
+    private void Retranslate()
+    {
+        foreach (var (item, key) in _localisedItems)
+            item.Text = Loc.T(key);
+
+        Update(_percent, _muted);   // the icon tooltip is built from the table too
     }
 
     /// <summary>Volume state is visible three ways: the glyph itself (arc count, or a cross while
@@ -405,6 +435,9 @@ public sealed class TrayIcon : IDisposable
         if (_disposed) return;
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+        // Loc.LanguageChanged is a STATIC event: a subscriber that never detaches keeps this whole
+        // object, its icon and its menu alive for the life of the process.
+        Loc.LanguageChanged -= Retranslate;
         _disposed = true;
         _icon.Visible = false;
         _icon.Dispose();

@@ -158,7 +158,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         FillEndBox.Text = info.FillEndX.ToString();
         _initializing = false;
         ReloadPreviewData();
-        StatusText.Text = $"Editing '{info.Name}'. Change the name before saving to create a copy.";
+        StatusText.Text = Loc.T("designer.status.editing-change-the-name", info.Name);
     }
 
     private void ClearEditor()
@@ -190,7 +190,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         RestartAnimationTimers(); // no frames -> stops both
         RefreshPreview();
         Validate();
-        StatusText.Text = "Pick two images to start a new skin.";
+        StatusText.Text = Loc.T("designer.status.pick-two-images-to");
     }
 
     private void OnBrowseEmpty(object sender, RoutedEventArgs e) => Browse(PreviewLayer.Empty);
@@ -215,9 +215,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             Filter = "Images (*.png;*.gif)|*.png;*.gif",
             Title = layer switch
             {
-                PreviewLayer.Empty => "Choose the empty layer (0% artwork)",
-                PreviewLayer.Full => "Choose the full layer (100% artwork)",
-                _ => "Choose the muted artwork (shown instead of the dimmed bar)",
+                PreviewLayer.Empty => Loc.T("designer.choose-the-empty-layer-0-artwork"),
+                PreviewLayer.Full => Loc.T("designer.choose-the-full-layer-100-artwork"),
+                _ => Loc.T("designer.choose-the-muted-artwork-shown-instead"),
             },
         };
         if (dialog.ShowDialog(this) != true) return;
@@ -280,7 +280,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         {
             Filter = "PNG frames (*.png)|*.png",
             Multiselect = true,
-            Title = "Select the frames, in order (sorted by filename)",
+            Title = Loc.T("designer.select-the-frames-in-order-sorted"),
         };
         if (dialog.ShowDialog(this) != true || dialog.FileNames.Length == 0) return;
 
@@ -293,14 +293,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
                 var s = PngHeader.Read(file);
                 if (s is null)
                 {
-                    ImageErrorText.Text = Path.GetFileName(file) + " is not a valid PNG.";
+                    ImageErrorText.Text = Path.GetFileName(file) + Loc.T("designer.is-not-a-valid-png");
                     return;
                 }
                 if (size is not null && s != size)
                 {
                     ImageErrorText.Text =
-                        $"{Path.GetFileName(file)} is {s.Value.Width}×{s.Value.Height} but earlier frames are " +
-                        $"{size.Value.Width}×{size.Value.Height}. All frames must share dimensions.";
+                        Loc.T("designer.is-but-earlier-frames-are-all", Path.GetFileName(file), s.Value.Width, s.Value.Height, size.Value.Width, size.Value.Height);
                     return;
                 }
                 size ??= s;
@@ -328,19 +327,19 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             {
                 case PreviewLayer.Empty:
                     _emptySource = sheetPath;
-                    EmptyPathText.Text = $"{files.Length} frames → sheet";
+                    EmptyPathText.Text = Loc.T("designer.empty-path.frames-sheet", files.Length);
                     EmptyPathText.ToolTip = sheetPath;
                     EmptyFramesBox.Text = files.Length.ToString();
                     break;
                 case PreviewLayer.Full:
                     _fullSource = sheetPath;
-                    FullPathText.Text = $"{files.Length} frames → sheet";
+                    FullPathText.Text = Loc.T("designer.full-path.frames-sheet", files.Length);
                     FullPathText.ToolTip = sheetPath;
                     FullFramesBox.Text = files.Length.ToString();
                     break;
                 case PreviewLayer.Muted:
                     _mutedSource = sheetPath;
-                    MutedPathText.Text = $"{files.Length} frames → sheet";
+                    MutedPathText.Text = Loc.T("designer.muted-path.frames-sheet", files.Length);
                     MutedPathText.ToolTip = sheetPath;
                     MutedFramesBox.Text = files.Length.ToString();
                     break;
@@ -352,7 +351,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             }
             _initializing = false;
             ReloadPreviewData();
-            StatusText.Text = $"Assembled {files.Length} frames into a sprite sheet.";
+            StatusText.Text = Loc.T("designer.status.assembled-frames-into-a", files.Length);
         }
         catch (Exception ex) when (ex is NotSupportedException or IOException
             or FileFormatException or ArgumentException)
@@ -391,8 +390,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         if (emptyMeta.Size != fullMeta.Size)
         {
             ImageErrorText.Text =
-                $"Frame-size mismatch: empty is {emptyMeta.Size.Value.Width}×{emptyMeta.Size.Value.Height}, " +
-                $"full is {fullMeta.Size.Value.Width}×{fullMeta.Size.Value.Height}. They must be identical.";
+                Loc.T("designer.frame-size-mismatch-empty-is", emptyMeta.Size.Value.Width, emptyMeta.Size.Value.Height) +
+                Loc.T("designer.full-is-they-must-be-identical", fullMeta.Size.Value.Width, fullMeta.Size.Value.Height);
             RefreshPreview();
             Validate();
             return;
@@ -400,8 +399,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         if (mutedMeta.Size is not null && mutedMeta.Size != emptyMeta.Size)
         {
             ImageErrorText.Text =
-                $"Frame-size mismatch: muted is {mutedMeta.Size.Value.Width}×{mutedMeta.Size.Value.Height} " +
-                $"but the skin is {emptyMeta.Size.Value.Width}×{emptyMeta.Size.Value.Height}. They must be identical.";
+                Loc.T("designer.frame-size-mismatch-muted-is", mutedMeta.Size.Value.Width, mutedMeta.Size.Value.Height) +
+                Loc.T("designer.but-the-skin-is-they-must", emptyMeta.Size.Value.Width, emptyMeta.Size.Value.Height);
             RefreshPreview();
             Validate();
             return;
@@ -423,7 +422,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             _emptyFrames = null;
             _fullFrames = null;
             _mutedFrames = null;
-            ImageErrorText.Text = "Image failed to decode: " + ex.Message;
+            ImageErrorText.Text = Loc.T("designer.image-failed-to-decode") + ex.Message;
             RefreshPreview();
             Validate();
             return;
@@ -465,13 +464,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         {
             var size = GifHeader.Read(path);
             return size is null
-                ? (null, Path.GetFileName(path) + " is not a valid GIF.")
+                ? (null, Path.GetFileName(path) + Loc.T("designer.is-not-a-valid-gif"))
                 : (size, null);
         }
         var pngSize = PngHeader.Read(path);
-        if (pngSize is null) return (null, Path.GetFileName(path) + " is not a valid PNG.");
+        if (pngSize is null) return (null, Path.GetFileName(path) + Loc.T("designer.is-not-a-valid-png"));
         if (pngSize.Value.Height % declaredFrames != 0)
-            return (null, $"{Path.GetFileName(path)} height {pngSize.Value.Height} is not divisible by {declaredFrames} frames.");
+            return (null, Loc.T("designer.height-is-not-divisible-by-frames", Path.GetFileName(path), pngSize.Value.Height, declaredFrames));
         return ((pngSize.Value.Width, pngSize.Value.Height / declaredFrames), null);
     }
 
@@ -635,7 +634,14 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
 
     /// <summary>Save/Test require both layers decoded, a valid name, and a sane fill range;
     /// Export and Share require a saved skin.</summary>
-    private const string RangeErrorMessage = "Fill range: the 0% position must be left of the 100% position.";
+    /// <summary>A property rather than a const, because the text now depends on the active
+    /// language and a const is baked in at compile time.
+    ///
+    /// Note the two call sites below: one SETS this into the error line, the other compares the
+    /// error line against it to decide whether it owns the message and may clear it. That
+    /// comparison is only sound while the language does not change between the two - which it
+    /// cannot, since both run on the UI thread inside one validation pass.</summary>
+    private static string RangeErrorMessage => Loc.T("designer.fill-range-the-0-position-must");
 
     /// <summary>Shown when the typed source URL is one the loader would silently drop. Blocking
     /// the save is deliberate: writing a skin that quietly lost the link the author typed is the
@@ -915,7 +921,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             && Directory.Exists(targetFolder))
         {
             var choice = System.Windows.MessageBox.Show(
-                $"A skin named '{name}' already exists. Overwrite it?",
+                Loc.T("designer.a-skin-named-already-exists-overwrite", name),
                 "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (choice != MessageBoxResult.Yes) return;
         }
@@ -938,7 +944,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             }
             _editingSkinName = name;
             PopulateSkinList(selectName: name);
-            StatusText.Text = $"Saved '{name}'.";
+            StatusText.Text = Loc.T("designer.status.saved", name);
             Validate();
             SkinSaved?.Invoke(name);
         }
@@ -955,7 +961,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Filter = "Skin zip (*.zip)|*.zip",
-            Title = "Import a shared skin",
+            Title = Loc.T("designer.import-a-shared-skin"),
         };
         if (dialog.ShowDialog(this) != true) return;
 
@@ -964,13 +970,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         {
             if (SkinWriter.ValidateName(name) is { } nameError)
             {
-                StatusText.Text = $"Zip filename can't be used as the skin name: {nameError}";
+                StatusText.Text = Loc.T("designer.status.zip-filename-can-t", nameError);
                 return;
             }
             if (Directory.Exists(Path.Combine(ApoPaths.GetSkinsRoot(), name)))
             {
                 var choice = System.Windows.MessageBox.Show(
-                    $"A skin named '{name}' already exists. Overwrite it?",
+                    Loc.T("designer.a-skin-named-already-exists-overwrite", name),
                     "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (choice != MessageBoxResult.Yes) return;
             }
@@ -981,7 +987,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             {
                 if ((string?)item.Tag == name) { SkinSelect.SelectedItem = item; break; }
             }
-            StatusText.Text = $"Imported '{name}'.";
+            StatusText.Text = Loc.T("designer.status.imported", name);
             SkinSaved?.Invoke(name);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
@@ -993,9 +999,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Exports the loaded skin's on-disk state (save first to include unsaved edits).</summary>
     private void OnExportZip(object sender, RoutedEventArgs e)
     {
-        if (ExportToZip("Export skin as zip") is not { } zipPath) return;
-        StatusText.Text = $"Exported '{_editingSkinName}' to {zipPath}. " +
-            "(Exports the last saved state — Save first to include current edits.)";
+        if (ExportToZip(Loc.T("designer.export-skin-as-zip")) is not { } zipPath) return;
+        StatusText.Text = Loc.T("designer.exported-to-exports-the-last-saved", _editingSkinName, zipPath);
     }
 
     /// <summary>Share: the same export, plus the aorineq:// install link on the clipboard. The
@@ -1003,7 +1008,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     /// at it — so the status line says so rather than implying a finished link.</summary>
     private void OnShare(object sender, RoutedEventArgs e)
     {
-        if (ExportToZip("Share skin as zip") is not { } zipPath) return;
+        if (ExportToZip(Loc.T("designer.share-skin-as-zip")) is not { } zipPath) return;
 
         var link = SkinShare.BuildInstallLinkTemplate(_editingSkinName!);
         try
@@ -1014,12 +1019,10 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         {
             // Another process can hold the clipboard open; the zip is still exported, so say what
             // did happen and hand over the link rather than reporting a blanket failure.
-            StatusText.Text = $"Exported '{_editingSkinName}' to {zipPath}, but the clipboard was "
-                + $"busy ({ex.Message}). The install link is: {link}";
+            StatusText.Text = Loc.T("designer.exported-to-but-the-clipboard-was", _editingSkinName, zipPath, ex.Message, link);
             return;
         }
-        StatusText.Text = $"Exported '{_editingSkinName}' to {zipPath} (including a preview image) "
-            + $"and copied this install link: {link} — {SkinShare.HostingHint}";
+        StatusText.Text = Loc.T("designer.exported-to-including-a-preview-image", _editingSkinName, zipPath, link, SkinShare.HostingHint);
     }
 
     /// <summary>Asks where to write the zip and exports the loaded skin there. Returns the path
@@ -1081,7 +1084,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
                 FillSlider.Value += _previewScroll.Feed(n.RawDelta, step, s.ScrollInverted);
             };
             _testOsd.ShowVolume((int)FillSlider.Value, MuteCheck.IsChecked == true, interactive: true);
-            StatusText.Text = "Showing on desktop — click/drag/scroll it like the real OSD.";
+            StatusText.Text = Loc.T("designer.status.showing-on-desktop-click");
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException
             or IOException or NotSupportedException or FileFormatException or OutOfMemoryException)

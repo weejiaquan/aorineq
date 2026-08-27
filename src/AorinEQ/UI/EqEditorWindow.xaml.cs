@@ -331,9 +331,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         BassSlider.IsEnabled = MidSlider.IsEnabled = TrebleSlider.IsEnabled = room;
         ShowMacroGains(EqSimpleMode.ReadOrZero(_bands, _macroBands));
         SimpleNoteText.Text = !room
-            ? $"This scope already has {_bands.Count} bands — there's no room for the "
-                + $"bass/mid/treble controls (the limit is {EqPreset.MaxBands}). "
-                + "Switch to Advanced to edit it."
+            ? Loc.T("eq.this-scope-already-has-bands-there", _bands.Count, EqPreset.MaxBands)
             : CoexistenceNote();
     }
 
@@ -346,10 +344,13 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
             return "";
         var what = _presetName.Length > 0 && _presetName != EqPreset.CustomName
             ? $"'{_presetName}'"
-            : "your existing chain";
-        return $"Adjusting bass/mid/treble on top of {what} "
-            + $"({foreign.Count} band{(foreign.Count == 1 ? "" : "s")}) — those bands are left "
-            + "untouched. Switch to Advanced to edit them.";
+            : Loc.T("eq.your-existing-chain");
+        // Singular and plural are separate strings, not an "s" glued on by a ternary. English
+        // pluralisation is the one rule that does NOT survive translation: Japanese and Korean
+        // have no plural form here at all, and Chinese counts with a measure word.
+        return foreign.Count == 1
+            ? Loc.T("eq.simple-mode.foreign-bands.one", what)
+            : Loc.T("eq.simple-mode.foreign-bands.many", what, foreign.Count);
     }
 
     private void ShowMacroGains(MacroGains gains)
@@ -471,7 +472,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnSavePresetAs(object sender, RoutedEventArgs e)
     {
-        var name = PromptForName("Save preset as", _presetName == EqPreset.CustomName ? "" : _presetName);
+        var name = PromptForName(Loc.T("eq.save-preset-as"), _presetName == EqPreset.CustomName ? "" : _presetName);
         if (name is null)
             return;
         if (PresetStore.ValidateName(name) is { } error)
@@ -491,7 +492,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            MessageBox.Show(this, $"Couldn't save the preset: {ex.Message}", "AorinEQ",
+            MessageBox.Show(this, Loc.T("eq.couldn-t-save-the-preset", ex.Message), "AorinEQ",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -517,8 +518,8 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Filter = "ParametricEQ files (*.txt)|*.txt|All files (*.*)|*.*",
-            Title = "Import ParametricEQ preset",
+            Filter = Loc.T("eq.parametriceq-files-txt-txt-all-files"),
+            Title = Loc.T("eq.import-parametriceq-preset"),
         };
         if (dialog.ShowDialog(this) != true)
             return;
@@ -529,7 +530,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, $"Couldn't read the file: {ex.Message}", "AorinEQ",
+            MessageBox.Show(this, Loc.T("eq.couldn-t-read-the-file", ex.Message), "AorinEQ",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -537,7 +538,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         var preset = EqPreset.Parse(name, text);
         if (preset.Bands.Count == 0)
         {
-            MessageBox.Show(this, "That file doesn't contain any Equalizer APO filter lines.",
+            MessageBox.Show(this, Loc.T("eq.that-file-doesn-t-contain-any"),
                 "AorinEQ", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -651,7 +652,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         var remove = new Button
         {
             Content = "✕", FontSize = 10, Width = 18, Height = 18, Padding = new Thickness(0),
-            Tag = index, ToolTip = "Remove this band",
+            Tag = index, ToolTip = Loc.T("eq.remove-this-band"),
         };
         remove.Click += (_, _) => RemoveBandAt(index);
         DockPanel.SetDock(remove, Dock.Right);
@@ -783,8 +784,8 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     private void ShowStripOutcome(EqFieldOutcome outcome, EqBandField field) =>
         StripHintText.Text = outcome switch
         {
-            EqFieldOutcome.Reverted => $"{FieldName(field)}: not a number — kept the previous value.",
-            EqFieldOutcome.Clamped => $"{FieldName(field)} was outside the supported range — clamped.",
+            EqFieldOutcome.Reverted => Loc.T("eq.not-a-number-kept-the-previous", FieldName(field)),
+            EqFieldOutcome.Clamped => Loc.T("eq.was-outside-the-supported-range-clamped", FieldName(field)),
             _ => "",
         };
 
@@ -842,8 +843,8 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         bool atCap = _bands.Count >= EqPreset.MaxBands;
         AddBandButton.IsEnabled = !atCap;
         AddBandButton.ToolTip = atCap
-            ? $"Band limit reached ({EqPreset.MaxBands} per scope)."
-            : "Add a band (then type its frequency)";
+            ? Loc.T("eq.band-limit-reached-per-scope", EqPreset.MaxBands)
+            : Loc.T("eq.add-a-band-then-type-its");
         BandCountText.Text = $"{_bands.Count}/{EqPreset.MaxBands}";
     }
 
@@ -863,7 +864,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (!EqPreset.TryAppend(_bands, EqPreset.NewBand()))
         {
-            StripHintText.Text = $"Band limit reached ({EqPreset.MaxBands} per scope).";
+            StripHintText.Text = Loc.T("eq.strip-hint.band-limit-reached-per", EqPreset.MaxBands);
             return;
         }
         StripHintText.Text = "";
@@ -912,7 +913,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_bands.Count == 0)
         {
-            StripHintText.Text = "There are no bands to share yet.";
+            StripHintText.Text = Loc.T("eq.strip-hint.there-are-no-bands");
             return;
         }
         if (!EqShare.TryBuildShareUrl(
@@ -928,11 +929,11 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         catch (System.Runtime.InteropServices.ExternalException ex)
         {
             // Another process can hold the clipboard open; that's a transient failure, not a bug.
-            MessageBox.Show(this, $"Couldn't copy the link: {ex.Message}", "AorinEQ",
+            MessageBox.Show(this, Loc.T("eq.couldn-t-copy-the-link", ex.Message), "AorinEQ",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        StripHintText.Text = $"Share link copied ({url.Length} characters).";
+        StripHintText.Text = Loc.T("eq.strip-hint.share-link-copied-characters", url.Length);
     }
 
     private void OnFlatten(object sender, RoutedEventArgs e)
@@ -976,7 +977,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
             BandTypeCombo.SelectedItem = null;
             FcBox.Text = GainBox.Text = QBox.Text = "";
         }
-        DbRangeButton.Content = $"Scale: ±{_dbRange} dB";
+        DbRangeButton.Content = Loc.T("eq.db-range.scale-db", _dbRange);
         UpdatePreampReadout();
         _syncing = false;
     }
@@ -984,12 +985,15 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
     private void UpdatePreampReadout()
     {
         var volumeText = _scopeDeviceId is null
-            ? "global scope"
+            ? Loc.T("eq.preamp-readout.global-scope")
             : _getVolumeDbFor(_scopeDeviceId) is { } db
-                ? string.Create(CultureInfo.InvariantCulture, $"volume {db:0.0} dB")
-                : "volume: Windows (system mode)";
-        PreampReadout.Text = string.Create(CultureInfo.InvariantCulture,
-            $"Preset preamp {_presetPreampDb:0.0} dB · {volumeText}");
+                ? Loc.T("eq.preamp-readout.volume-db", db)
+                : Loc.T("eq.preamp-readout.volume-system");
+
+        // Loc.T formats with CurrentCulture, where this used InvariantCulture. That is the right
+        // change, not an accident: the readout is being read by a person, so the decimal separator
+        // should be theirs. It is not parsed back anywhere - the value comes from _presetPreampDb.
+        PreampReadout.Text = Loc.T("eq.preamp-readout.text", _presetPreampDb, volumeText);
     }
 
     private void OnBandTypeChanged(object sender, SelectionChangedEventArgs e)
@@ -1221,7 +1225,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
                 Tag = i,
                 Cursor = Cursors.SizeAll,
                 Opacity = bypassOpacity,
-                ToolTip = $"{band.Type} · {band.Fc:0.#} Hz · {band.GainDb:0.0} dB · Q {band.Q:0.00}",
+                ToolTip = Loc.T("eq.hz-db-q", band.Type, band.Fc, band.GainDb, band.Q),
             };
             Canvas.SetLeft(node, XFromFreq(band.Fc) - 7);
             Canvas.SetTop(node, YFromDb(band.HasGain ? band.GainDb : 0) - 7);
@@ -1259,7 +1263,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
                 if (!EqPreset.TryAppend(_bands, new EqBand(EqBandType.Peak,
                         FreqFromX(pos.X), Math.Round(DbFromY(pos.Y), 1), 1.0)))
                 {
-                    StripHintText.Text = $"Band limit reached ({EqPreset.MaxBands} per scope).";
+                    StripHintText.Text = Loc.T("eq.strip-hint.band-limit-reached-per", EqPreset.MaxBands);
                     e.Handled = true;
                     return;
                 }
