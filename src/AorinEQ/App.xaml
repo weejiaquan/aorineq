@@ -9,6 +9,20 @@
                 <ui:ThemesDictionary Theme="Dark" />
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Segoe UI has NO CJK coverage. Before this release the app set no FontFamily at
+                 all, so every window inherited it - which was invisible while the UI was English
+                 only, and would have rendered the Chinese, Japanese and Korean tables as rows of
+                 empty boxes. Not a crash and not a failed test: just squares.
+
+                 WPF walks this list per GLYPH, so an English UI still renders entirely in Segoe UI
+                 and only the characters it lacks are taken from the faces after it. Those four are
+                 the Windows 10/11 system UI faces for Simplified Chinese, Traditional Chinese,
+                 Japanese and Korean respectively, and ship with the OS. Segoe UI Symbol is last,
+                 for the arrows and bullets the UI faces miss.
+
+                 LocFontTests pins both this chain and the fact that every window states it. -->
+            <FontFamily x:Key="AppFontFamily">Segoe UI, Microsoft YaHei UI, Microsoft JhengHei UI, Yu Gothic UI, Malgun Gothic, Segoe UI Symbol</FontFamily>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
