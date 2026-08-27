@@ -113,4 +113,56 @@ public static class HelpCatalogue
     /// being touched.</summary>
     public static IReadOnlyList<HelpTopic> ForSurface(string surface) =>
         [.. Topics.Where(t => t.Surface == surface)];
+
+    /// <summary>Topics matching <paramref name="query"/>, best first.
+    ///
+    /// Matches the ACTIVE language and English, always both. English is not a fallback here, it is
+    /// a deliberate second index: almost all audio documentation online is in English, so a Korean
+    /// user who has just read a forum post about "pre-ringing" types exactly that. Searching only
+    /// the active table would find nothing, and finding nothing reads as the feature not existing.
+    ///
+    /// An empty query returns nothing rather than everything - a search box that lists all sixty
+    /// topics the moment it is focused is noise, not a result.</summary>
+    public static IReadOnlyList<HelpTopic> Search(string query)
+    {
+        var needle = query?.Trim();
+        if (string.IsNullOrEmpty(needle)) return [];
+
+        return
+        [
+            .. Topics
+                .Select(topic => (topic, score: Score(topic, needle)))
+                .Where(x => x.score > 0)
+                .OrderByDescending(x => x.score)
+                .ThenBy(x => x.topic.Key, StringComparer.Ordinal)
+                .Select(x => x.topic)
+        ];
+    }
+
+    private static int Score(HelpTopic topic, string needle)
+    {
+        var best = ScoreIn(Loc.Raw(Languages.En), topic, needle);
+
+        if (Loc.Language != Languages.En)
+            best = Math.Max(best, ScoreIn(Loc.Raw(Loc.Language), topic, needle));
+
+        return best;
+    }
+
+    /// <summary>Where a match landed decides how good it is. A title match is what the user meant;
+    /// a body match is a topic that merely mentions the word.</summary>
+    private static int ScoreIn(IReadOnlyDictionary<string, string> table, HelpTopic topic, string needle)
+    {
+        var title = table.GetValueOrDefault(topic.TitleKey, "");
+        var summary = topic.SummaryKey is null ? "" : table.GetValueOrDefault(topic.SummaryKey, "");
+        var body = table.GetValueOrDefault($"help.{topic.Key}.body", "");
+
+        if (title.Equals(needle, StringComparison.OrdinalIgnoreCase)) return 100;
+        if (title.StartsWith(needle, StringComparison.OrdinalIgnoreCase)) return 80;
+        if (title.Contains(needle, StringComparison.OrdinalIgnoreCase)) return 60;
+        if (summary.Contains(needle, StringComparison.OrdinalIgnoreCase)) return 40;
+        if (body.Contains(needle, StringComparison.OrdinalIgnoreCase)) return 20;
+
+        return 0;
+    }
 }
