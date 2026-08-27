@@ -407,6 +407,11 @@ public sealed class TrayIcon : IDisposable
 
     public void ShowInfo(string text) => Show(text, ToolTipIcon.Info, 5000, onClick: null);
 
+    /// <summary>An informational balloon that DOES something when clicked, and stays up longer
+    /// because it is asking to be clicked rather than just reporting.</summary>
+    public void ShowActionableInfo(string text, Action onClick) =>
+        Show(text, ToolTipIcon.Info, 10000, onClick);
+
     /// <summary>An info balloon that runs <paramref name="onClick"/> when clicked — used by the
     /// updater's "new version available — click to open the release page" notice when the exe
     /// directory isn't writable for the in-place swap.</summary>

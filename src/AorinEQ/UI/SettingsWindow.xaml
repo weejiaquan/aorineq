@@ -150,12 +150,44 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <ui:TitleBar Grid.Row="0" Title="{loc:T settings.title.aorineq-settings}" Icon="{ui:ImageIcon '/AorinEQ.ico'}" />
 
-        <ui:NavigationView x:Name="Nav" Grid.Row="1"
+        <!-- A row of its own rather than NavigationView.AutoSuggestBox: that slot exists in the
+             library but renders nothing in this version, which is invisible until you notice the
+             box is simply absent. A row here always draws, and it spans the window so a result
+             label like "AirPlay > Receiver" has somewhere to be read.
+
+             It searches help TOPICS, not section names - "homepod" finds the AirPlay receiver row
+             even though no label anywhere in the app contains that word. -->
+        <Grid Grid.Row="1" Margin="16,0,16,12">
+            <ui:TextBox x:Name="HelpSearchBox"
+                        PlaceholderText="{loc:T settings.search.placeholder}"
+                        Icon="{ui:SymbolIcon Search24}"
+                        TextChanged="OnHelpSearchTextChanged"
+                        PreviewKeyDown="OnHelpSearchKeyDown" />
+
+            <!-- A Popup rather than a panel in the layout: results must float OVER the page, or
+                 opening them would shove every card down and the row you were aiming at moves
+                 while you read it. StaysOpen=False closes it on a click anywhere else. -->
+            <Popup x:Name="HelpSearchPopup" PlacementTarget="{Binding ElementName=HelpSearchBox}"
+                   Placement="Bottom" StaysOpen="False" AllowsTransparency="True"
+                   Width="{Binding ActualWidth, ElementName=HelpSearchBox}">
+                <Border Background="{DynamicResource ApplicationBackgroundBrush}"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="6" Padding="2">
+                    <ListBox x:Name="HelpSearchResults" MaxHeight="320"
+                             Background="Transparent" BorderThickness="0"
+                             SelectionChanged="OnHelpResultChosen"
+                             KeyDown="OnHelpResultsKeyDown" />
+                </Border>
+            </Popup>
+        </Grid>
+
+        <ui:NavigationView x:Name="Nav" Grid.Row="2"
                            PaneDisplayMode="Left" OpenPaneLength="220"
                            IsBackButtonVisible="Collapsed" IsPaneToggleVisible="True"
                            FrameMargin="0" TransitionDuration="120">
@@ -190,7 +222,7 @@
              are detached from this holder and handed to the NavigationView's frame one at a time
              (see SettingsWindow.Navigate), so exactly one is ever parented. The holder itself is
              collapsed and never renders. -->
-        <Grid x:Name="SectionHolder" Grid.Row="1" Visibility="Collapsed">
+        <Grid x:Name="SectionHolder" Grid.Row="2" Visibility="Collapsed">
 
             <!-- =========================== DISCOVER =========================== -->
             <!-- First in the sidebar, and first here, because someone who has just installed

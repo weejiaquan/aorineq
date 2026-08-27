@@ -542,6 +542,7 @@ public partial class App : System.Windows.Application
             _tray!.ShowWarning(ex.Message);
         }
         SetupAutoUpdate();
+        NudgeToDiscoverOnce();
         if (e.Args.Contains("--updated"))
             _tray!.ShowInfo(Loc.T("app.updated-to-aorineq", GetVersionString()));
 
@@ -828,6 +829,24 @@ public partial class App : System.Windows.Application
     /// <summary>Handles the SettingsWindow AutostartChanged event: applies the change and
     /// re-syncs the checkbox against the actual resulting state, so a failed enable (e.g. no
     /// elevation yet for the scheduled task) un-checks the box instead of leaving it stuck on.</summary>
+    /// <summary>Tells an upgrading user, exactly once, that the Discover page exists.
+    ///
+    /// New installs need no nudge: the landing rule already opens Settings on Discover the first
+    /// time. This is for everyone coming from 3.6.0, who has a settings file with HasSeenDiscover
+    /// absent - which is precisely the population that has never seen the page and has no reason
+    /// to go looking for a sidebar item that was not there yesterday.
+    ///
+    /// The flag is only cleared when Discover is actually SHOWN, so dismissing the balloon without
+    /// clicking it does not burn the one chance.</summary>
+    private void NudgeToDiscoverOnce()
+    {
+        if (_settings.HasSeenDiscover) return;
+
+        _tray?.ShowActionableInfo(
+            Loc.T("nudge.discover.balloon"),
+            () => _ = OpenSettingsAsync(SettingsSections.Discover));
+    }
+
     /// <summary>Whether each Discover feature is currently doing anything, and a word about how.
     ///
     /// Lives here rather than in Core because every line reads live app state - the connected
