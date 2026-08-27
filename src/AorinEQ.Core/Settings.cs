@@ -46,6 +46,14 @@ public sealed record Settings(
     string TrayMiddleClick = TrayActions.Mute,
     bool TrayScrollEnabled = true,
     bool ScrollInverted = false,
+    // "auto" follows Windows. Resolved through Languages.Resolve at startup rather than stored
+    // resolved, so a user who changes their Windows display language gets AorinEQ's along with it
+    // without having to know this setting exists.
+    string Language = Languages.Auto,
+    // Whether the Discover page has been seen. Drives two things: the one-time tray nudge on
+    // upgrade, and where Settings lands when no page was asked for. False for everyone upgrading
+    // into this release, which is exactly who needs telling that Discover is there.
+    bool HasSeenDiscover = false,
     AirPlaySetting? AirPlay = null)
 {
     public static Settings Default { get; } = new(50, false);
@@ -96,6 +104,9 @@ public sealed record Settings(
                 .Where(kv => !string.IsNullOrEmpty(kv.Key) && kv.Value is not null)
                 .ToDictionary(kv => kv.Key, kv => NormalizeScope(kv.Value)),
             GlobalEq = s.GlobalEq is null ? null : NormalizeScope(s.GlobalEq),
+            // settings.json is a plain file people edit. An unrecognised language becomes "auto"
+            // rather than leaving the app pointed at a table that does not exist.
+            Language = Languages.Normalize(s.Language),
             // Absent for everyone upgrading into this feature, so a missing block becomes the
             // default (disabled) rather than a null the UI has to guard on everywhere.
             AirPlay = NormalizeAirPlay(s.AirPlay ?? AirPlaySetting.Default),
