@@ -1,0 +1,7 @@
+{
+  "_meta.language": "en",
+  "_meta.note": "The authored source of truth. Every other table has exactly these keys.",
+
+  "settings.nav.volume": "Volume",
+  "app.tray.tooltip.level": "AorinEQ: {0}%"
+}
