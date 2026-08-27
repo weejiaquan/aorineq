@@ -71,7 +71,12 @@ public static class Loc
     /// applied. The placeholders in every translation are pinned to the English original's by
     /// LocPlaceholderTests, because a dropped {0} loses an argument silently and an added {1}
     /// throws - in a language whoever wrote the call site cannot read.</summary>
-    public static string T(string key, params object[] args) =>
+    /// <remarks>The arguments are nullable, because real call sites pass things that can be null -
+    /// a parse error that may not have been set, a skin name that has not been chosen yet.
+    /// string.Format renders a null as an empty string, which is the sensible outcome and is what
+    /// this did before the strings were keyed. Declaring them non-null instead just moves the
+    /// problem to a null-forgiving operator at every call site.</remarks>
+    public static string T(string key, params object?[] args) =>
         string.Format(CultureInfo.CurrentCulture, T(key), args);
 
     /// <summary>Every key in one table. Used by the tests that compare tables against each other.</summary>
