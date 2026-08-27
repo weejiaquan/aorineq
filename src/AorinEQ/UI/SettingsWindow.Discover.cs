@@ -54,7 +54,7 @@ public partial class SettingsWindow
             {
                 // Each language names ITSELF, in its own script. A list of languages written in
                 // English is no use to the person who needs the list.
-                Content = Loc.T($"language.{language}.endonym"),
+                Content = Loc.T($"language.{language.ToLowerInvariant()}.endonym"),
                 Tag = language,
             });
         }
