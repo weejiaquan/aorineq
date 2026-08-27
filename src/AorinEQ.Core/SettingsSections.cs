@@ -9,6 +9,11 @@ namespace AorinEQ.Core;
 /// <see cref="VolumeModes"/> and <see cref="ProtocolPages"/> already use for their own vocabularies.</summary>
 public static class SettingsSections
 {
+    /// <summary>The "what can this app do" page. First in the sidebar because someone who has
+    /// just installed AorinEQ should meet it before a list of settings for features they do not
+    /// know exist.</summary>
+    public const string Discover = "discover";
+
     public const string Volume = "volume";
     public const string Osd = "osd";
     public const string Skins = "skins";
@@ -21,7 +26,7 @@ public static class SettingsSections
     /// <summary>Every section, in sidebar order. The FIRST entry is also the default landing
     /// section — see <see cref="ForProtocolPage"/>.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Volume, Osd, Skins, Equalizer, AirPlay, Hud, Updates, About];
+        [Discover, Volume, Osd, Skins, Equalizer, AirPlay, Hud, Updates, About];
 
     public static bool IsSection(string section) => All.Contains(section);
 
@@ -33,4 +38,12 @@ public static class SettingsSections
     /// throwing or showing a blank shell.</summary>
     public static string ForProtocolPage(string page) =>
         page == ProtocolPages.Skins ? Skins : All[0];
+
+    /// <summary>Where the Settings window opens when no page was asked for.
+    ///
+    /// Discover, but only until it has been seen once. Landing a returning user on a page that
+    /// explains what AirPlay is, every time they open Settings to change the volume step, would be
+    /// irritating enough to make them resent the page - and Discover exists to be welcome. An
+    /// explicit <c>aorineq://open?page=</c> always wins over this.</summary>
+    public static string LandingSection(bool hasSeenDiscover) => hasSeenDiscover ? Volume : Discover;
 }
