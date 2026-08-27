@@ -91,6 +91,14 @@ public static class HelpCatalogue
             "settings.auto-update.title", "settings.auto-update.subtitle", "#auto-update"),
         new("settings.update-status", SettingsSections.Updates,
             "settings.update-status.title", null, "#auto-update"),
+
+        // ---- the HUD widget kinds, reached from the tray's "Add widget" submenu ----
+        // That menu was four bare nouns before this: Spectrum, Levels, EQ curve, Volume. Nothing
+        // there said what any of them showed.
+        new("hud.widget.spectrum", SettingsSections.Hud, "hud.widget.spectrum.name", null, "#hud-widgets"),
+        new("hud.widget.levels", SettingsSections.Hud, "hud.widget.levels.name", null, "#hud-widgets"),
+        new("hud.widget.eqcurve", SettingsSections.Hud, "hud.widget.eqcurve.name", null, "#hud-widgets"),
+        new("hud.widget.volume", SettingsSections.Hud, "hud.widget.volume.name", null, "#hud-widgets"),
     ];
 
     private static readonly Dictionary<string, HelpTopic> ByKey =

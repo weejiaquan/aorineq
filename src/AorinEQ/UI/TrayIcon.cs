@@ -96,8 +96,10 @@ public sealed class TrayIcon : IDisposable
             foreach (var type in HudWidgetTypes.All)
             {
                 var chosen = type;
-                _hudAddMenu.DropDownItems.Add(
-                    Localised($"hud.widget.{chosen}.name", (_, _) => HudWidgetAdded?.Invoke(chosen)));
+                var item = Localised($"hud.widget.{chosen}.name", (_, _) => HudWidgetAdded?.Invoke(chosen));
+                // Four bare nouns otherwise. The hover text says what each widget actually shows.
+                HelpDecorator.Apply(item, $"hud.widget.{chosen}");
+                _hudAddMenu.DropDownItems.Add(item);
             }
             _hudMenu = Localised("tray.menu.hud");
 
