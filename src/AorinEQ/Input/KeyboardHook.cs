@@ -1,12 +1,18 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using AorinEQ.Core;
 
 namespace AorinEQ.Input;
 
 /// <summary>
 /// System-wide WH_KEYBOARD_LL hook. Swallows volume keys (down and up) so the broken
 /// Windows volume path and its flyout never engage; raises events on the WPF dispatcher.
+///
+/// Installed on, and torn down from, the app's <see cref="HookThread"/> — never the UI thread.
+/// A low-level hook is called on the thread that installed it, and the system holds the
+/// keystroke until that thread answers; see <see cref="HookThread"/> for what that cost the
+/// machine while these lived on the dispatcher.
 /// </summary>
 public sealed class KeyboardHook : IDisposable
 {
@@ -22,14 +28,22 @@ public sealed class KeyboardHook : IDisposable
     public event Action? MuteToggle;
 
     private readonly LowLevelKeyboardProc _proc; // field: keeps delegate alive for the native hook
+    private readonly HookThread _hooks;
     private readonly IntPtr _hook;
 
-    public KeyboardHook()
+    public KeyboardHook(HookThread hooks)
     {
+        _hooks = hooks;
         _proc = Callback;
-        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
-        if (_hook == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to install low-level keyboard hook.");
+        // The last-error is read INSIDE the hook thread's turn: it is per-thread state, so
+        // reading it back here would report whatever the caller's thread last did, not the
+        // failure being diagnosed.
+        var (hook, error) = hooks.Invoke(() =>
+            (SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0),
+             Marshal.GetLastWin32Error()));
+        if (hook == IntPtr.Zero)
+            throw new Win32Exception(error, "Failed to install low-level keyboard hook.");
+        _hook = hook;
     }
 
     private IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -56,7 +70,7 @@ public sealed class KeyboardHook : IDisposable
         return CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 
-    public void Dispose() => UnhookWindowsHookEx(_hook);
+    public void Dispose() => _hooks.Invoke(() => { UnhookWindowsHookEx(_hook); });
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 

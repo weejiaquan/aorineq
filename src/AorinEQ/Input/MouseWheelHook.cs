@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using AorinEQ.Core;
 
 namespace AorinEQ.Input;
 
@@ -21,11 +22,13 @@ public readonly record struct WheelNotch(int RawDelta, bool Ctrl, bool Shift);
 /// vertical wheel — and <c>App</c> only installs the hook while the feature is switched on.
 ///
 /// <paramref name="isOverTarget"/> is asked, synchronously, whether the cursor is over the thing
-/// we own; only then is the notch delivered and the message swallowed. It has to be synchronous
-/// because the return value IS the swallow, and it is safe to be: a low-level hook's callback
-/// runs on the thread that installed it, which here is the UI thread. Delivery itself still goes
-/// through the dispatcher, the same as <see cref="KeyboardHook"/>, so a slow handler can never
-/// hold the hook past the system's timeout.
+/// we own; only then is the notch delivered and the message swallowed. It has to be synchronous,
+/// because the return value IS the swallow — so it is answered from state both surfaces publish
+/// for exactly this (an atomic field in the tray, a snapshot of screen boxes in the HUD) rather
+/// than by asking a WPF window anything: this callback runs on the app's <see cref="HookThread"/>,
+/// which is not the UI thread and may not touch one. Delivery itself still goes through the
+/// dispatcher, the same as <see cref="KeyboardHook"/>, so a slow handler can never hold the hook
+/// past the system's timeout.
 /// </summary>
 public sealed class MouseWheelHook : IDisposable
 {
@@ -45,16 +48,22 @@ public sealed class MouseWheelHook : IDisposable
 
     private readonly Func<int, int, bool> _isOverTarget;
     private readonly LowLevelMouseProc _proc; // field: keeps delegate alive for the native hook
+    private readonly HookThread _hooks;
     private readonly IntPtr _hook;
     private bool _disposed;
 
-    public MouseWheelHook(Func<int, int, bool> isOverTarget)
+    public MouseWheelHook(HookThread hooks, Func<int, int, bool> isOverTarget)
     {
+        _hooks = hooks;
         _isOverTarget = isOverTarget;
         _proc = Callback;
-        _hook = SetWindowsHookEx(WH_MOUSE_LL, _proc, GetModuleHandle(null), 0);
-        if (_hook == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to install low-level mouse hook.");
+        // Last-error read inside the hook thread's turn — it is per-thread state; see KeyboardHook.
+        var (hook, error) = hooks.Invoke(() =>
+            (SetWindowsHookEx(WH_MOUSE_LL, _proc, GetModuleHandle(null), 0),
+             Marshal.GetLastWin32Error()));
+        if (hook == IntPtr.Zero)
+            throw new Win32Exception(error, "Failed to install low-level mouse hook.");
+        _hook = hook;
     }
 
     private IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -87,7 +96,7 @@ public sealed class MouseWheelHook : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        UnhookWindowsHookEx(_hook);
+        _hooks.Invoke(() => { UnhookWindowsHookEx(_hook); });
     }
 
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);

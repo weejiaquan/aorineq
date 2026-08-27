@@ -39,8 +39,18 @@ public sealed class TrayIcon : IDisposable
     private Action? _balloonClickAction;
     private string _leftClick = TrayActions.VolumeBar;
     private string _middleClick = TrayActions.Mute;
-    // Screen position of the last mouse move the shell forwarded to the icon — see IsOverIcon.
-    private Point? _lastHoverPoint;
+    /// <summary>Screen position of the last mouse move the shell forwarded to the icon (see
+    /// <see cref="IsOverIcon"/>), PACKED into one long: x in the high half, y in the low.
+    ///
+    /// Packed because it is written here on the UI thread and read on the app's hook thread, by
+    /// the wheel hook's hit-test. A 64-bit field is read and written atomically, where a Point?
+    /// is three fields and a reader could see half of one position and half of another.</summary>
+    private long _lastHoverPoint = NoHover;
+
+    /// <summary>The "never hovered" value: x = int.MinValue, which no cursor can occupy.</summary>
+    private const long NoHover = long.MinValue;
+
+    private static long Pack(Point p) => ((long)p.X << 32) | (uint)p.Y;
 
     /// <summary>A bindable action was asked for, by <see cref="TrayActions"/> name. Both the
     /// context menu and the mouse buttons come through here, so the app has one switch rather
@@ -155,7 +165,7 @@ public sealed class TrayIcon : IDisposable
             };
             // The shell forwards mouse moves to an icon's owner even though it never forwards the
             // wheel — which is exactly what makes IsOverIcon possible.
-            icon.MouseMove += (_, _) => _lastHoverPoint = Cursor.Position;
+            icon.MouseMove += (_, _) => Volatile.Write(ref _lastHoverPoint, Pack(Cursor.Position));
             // One handler for the lifetime of the icon; each balloon sets (or clears) the action so
             // a click on a stale balloon can never fire a newer balloon's action.
             icon.BalloonTipClicked += (_, _) => _balloonClickAction?.Invoke();
@@ -206,9 +216,11 @@ public sealed class TrayIcon : IDisposable
     /// of our volume instead of nothing at all.</summary>
     public bool IsOverIcon(int x, int y)
     {
-        if (_lastHoverPoint is not { } p) return false; // never hovered: nothing to compare against
+        long packed = Volatile.Read(ref _lastHoverPoint);
+        if (packed == NoHover) return false; // never hovered: nothing to compare against
         var size = SystemInformation.SmallIconSize;
-        return Math.Abs(x - p.X) <= size.Width && Math.Abs(y - p.Y) <= size.Height;
+        return Math.Abs(x - (int)(packed >> 32)) <= size.Width
+            && Math.Abs(y - (int)(uint)packed) <= size.Height;
     }
 
     /// <summary>Every menu item whose text comes from the string table, with the key it came from.

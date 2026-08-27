@@ -18,6 +18,10 @@ public partial class App : System.Windows.Application
     private Mutex? _mutex;
     private bool _ownsMutex;
     private EventWaitHandle? _showEvent;
+    /// <summary>THE thread both low-level hooks below are installed on, and the only thing it
+    /// ever does. Not the UI thread, and that is the whole point — see <see cref="HookThread"/>
+    /// for the machine-wide input freeze that put it here.</summary>
+    private HookThread? _hookThread;
     private KeyboardHook? _hook;
     /// <summary>Installed only while <see cref="Settings.TrayScrollEnabled"/> is on — a
     /// WH_MOUSE_LL hook sits in front of every mouse message on the machine, so the app does not
@@ -480,7 +484,9 @@ public partial class App : System.Windows.Application
 
             // Hook construction can fail (e.g. another process/policy blocks WH_KEYBOARD_LL);
             // kept inside this try so that failure hits the same friendly fail-fast dialog below.
-            _hook = new KeyboardHook();
+            // The thread comes first: it is what the hook will be installed ON.
+            _hookThread = new HookThread();
+            _hook = new KeyboardHook(_hookThread);
             // TryApplyAirPlayVolume answers false unless a stream is running AND the volume mode
             // is one where retargeting is correct, so the normal path is untouched otherwise.
             _hook.VolumeUp += () =>
@@ -2296,11 +2302,12 @@ public partial class App : System.Windows.Application
         }
         try
         {
-            // The hit-test is asked synchronously, on this thread — see MouseWheelHook. Both
+            // The hit-test is asked synchronously, on the HOOK thread — see MouseWheelHook — so
+            // both answers come from state published for it rather than from a window. Both
             // surfaces the shell will not give us wheel input for: the tray icon (Explorer keeps
             // the wheel for its own icons) and a HUD volume widget (click-through, so WPF sees no
             // mouse input at all). The OSD needs neither, being an ordinary window of our own.
-            _wheelHook = new MouseWheelHook((x, y) =>
+            _wheelHook = new MouseWheelHook(_hookThread!, (x, y) =>
                 (_tray?.IsOverIcon(x, y) ?? false) || (_hud?.IsOverVolumeWidget(x, y) ?? false));
             _wheelHook.Scrolled += OnVolumeWheel;
         }
@@ -3109,6 +3116,8 @@ public partial class App : System.Windows.Application
     {
         _hook?.Dispose();
         _wheelHook?.Dispose();
+        // After both, never before: unhooking is itself work that runs ON this thread.
+        _hookThread?.Dispose();
         // The health monitor goes FIRST, and for the reason documented on SetupEapoHealthMonitor:
         // its two SystemEvents handlers run on a system thread, and _healthEventsSubscribed is
         // what stops one already in flight from posting to a dispatcher that is draining. Clearing

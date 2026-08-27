@@ -41,6 +41,13 @@ internal sealed class HudManager : IDisposable
     private bool _disposed;
     private TimeSpan _lastSignal;
 
+    /// <summary>Screen boxes of the VISIBLE volume widgets, republished on this thread for the
+    /// wheel hook to read from ITS thread — see <see cref="IsOverVolumeWidget"/>. The hook cannot
+    /// ask the windows: they are WPF objects with thread affinity, and Box is a GetWindowRect on
+    /// the handle the window's own thread owns. At most one frame stale, which for a hit-test on
+    /// a widget the user is looking at is nothing.</summary>
+    private volatile IReadOnlyList<HudRect> _volumeBoxes = Array.Empty<HudRect>();
+
     /// <summary>How long after the last audio the widgets stay up under "show only while
     /// playing". Without a hold, the HUD would blink on every gap between tracks.</summary>
     private static readonly TimeSpan SilenceHold = TimeSpan.FromSeconds(3);
@@ -117,6 +124,10 @@ internal sealed class HudManager : IDisposable
         // registration before knowing whether the widgets are even going to be on screen would
         // start a WASAPI capture and drop it again in the same call.
         ApplySuppression(force: true);
+        // After suppression, so the snapshot describes what is actually on screen — and here as
+        // well as in OnFrame because this is the path that ends with NO windows, which stops the
+        // frame timer and with it the only other thing that would clear the snapshot.
+        PublishVolumeBoxes();
         LayoutChanged?.Invoke(layout);
     }
 
@@ -325,10 +336,26 @@ internal sealed class HudManager : IDisposable
     /// transparent to everything except the wheel.
     ///
     /// Unlike the tray's <c>IsOverIcon</c> this is exact — <see cref="HudWidgetWindow.Box"/> comes
-    /// from GetWindowRect, in the same physical pixels the hook reports.</summary>
-    public bool IsOverVolumeWidget(int x, int y) =>
-        _windows.Values.Any(w =>
-            w.Widget.Type == HudWidgetTypes.Volume && w.IsVisible && w.Box.Contains(x, y));
+    /// from GetWindowRect, in the same physical pixels the hook reports.
+    ///
+    /// Answered from <see cref="_volumeBoxes"/> rather than from the windows themselves, because
+    /// the hook asks from its OWN thread and a WPF window may only be touched from the one that
+    /// made it.</summary>
+    public bool IsOverVolumeWidget(int x, int y)
+    {
+        foreach (var box in _volumeBoxes)
+            if (box.Contains(x, y)) return true;
+        return false;
+    }
+
+    /// <summary>Takes the snapshot <see cref="IsOverVolumeWidget"/> answers from. UI thread only:
+    /// it reads each window's visibility and asks Windows for its rectangle, and both are bound to
+    /// the thread that owns the window.</summary>
+    private void PublishVolumeBoxes() =>
+        _volumeBoxes = _windows.Values
+            .Where(w => w.Widget.Type == HudWidgetTypes.Volume && w.IsVisible)
+            .Select(w => w.Box)
+            .ToArray();
 
     public void SetVisible(string id, bool visible)
     {
@@ -404,6 +431,10 @@ internal sealed class HudManager : IDisposable
 
     private void OnFrame()
     {
+        // Republished every frame, on THIS thread, because the wheel hook asks its hit-test from
+        // another one — see IsOverVolumeWidget. A frame is also the only thing that sees a widget
+        // being DRAGGED in edit mode, which no layout event reports until the drag ends.
+        PublishVolumeBoxes();
         if (_disposed || _windows.Count == 0) return;
 
         var now = _clock.Elapsed;
