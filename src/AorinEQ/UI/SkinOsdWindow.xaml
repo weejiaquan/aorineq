@@ -1,4 +1,5 @@
 <Window x:Class="AorinEQ.UI.SkinOsdWindow"
+        FontFamily="{StaticResource AppFontFamily}"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
