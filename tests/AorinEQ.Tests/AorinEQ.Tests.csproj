@@ -14,6 +14,11 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <!-- Only so FeatureCatalogueTests can check a Discover glyph against the real SymbolRegular
+         enum. FeatureCatalogue stores glyphs by NAME so that AorinEQ.Core never references WPF-UI
+         - a good trade, but it turns a compile error into a fallback circle nobody notices. This
+         puts the error back at build time. Version pinned to the app's. -->
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
   </ItemGroup>
 
   <ItemGroup>

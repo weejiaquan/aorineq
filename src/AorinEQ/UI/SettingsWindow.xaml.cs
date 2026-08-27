@@ -94,6 +94,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// repair button knows which of its two jobs it currently has.</summary>
     private EapoHealthSnapshot? _health;
     private string _volumeMode = VolumeModes.Eapo;
+    /// <summary>The language SETTING ("auto" or a code), not the resolved table.</summary>
+    private string _language = Languages.Auto;
     private bool _eapoApplies = true;
 
     public SettingsWindow(bool autostartEnabled, bool runAsAdmin, bool isElevated, string version,
@@ -113,7 +115,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         AutostartBox.IsChecked = autostartEnabled;
         RunAsAdminBox.IsChecked = runAsAdmin;
         ElevationStateText.Text = isElevated
-            ? "Currently running elevated."
+            ? Loc.T("settings.currently-running-elevated")
             : runAsAdmin
                 ? Loc.T("settings.not-elevated-in-this-session-restart")
                 : Loc.T("settings.currently-running-without-elevation");
@@ -124,6 +126,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         PopulateTrayActions(TrayLeftClickCombo);
         PopulateTrayActions(TrayMiddleClickCombo);
 
+        _language = settings.Language;
+        BuildDiscover();
         ApplyOsdSettings(settings);
         ApplyTrayBehaviour(settings);
         ApplyVolumeMode(settings);
@@ -136,7 +140,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         // Nothing is in the frame until a section is selected, so the window would open blank.
         // Applied on Loaded — see Navigate.
-        Navigate(SettingsSections.All[0]);
+        // Discover, but only until it has been seen once - after that a returning user lands on
+        // Volume, which is what they came for.
+        Navigate(SettingsSections.LandingSection(settings.HasSeenDiscover));
         Loaded += (_, _) => ApplyPendingSection();
     }
 
@@ -147,6 +153,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var bodies = new (string Section, UIElement Body)[]
         {
+            (SettingsSections.Discover, SectionDiscover),
             (SettingsSections.Volume, SectionVolume),
             (SettingsSections.Osd, SectionOsd),
             (SettingsSections.Skins, SectionSkins),
@@ -195,15 +202,53 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         if (IsLoaded) ApplyPendingSection();
     }
 
+    /// <summary>Sections whose help affordances have been built. Each is done once.</summary>
+    private readonly HashSet<string> _decoratedSections = new(StringComparer.Ordinal);
+
+    /// <summary>Builds the (?) affordances for one section, the first time it is shown.
+    ///
+    /// It cannot be done once for the whole window. The nine section bodies are DETACHED from the
+    /// holder at construction and handed to the frame one at a time, so at any moment eight of them
+    /// are outside the visual tree entirely - and a pass over the window would silently decorate
+    /// only whichever page happened to be open. That is exactly the bug this replaced: every card
+    /// outside the landing page had no help at all, and nothing failed.</summary>
+    private void DecorateHelpFor(string section, UIElement body)
+    {
+        if (!_decoratedSections.Add(section)) return;
+
+        // After layout: a CardControl's header is not reachable until its template has been
+        // applied, and ReplaceContent has only just parented it.
+        Dispatcher.BeginInvoke(() =>
+        {
+            var added = HelpDecorator.Decorate(body);
+            if (added.Count == 0) return;
+
+            var merged = new Dictionary<string, FrameworkElement>(_helpTargets, StringComparer.Ordinal);
+            foreach (var (key, element) in added) merged[key] = element;
+            _helpTargets = merged;
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Topic key to the control carrying it, filled in as each section is first shown.
+    /// Search uses this to scroll a result into view and open its help.</summary>
+    private IReadOnlyDictionary<string, System.Windows.FrameworkElement> _helpTargets =
+        new Dictionary<string, System.Windows.FrameworkElement>();
+
     private void ApplyPendingSection()
     {
         if (_pendingSection is not { } section || !_sections.TryGetValue(section, out var body)) return;
         _pendingSection = null;
+
+        // Rebuilt on every visit rather than once: the cards show live state, and "AirPlay: On"
+        // must not still say Off because the page was built before the user connected.
+        if (section == SettingsSections.Discover) OnDiscoverShown();
         bool focusPrimary = _pendingFocus;
         _pendingFocus = false;
 
         _currentSection = section;
         Nav.ReplaceContent(body);
+
+        DecorateHelpFor(section, body);
 
         // IsActive is the ONE source of truth for which item looks selected. NavigationView's own
         // SelectedItem is read-only from outside, and it is only ever set by the page-type
@@ -464,6 +509,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
+        _language = settings.Language;
+        BuildDiscover();
         ApplyOsdSettings(settings);
         ApplyVolumeMode(settings);
         ApplyDeviceVolumes(settings);
