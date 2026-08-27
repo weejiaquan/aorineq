@@ -592,11 +592,9 @@
   "settings.language.subtitle": "Follow Windows, or choose one. The change applies immediately — no restart.",
   "settings.language.auto": "Follow Windows",
   "settings.language.suggest-correction": "Suggest a correction",
-  "settings.search.placeholder": "Search settings and help…",
-  "nudge.discover.balloon": "New: see everything AorinEQ can do",
   "language.en.endonym": "English",
-  "language.zh-Hans.endonym": "简体中文",
-  "language.zh-Hant.endonym": "繁體中文",
   "language.ja.endonym": "日本語",
-  "language.ko.endonym": "한국어"
+  "language.ko.endonym": "한국어",
+  "language.zh-hans.endonym": "简体中文",
+  "language.zh-hant.endonym": "繁體中文"
 }

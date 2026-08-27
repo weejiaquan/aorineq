@@ -28,10 +28,10 @@ public class LocKeyUsageTests
     ///
     /// Excluding a prefix from the orphan check would normally be a hole, so each family has a
     /// test that enumerates its real members instead: the two below are covered by
-    /// Every_hud_widget_type_and_tray_action_has_a_name here, and help./feature. by
+    /// Every_hud_widget_tray_action_and_language_has_a_name here, and help./feature. by
     /// HelpCatalogueTests and FeatureCatalogueTests walking their catalogues.</summary>
     private static readonly string[] ComposedPrefixes =
-        ["help.", "feature.", "surface.", "hud.widget.", "tray.action."];
+        ["help.", "feature.", "surface.", "hud.widget.", "tray.action.", "language."];
 
     private static IReadOnlyList<string> ReferencedKeys()
     {
@@ -86,7 +86,7 @@ public class LocKeyUsageTests
     /// keeps that promise only if the key is actually there - otherwise "eqcurve" is exactly what
     /// the user sees. This is that guarantee, enumerated rather than assumed.</summary>
     [Fact]
-    public void Every_hud_widget_type_and_tray_action_has_a_name()
+    public void Every_hud_widget_tray_action_and_language_has_a_name()
     {
         var table = Loc.Keys(Languages.En).ToHashSet(StringComparer.Ordinal);
         var missing = new List<string>();
@@ -98,6 +98,12 @@ public class LocKeyUsageTests
         foreach (var action in TrayActions.All)
             if (!table.Contains($"tray.action.{action}.name"))
                 missing.Add($"tray.action.{action}.name");
+
+        // Every shipped language must name ITSELF, in its own script. A picker that lists
+        // languages in English is no use to the one person who needs the picker.
+        foreach (var language in Languages.All)
+            if (!table.Contains($"language.{language.ToLowerInvariant()}.endonym"))
+                missing.Add($"language.{language.ToLowerInvariant()}.endonym");
 
         Assert.True(missing.Count == 0,
             $"These would render as their raw persisted name in menus:{Environment.NewLine}  " +
