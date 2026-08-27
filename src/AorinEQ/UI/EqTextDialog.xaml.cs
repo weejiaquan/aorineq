@@ -68,12 +68,12 @@ public partial class EqTextDialog : Wpf.Ui.Controls.FluentWindow
         try
         {
             System.Windows.Clipboard.SetText(TextArea.Text);
-            CopiedText.Text = "Copied.";
+            CopiedText.Text = Loc.T("dialog.eqtext.copied.copied");
         }
         catch (System.Runtime.InteropServices.COMException)
         {
             // The clipboard is a shared OS resource another process can hold open.
-            CopiedText.Text = "Couldn't access the clipboard — try again.";
+            CopiedText.Text = Loc.T("dialog.eqtext.copied.couldn-t-access-the");
         }
     }
 }

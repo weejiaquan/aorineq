@@ -42,13 +42,6 @@ public static class TrayActions
     /// <summary>The label the Settings combo shows. Lives here so an action added later cannot
     /// ship with its raw persisted name showing in the UI — the same reason
     /// <see cref="HudWidgetTypes.DisplayName"/> exists.</summary>
-    public static string DisplayName(string action) => action switch
-    {
-        VolumeBar => "Open the volume slider",
-        Settings => "Open Settings",
-        Equalizer => "Open the equalizer",
-        Mute => "Mute / unmute",
-        None => "Do nothing",
-        _ => action,
-    };
+    public static string DisplayName(string action) =>
+        IsAction(action) ? Loc.T($"tray.action.{action}.name") : action;
 }

@@ -64,15 +64,13 @@ public static class HudWidgetTypes
     /// open (and with it a thread, an event handle and a COM object) for nothing.</summary>
     public static bool ConsumesAudio(string? type) => type is Spectrum or Levels;
 
-    /// <summary>The name shown in menus.</summary>
-    public static string DisplayName(string type) => type switch
-    {
-        Spectrum => "Spectrum",
-        Levels => "Levels",
-        EqCurve => "EQ curve",
-        Volume => "Volume",
-        _ => type,
-    };
+    /// <summary>The name shown in menus, in the active language.
+    ///
+    /// Composed from the type rather than switched on it, so a widget kind added later cannot ship
+    /// with its raw persisted name showing in the UI - it fails LocKeyUsageTests instead. An
+    /// unknown type falls back to itself for the same reason the switch used to.</summary>
+    public static string DisplayName(string type) =>
+        All.Contains(type) ? Loc.T($"hud.widget.{type}.name") : type;
 }
 
 /// <summary>One widget's persisted record: what it is, which screen it lives on, where and how big

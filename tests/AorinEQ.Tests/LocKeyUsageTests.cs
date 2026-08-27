@@ -18,13 +18,20 @@ public class LocKeyUsageTests
     private static readonly Regex XamlReference =
         new(@"\{loc:T\s+(?<key>[A-Za-z0-9_.\-]+)\s*\}", RegexOptions.Compiled);
 
+    /// <summary>Loc.T("...") and the thin wrappers over it. TrayIcon.Localised registers a menu
+    /// item's key so a language change can re-set its Text; it is a reference like any other.</summary>
     private static readonly Regex CodeReference =
-        new(@"Loc\.T\(\s*""(?<key>[A-Za-z0-9_.\-]+)""", RegexOptions.Compiled);
+        new(@"(?:Loc\.T|Localised)\(\s*""(?<key>[A-Za-z0-9_.\-]+)""", RegexOptions.Compiled);
 
-    /// <summary>Prefixes reached by composing a key at runtime (help.{topic}.body), so they never
-    /// appear as a literal anywhere. HelpCatalogueTests covers those instead - it walks the
-    /// catalogue and asserts every topic resolves a title, summary and body.</summary>
-    private static readonly string[] ComposedPrefixes = ["help.", "feature.", "surface."];
+    /// <summary>Prefixes reached by COMPOSING a key at runtime - Loc.T($"help.{topic}.body") - so
+    /// they never appear as a literal anywhere for the regex above to find.
+    ///
+    /// Excluding a prefix from the orphan check would normally be a hole, so each family has a
+    /// test that enumerates its real members instead: the two below are covered by
+    /// Every_hud_widget_type_and_tray_action_has_a_name here, and help./feature. by
+    /// HelpCatalogueTests and FeatureCatalogueTests walking their catalogues.</summary>
+    private static readonly string[] ComposedPrefixes =
+        ["help.", "feature.", "surface.", "hud.widget.", "tray.action."];
 
     private static IReadOnlyList<string> ReferencedKeys()
     {
@@ -69,6 +76,32 @@ public class LocKeyUsageTests
             $"In strings.en.json but referenced by nothing - four translations of a string no " +
             $"user will ever see:{Environment.NewLine}  " +
             string.Join($"{Environment.NewLine}  ", orphans));
+    }
+
+    /// <summary>The two families whose keys are composed from a persisted identifier.
+    ///
+    /// HudWidgetTypes.DisplayName and TrayActions.DisplayName used to be switch statements with
+    /// English literals, and both carried a comment saying they existed so a member added later
+    /// could not ship with its RAW PERSISTED NAME showing in the UI. Composing a string-table key
+    /// keeps that promise only if the key is actually there - otherwise "eqcurve" is exactly what
+    /// the user sees. This is that guarantee, enumerated rather than assumed.</summary>
+    [Fact]
+    public void Every_hud_widget_type_and_tray_action_has_a_name()
+    {
+        var table = Loc.Keys(Languages.En).ToHashSet(StringComparer.Ordinal);
+        var missing = new List<string>();
+
+        foreach (var type in HudWidgetTypes.All)
+            if (!table.Contains($"hud.widget.{type}.name"))
+                missing.Add($"hud.widget.{type}.name");
+
+        foreach (var action in TrayActions.All)
+            if (!table.Contains($"tray.action.{action}.name"))
+                missing.Add($"tray.action.{action}.name");
+
+        Assert.True(missing.Count == 0,
+            $"These would render as their raw persisted name in menus:{Environment.NewLine}  " +
+            string.Join($"{Environment.NewLine}  ", missing));
     }
 
     /// <summary>Keys are lower-kebab within dot-separated segments. Not decoration: this is the

@@ -68,9 +68,8 @@ public partial class SettingsWindow
         bool applies = AirPlayController.RetargetSettingApplies(_airPlayVolumeMode);
         AirPlayRetargetBox.IsEnabled = applies;
         AirPlayRetargetNote.Text = applies
-            ? "While streaming, the volume keys set the AirPlay device's level instead of Windows'."
-            : "Not needed in Equalizer APO mode: the preamp already applies before audio is sent, "
-            + "so the volume keys control the receiver anyway. Set the receiver to 100%.";
+            ? Loc.T("settings.airplay.while-streaming-the-volume-keys-set")
+            : Loc.T("settings.airplay.not-needed-in-equalizer-apo-mode");
     }
 
     /// <summary>Called by App when the volume mode changes, so the note above stays honest
@@ -85,7 +84,7 @@ public partial class SettingsWindow
     {
         _airPlayEndpoints = AudioEndpoint.GetRenderEndpoints();
         AirPlaySourceCombo.Items.Clear();
-        AirPlaySourceCombo.Items.Add(new ComboBoxItem { Content = "Default playback device", Tag = "" });
+        AirPlaySourceCombo.Items.Add(new ComboBoxItem { Content = Loc.T("settings.airplay.default-playback-device"), Tag = "" });
         foreach (var endpoint in _airPlayEndpoints)
             AirPlaySourceCombo.Items.Add(new ComboBoxItem
             {
@@ -113,7 +112,7 @@ public partial class SettingsWindow
         AirPlayRefreshButton.IsEnabled = true;
         if (devices.Count == 0)
         {
-            AirPlayStatusText.Text = "No AirPlay receivers found on this network.";
+            AirPlayStatusText.Text = Loc.T("settings.airplay.air-play-status.no-airplay-receivers-found");
             AirPlayConnectButton.IsEnabled = false;
             return;
         }
@@ -136,12 +135,11 @@ public partial class SettingsWindow
                 $"receiver   {diagnostics.Receiver}  ({diagnostics.ServerName})",
                 $"codec      {diagnostics.Codec}",
                 $"format     {diagnostics.SampleRate} Hz, {diagnostics.FramesPerPacket} frames/packet",
-                $"queue      {diagnostics.QueueMs} ms   (receiver reports {diagnostics.ReceiverLatencySamples} samples)",
+                Loc.T("settings.airplay.queue-ms-receiver-reports-samples", diagnostics.QueueMs, diagnostics.ReceiverLatencySamples),
                 $"sent       {diagnostics.PacketsSent:N0} packets, {diagnostics.BytesSent / 1024:N0} KiB, {diagnostics.Kbps:F0} kbps",
-                $"resends    {diagnostics.RetransmitRequests:N0} requested, {diagnostics.RetransmitsServed:N0} served, "
-                    + $"{diagnostics.RetransmitsMissed:N0} missed  ({diagnostics.RetransmitPercent:F2}% of packets)",
+                Loc.T("settings.airplay.resends-requested-served-missed-of-packets", diagnostics.RetransmitRequests, diagnostics.RetransmitsServed, diagnostics.RetransmitsMissed, diagnostics.RetransmitPercent),
                 $"timing     {diagnostics.TimingReplies:N0} replies, {diagnostics.SyncsSent:N0} syncs",
-                $"silence    {diagnostics.SilentPackets:N0} packets with no source audio")
+                Loc.T("settings.airplay.silence-packets-with-no-source-audio", diagnostics.SilentPackets))
             : diagnostics.LastError is { Length: > 0 } error
                 ? $"Last attempt failed: {error}"
                 : "Not streaming.";
@@ -184,7 +182,7 @@ public partial class SettingsWindow
     private void OnAirPlayRefresh(object sender, RoutedEventArgs e)
     {
         AirPlayRefreshButton.IsEnabled = false;
-        AirPlayStatusText.Text = "Searching…";
+        AirPlayStatusText.Text = Loc.T("settings.airplay.air-play-status.searching");
         AirPlayRefreshRequested?.Invoke();
     }
 
@@ -200,7 +198,7 @@ public partial class SettingsWindow
         var device = _airPlayDevices.FirstOrDefault(d => d.Id == id);
         if (device is null) return;
 
-        AirPlayStatusText.Text = $"Connecting to {device.DisplayName}…";
+        AirPlayStatusText.Text = Loc.T("settings.airplay.air-play-status.connecting-to", device.DisplayName);
         AirPlayConnectRequested?.Invoke(device);
     }
 

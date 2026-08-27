@@ -56,7 +56,7 @@ public partial class AutoEqImportDialog : Wpf.Ui.Controls.FluentWindow
         {
             var text = await AutoEqIndex.FetchIndexAsync(IndexCachePath, refresh);
             _entries = AutoEqIndex.ParseIndex(text);
-            StatusText.Text = $"{_entries.Count} profiles available.";
+            StatusText.Text = Loc.T("dialog.autoeq.status.profiles-available", _entries.Count);
             UpdateResults();
         }
         catch (Exception ex)
@@ -94,7 +94,7 @@ public partial class AutoEqImportDialog : Wpf.Ui.Controls.FluentWindow
             return;
         _busy = true;
         ImportButton.IsEnabled = false;
-        StatusText.Text = $"Downloading {item.Entry.Name}…";
+        StatusText.Text = Loc.T("dialog.autoeq.status.downloading", item.Entry.Name);
         try
         {
             ImportedPreset = await AutoEqIndex.DownloadPresetAsync(item.Entry, ApoPaths.GetPresetsRoot());
@@ -102,7 +102,7 @@ public partial class AutoEqImportDialog : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Import failed: {ex.Message}";
+            StatusText.Text = Loc.T("dialog.autoeq.status.import-failed", ex.Message);
             _busy = false;
             ImportButton.IsEnabled = ResultsList.SelectedItem is not null;
         }
