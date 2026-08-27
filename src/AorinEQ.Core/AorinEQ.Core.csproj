@@ -8,6 +8,31 @@
          3.3.0. See the comment there before adding one back. -->
   </PropertyGroup>
   <ItemGroup>
+    <!-- The string tables ship INSIDE the assembly.
+
+         Not satellite assemblies, which is the .NET default answer and the wrong one here:
+         publish.ps1 builds single-file with compression, and a per-culture file beside the exe
+         defeats the whole point of that. Not loose JSON either - single-file self-extracts to
+         %TEMP%, and Storage Sense reaps that directory under a long-running tray session, which
+         is the crash BundlePin exists to work around. An embedded resource is read straight out
+         of the assembly image and cannot be deleted from underneath us.
+
+         WithCulture="false" IS CRITICAL and must stay. MSBuild's AssignCulture task reads
+         the middle segment of "strings.ja.json" as a culture identifier and, left alone, routes
+         the file into a SATELLITE ASSEMBLY (ja\AorinEQ.Core.resources.dll) instead of the main
+         one - so GetManifestResourceStream finds nothing, and the single-file build grows exactly
+         the per-culture files this design exists to avoid. It fails silently: the build succeeds
+         and every string falls back to its key at runtime. LogicalName is stated for the same
+         reason - it pins the names Loc composes, rather than inheriting whatever the culture
+         inference leaves behind.
+
+         LocBundleTests asserts these resources are present under the exact names Loc looks for,
+         so renaming the folder or the files fails the build rather than the app. -->
+    <EmbeddedResource Include="Strings\strings.*.json" WithCulture="false"
+                      LogicalName="AorinEQ.Core.Strings.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- System.Drawing, for the runtime-drawn tray glyph (TrayGlyph/TrayIconRenderer). Taken from
          the desktop framework rather than the System.Drawing.Common package because the app
          already ships WindowsForms, and the test project resolves it the same way. -->
