@@ -61,6 +61,13 @@
   import byte-for-byte, straight from its published index.
 * **`aorineq://` links** — one click installs a skin or applies an EQ preset from a web page,
   always behind a dialog that shows you what it is first.
+* **AirPlay, built in** — send this PC's audio to a HomePod, an Apple TV or any AirPlay receiver
+  without a second application. Receiver picker, four latency modes, dithered silence, standby.
+* **It explains itself** — a Discover page listing what the app can do, a (?) on every setting
+  saying when you would want it, and a search box that finds any of it by what it does rather than
+  by what it is labelled.
+* **Five languages** — English, 简体中文, 繁體中文, 日本語, 한국어. Follows your Windows language
+  by default, and switches without a restart.
 * **Auto-update** — checks GitHub Releases, verifies the SHA-256, swaps itself in place.
 * **A tray icon you can actually use** — scroll the wheel over it to change the volume the way you
   can over the Windows one (Ctrl for 1 % steps, Shift for 10 %), middle-click to mute, and pick
@@ -158,8 +165,11 @@ Runs on Windows 10/11 x64. Releases are self-contained: no .NET runtime needed t
 - **[aorineq-web.vercel.app/docs](https://aorineq-web.vercel.app/docs)** — install guide, skin
   format, and the `aorineq://` contract.
 - **[docs/reference.md](docs/reference.md)** — the full manual in this repo: volume modes, the
-  whole `skin.json` schema, the equalizer, the link contract and its share-payload format, and
-  every file AorinEQ touches.
+  whole `skin.json` schema, the equalizer, AirPlay, HUD widgets, the link contract and its
+  share-payload format, and every file AorinEQ touches.
+- **Translating** — the four non-English tables are machine-drafted and corrections are welcome;
+  they are plain JSON in `src/AorinEQ.Core/Strings/`, no C# involved. See
+  [Languages](docs/reference.md#languages).
 
 Found a bug, or want something? [Open an issue](https://github.com/weejiaquan/aorineq/issues).
 
