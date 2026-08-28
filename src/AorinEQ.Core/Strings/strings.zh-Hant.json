@@ -603,5 +603,10 @@
   "help.hud.widget.volume.body": "常駐顯示目前音量，不用按鍵，也不用把滑鼠移到工作列圖示上就能看到。如果開啟了滾輪調整，也可以直接在它上面滾動改音量。",
   "settings.search.placeholder": "搜尋設定與說明…",
   "settings.search.result": "{0} › {1}",
-  "nudge.discover.balloon": "新增：看看 AorinEQ 都能做什麼"
+  "nudge.discover.balloon": "新增：看看 AorinEQ 都能做什麼",
+  "settings.nav-general.label": "設定",
+  "settings.page-title.general": "設定",
+  "surface.general.name": "設定",
+  "settings.heading.links": "連結",
+  "settings.section-general.subtitle": "AorinEQ 本身的行為——工作列圖示做什麼、是否隨 Windows 啟動，以及是否以系統管理員身分執行。"
 }

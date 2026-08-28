@@ -603,5 +603,10 @@
   "help.hud.widget.volume.body": "常驻显示当前音量，不用按键，也不用把鼠标移到托盘图标上就能看到。如果开启了滚轮调节，也可以直接在它上面滚动改音量。",
   "settings.search.placeholder": "搜索设置与帮助…",
   "settings.search.result": "{0} › {1}",
-  "nudge.discover.balloon": "新增：看看 AorinEQ 都能做什么"
+  "nudge.discover.balloon": "新增：看看 AorinEQ 都能做什么",
+  "settings.nav-general.label": "设置",
+  "settings.page-title.general": "设置",
+  "surface.general.name": "设置",
+  "settings.heading.links": "链接",
+  "settings.section-general.subtitle": "AorinEQ 自身的行为——托盘图标做什么、是否随 Windows 启动，以及是否以管理员身份运行。"
 }

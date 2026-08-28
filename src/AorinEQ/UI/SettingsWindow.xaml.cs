@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -160,6 +160,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             (SettingsSections.Equalizer, SectionEqualizer),
             (SettingsSections.AirPlay, SectionAirPlay),
             (SettingsSections.Hud, SectionHud),
+            (SettingsSections.General, SectionGeneral),
             (SettingsSections.Updates, SectionUpdates),
             (SettingsSections.About, SectionAbout),
         };
@@ -295,7 +296,11 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     private IEnumerable<Wpf.Ui.Controls.NavigationViewItem> NavItems() =>
-        new[] { NavVolume, NavOsd, NavSkins, NavEqualizer, NavAirPlay, NavHud, NavUpdates, NavAbout };
+        new[]
+        {
+            NavDiscover, NavVolume, NavOsd, NavSkins, NavEqualizer, NavAirPlay, NavHud,
+            NavGeneral, NavUpdates, NavAbout,
+        };
 
     private Wpf.Ui.Controls.NavigationViewItem? NavItemFor(string section) =>
         NavItems().FirstOrDefault(i => i.TargetPageTag == section);

@@ -603,5 +603,10 @@
   "help.hud.widget.volume.body": "A permanent read-out of the current volume, for when you want to see the level without pressing anything or hovering the tray icon. You can also scroll on it to change the volume, if scrolling is turned on.",
   "settings.search.placeholder": "Search settings and help…",
   "settings.search.result": "{0} › {1}",
-  "nudge.discover.balloon": "New: see everything AorinEQ can do"
+  "nudge.discover.balloon": "New: see everything AorinEQ can do",
+  "settings.nav-general.label": "Settings",
+  "settings.page-title.general": "Settings",
+  "surface.general.name": "Settings",
+  "settings.heading.links": "Links",
+  "settings.section-general.subtitle": "How AorinEQ itself behaves — what the tray icon does, whether it starts with Windows, and whether it runs with administrator rights."
 }

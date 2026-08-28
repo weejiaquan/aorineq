@@ -1,4 +1,4 @@
-namespace AorinEQ.Core;
+﻿namespace AorinEQ.Core;
 
 /// <summary>The Settings window's sidebar sections, spelled once.
 ///
@@ -20,13 +20,27 @@ public static class SettingsSections
     public const string Equalizer = "equalizer";
     public const string AirPlay = "airplay";
     public const string Hud = "hud";
+
+    /// <summary>The app's own settings - start with Windows, run as administrator, what the tray
+    /// icon does, whether aorineq:// links are handled. Everything that configures AorinEQ itself
+    /// rather than the sound it makes.
+    ///
+    /// The tag is "general" and NOT "settings", though the sidebar labels it Settings. The word
+    /// settings is already taken: <see cref="ProtocolPages.Settings"/> is the page name in
+    /// <c>aorineq://open?page=settings</c>, which means "just open the Settings window" and
+    /// resolves to the FIRST section. Giving a section the same tag would leave one word meaning
+    /// two things in the same routing table, and <c>SettingsSections.Settings</c> reads like a
+    /// mistake besides.</summary>
+    public const string General = "general";
+
     public const string Updates = "updates";
     public const string About = "about";
 
-    /// <summary>Every section, in sidebar order. The FIRST entry is also the default landing
-    /// section — see <see cref="ForProtocolPage"/>.</summary>
+    /// <summary>Every section, in sidebar order - the seven main items, then the three the
+    /// NavigationView shows in its footer. The FIRST entry is also the default landing section -
+    /// see <see cref="ForProtocolPage"/>.</summary>
     public static readonly IReadOnlyList<string> All =
-        [Discover, Volume, Osd, Skins, Equalizer, AirPlay, Hud, Updates, About];
+        [Discover, Volume, Osd, Skins, Equalizer, AirPlay, Hud, General, Updates, About];
 
     public static bool IsSection(string section) => All.Contains(section);
 

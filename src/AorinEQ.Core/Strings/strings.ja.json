@@ -603,5 +603,10 @@
   "help.hud.widget.volume.body": "現在の音量を常に表示します。キーを押したりトレイアイコンにカーソルを乗せたりしなくても確認できます。スクロール操作を有効にしていれば、この上でスクロールして音量を変えることもできます。",
   "settings.search.placeholder": "設定とヘルプを検索…",
   "settings.search.result": "{0} › {1}",
-  "nudge.discover.balloon": "新機能: AorinEQ でできることを見る"
+  "nudge.discover.balloon": "新機能: AorinEQ でできることを見る",
+  "settings.nav-general.label": "設定",
+  "settings.page-title.general": "設定",
+  "surface.general.name": "設定",
+  "settings.heading.links": "リンク",
+  "settings.section-general.subtitle": "AorinEQ 自体の動作です。トレイアイコンの役割、Windows と一緒に起動するか、管理者権限で実行するかを設定します。"
 }

@@ -1,4 +1,4 @@
-namespace AorinEQ.Core;
+﻿namespace AorinEQ.Core;
 
 /// <summary>Every topic AorinEQ can explain.
 
@@ -23,18 +23,6 @@ public static class HelpCatalogue
             "settings.step.title", "settings.step.subtitle", "#volume-modes"),
         new("settings.device-volume", SettingsSections.Volume,
             "settings.device-volume.title", null, "#volume-modes"),
-        new("settings.tray-left-click", SettingsSections.Volume,
-            "settings.tray-left-click.title", "settings.tray-left-click.subtitle", "#volume-modes"),
-        new("settings.tray-middle-click", SettingsSections.Volume,
-            "settings.tray-middle-click.title", "settings.tray-middle-click.subtitle", "#volume-modes"),
-        new("settings.tray-scroll", SettingsSections.Volume,
-            "settings.tray-scroll.title", "settings.tray-scroll.subtitle", "#volume-modes"),
-        new("settings.scroll-inverted", SettingsSections.Volume,
-            "settings.scroll-inverted.title", "settings.scroll-inverted.subtitle", "#volume-modes"),
-        new("settings.autostart", SettingsSections.Volume,
-            "settings.autostart.title", "settings.autostart.subtitle", "#volume-modes"),
-        new("settings.elevation-state", SettingsSections.Volume,
-            "settings.elevation-state.title", "settings.elevation-state.subtitle", "#volume-modes"),
         // ---- osd ----
         new("settings.style", SettingsSections.Osd,
             "settings.style.title", "settings.style.subtitle", "#the-osd"),
@@ -53,8 +41,6 @@ public static class HelpCatalogue
             "settings.skin-credit.title", "settings.skin-credit.subtitle", "#skins"),
         new("settings.skin-designer", SettingsSections.Skins,
             "settings.skin-designer.title", "settings.skin-designer.subtitle", "#skins"),
-        new("settings.protocol-links", SettingsSections.Skins,
-            "settings.protocol-links.title", "settings.protocol-links.subtitle", "#skins"),
         // ---- equalizer ----
         new("settings.open-equalizer", SettingsSections.Equalizer,
             "settings.open-equalizer.title", "settings.open-equalizer.subtitle", "#equalizer"),
@@ -86,6 +72,21 @@ public static class HelpCatalogue
             "settings.hud-only-playing-switch.title", "settings.hud-only-playing-switch.subtitle", "#hud-widgets"),
         new("settings.hud-fps", SettingsSections.Hud,
             "settings.hud-fps.title", "settings.hud-fps.subtitle", "#hud-widgets"),
+        // ---- general (AorinEQ configuring itself) ----
+        new("settings.tray-left-click", SettingsSections.General,
+            "settings.tray-left-click.title", "settings.tray-left-click.subtitle", "#volume-modes"),
+        new("settings.tray-middle-click", SettingsSections.General,
+            "settings.tray-middle-click.title", "settings.tray-middle-click.subtitle", "#volume-modes"),
+        new("settings.tray-scroll", SettingsSections.General,
+            "settings.tray-scroll.title", "settings.tray-scroll.subtitle", "#volume-modes"),
+        new("settings.scroll-inverted", SettingsSections.General,
+            "settings.scroll-inverted.title", "settings.scroll-inverted.subtitle", "#volume-modes"),
+        new("settings.autostart", SettingsSections.General,
+            "settings.autostart.title", "settings.autostart.subtitle", "#volume-modes"),
+        new("settings.elevation-state", SettingsSections.General,
+            "settings.elevation-state.title", "settings.elevation-state.subtitle", "#volume-modes"),
+        new("settings.protocol-links", SettingsSections.General,
+            "settings.protocol-links.title", "settings.protocol-links.subtitle", "#skins"),
         // ---- updates ----
         new("settings.auto-update", SettingsSections.Updates,
             "settings.auto-update.title", "settings.auto-update.subtitle", "#auto-update"),

@@ -603,5 +603,10 @@
   "help.hud.widget.volume.body": "현재 음량을 항상 표시합니다. 키를 누르거나 트레이 아이콘에 마우스를 올리지 않아도 확인할 수 있습니다. 스크롤 조작을 켜 두었다면 이 위에서 스크롤해 음량을 바꿀 수도 있습니다.",
   "settings.search.placeholder": "설정과 도움말 검색…",
   "settings.search.result": "{0} › {1}",
-  "nudge.discover.balloon": "새로운 기능: AorinEQ로 무엇을 할 수 있는지 보기"
+  "nudge.discover.balloon": "새로운 기능: AorinEQ로 무엇을 할 수 있는지 보기",
+  "settings.nav-general.label": "설정",
+  "settings.page-title.general": "설정",
+  "surface.general.name": "설정",
+  "settings.heading.links": "링크",
+  "settings.section-general.subtitle": "AorinEQ 자체의 동작입니다. 트레이 아이콘의 역할, Windows와 함께 시작할지, 관리자 권한으로 실행할지를 설정합니다."
 }
