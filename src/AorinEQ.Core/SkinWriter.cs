@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace AorinEQ.Core;
 
@@ -54,7 +54,17 @@ public static class SkinWriter
             var jsonPath = Path.Combine(folder, "skin.json");
             bool showText = config.Text is { Show: true };
             var meta = config.Meta ?? SkinMeta.None;
-            if (showText || config.Scale != 1.0 || config.Fps != 10.0
+
+            // Whatever this writer does not understand, it keeps. Today that is the "airplay"
+            // block: SkinLoader reads it, the designer cannot edit it, and this method rewrites
+            // skin.json wholesale from a SkinConfig - so without this the block would vanish on
+            // the next save. The artwork files are never deleted, so the bar would still LOAD,
+            // stripped of its fill range, its text anchors and its hit region, and the author
+            // would have no way to tell which save did it. Silent partial loss is worse than
+            // either keeping it or refusing to save.
+            var preservedAirPlay = ReadPreservedAirPlay(jsonPath);
+
+            if (preservedAirPlay is not null || showText || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
                 || config.MutedFrames != 1 || config.MutedDim != 0.6
                 || config.FillStartX is not null || config.FillEndX is not null
@@ -85,6 +95,7 @@ public static class SkinWriter
                     mutedDim = config.MutedDim == 0.6 ? (double?)null : config.MutedDim,
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,
+                    airplay = preservedAirPlay,
                 }, JsonWriteOptions);
                 File.WriteAllText(jsonPath, json);
             }
@@ -97,6 +108,29 @@ public static class SkinWriter
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"Failed to save skin '{name.Trim()}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>The "airplay" block of an existing skin.json, which this writer preserves rather
+    /// than authors. Absent file, unreadable file or malformed JSON all read as "nothing to keep" -
+    /// this runs on the save path, and refusing to save a skin because the file it is replacing
+    /// was already broken would be the wrong trade.</summary>
+    private static JsonElement? ReadPreservedAirPlay(string jsonPath)
+    {
+        if (!File.Exists(jsonPath)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            return doc.RootElement.TryGetProperty("airplay", out var airplay)
+                // Cloned: a JsonElement is only valid while its document lives, and this one is
+                // disposed on the way out of this method.
+                ? airplay.Clone()
+                : null;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

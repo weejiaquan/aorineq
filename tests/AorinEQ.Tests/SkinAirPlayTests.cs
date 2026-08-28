@@ -1,4 +1,4 @@
-using AorinEQ.Core;
+﻿using AorinEQ.Core;
 using Xunit.Abstractions;
 
 namespace AorinEQ.Tests;
@@ -231,5 +231,66 @@ public class SkinAirPlayTests : IDisposable
 
         Assert.True(skin.IsValid);
         Assert.Equal(300, skin.Width);
+    }
+
+    /// <summary>Saving a skin in the designer must not quietly delete its AirPlay bar.
+    ///
+    /// SkinWriter rewrites skin.json wholesale from a SkinConfig, and the designer does not know
+    /// about the airplay block. The artwork files would survive that - they are never deleted -
+    /// so the bar would still LOAD, but stripped of its fill range, its text anchors and its hit
+    /// region, and the author would have no idea which save did it. Preserving what the writer
+    /// does not understand is the only honest option while the designer cannot edit it.</summary>
+    [Fact]
+    public void Resaving_a_skin_preserves_an_airplay_block_the_designer_cannot_edit()
+    {
+        var json = """
+        {
+          "percentText": { "show": true, "x": 5, "y": 6 },
+          "airplay": {
+            "fillStartX": 8,
+            "fillEndX": 292,
+            "nameText": { "show": true, "x": 30, "y": 6 },
+            "dropdownHit": { "x": 260, "y": 4, "w": 30, "h": 30 }
+          }
+        }
+        """;
+        var folder = MakeSkin("resaved", airPlayArt: true, airPlayJson: json);
+
+        var before = SkinLoader.Load(folder);
+        Assert.NotNull(before.AirPlay);
+
+        // What the designer does: same folder, same layers, its own idea of the config.
+        SkinWriter.Save(_dir, "resaved",
+            Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
+            new SkinConfig(new SkinText(true, 5, 6), Scale: 1.0));
+
+        var after = SkinLoader.Load(folder);
+
+        _out.WriteLine("skin.json after resave:");
+        _out.WriteLine(File.ReadAllText(Path.Combine(folder, "skin.json")));
+
+        Assert.NotNull(after.AirPlay);
+        Assert.Equal(8, after.AirPlay!.FillStartX);
+        Assert.Equal(292, after.AirPlay.FillEndX);
+        Assert.Equal(30, after.AirPlay.Name!.X);
+        Assert.Equal(260, after.AirPlay.DropdownHit.X);
+        Assert.Equal(30, after.AirPlay.DropdownHit.Width);
+    }
+
+    /// <summary>And a skin that never had one still resaves without growing an empty block - the
+    /// byte-identical contract SkinMeta established in 3.2.</summary>
+    [Fact]
+    public void Resaving_a_skin_without_airplay_does_not_invent_a_block()
+    {
+        var folder = MakeSkin("plain", airPlayJson: """{ "percentText": { "show": true, "x": 5, "y": 6 } }""");
+
+        SkinWriter.Save(_dir, "plain",
+            Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
+            new SkinConfig(new SkinText(true, 5, 6), Scale: 1.0));
+
+        var text = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        _out.WriteLine(text);
+
+        Assert.DoesNotContain("airplay", text, StringComparison.OrdinalIgnoreCase);
     }
 }
