@@ -1,4 +1,4 @@
-namespace AorinEQ.Core;
+﻿namespace AorinEQ.Core;
 
 /// <summary>How much audio the sender keeps queued ahead of playback.
 ///
@@ -109,7 +109,8 @@ public sealed record AirPlaySetting(
     bool DitheredSilence = true,
     bool StandbyEnabled = true,
     int IdleDisconnectSeconds = 300,
-    bool MuteLocalWhileStreaming = false)
+    bool MuteLocalWhileStreaming = false,
+    string BarVisibility = AirPlayBarVisibility.Connected)
 {
     public static AirPlaySetting Default { get; } = new();
 
