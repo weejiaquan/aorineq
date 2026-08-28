@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 
@@ -17,9 +17,10 @@ namespace AorinEQ.Core;
 /// are the reason these three exist as more than decoration: they are the reference for what an
 /// AirPlay bar is supposed to look like, in a format a skin author can copy.
 ///
-/// The layer contract they follow is the one the loader documents: empty.png carries ALL the
-/// static decoration, and full.png paints only the lit pixels inside the fill range, so the clip
-/// between fillStartX and fillEndX is pixel-exact at both ends.</summary>
+/// Both layers paint the WHOLE image and differ only in the colour of the track. That is what the
+/// renderer wants: it clips the empty layer away across the full HEIGHT of the filled band and
+/// shows the full layer through the hole, so anything the full layer leaves out inside that band
+/// is a transparent rectangle punched through the middle of the skin.</summary>
 public static class SkinArt
 {
     public const int Width = 300;
@@ -53,8 +54,7 @@ public static class SkinArt
         bool airplay = height == AirPlayHeight;
         bool full = layer.EndsWith("full", StringComparison.Ordinal);
 
-        if (full) DrawFull(g, palette, airplay);
-        else DrawEmpty(g, palette, airplay);
+        DrawLayer(g, palette, airplay, lit: full);
 
         return bmp;
     }
@@ -91,7 +91,14 @@ public static class SkinArt
             Ink: Color.FromArgb(0xFF, 0x0A, 0x24, 0x6A), Corner: 3, Bevel: true, Font: "Tahoma"),
     };
 
-    private static void DrawEmpty(Graphics g, Palette p, bool airplay)
+    /// <summary>Draws one layer. The two differ ONLY in the colour of the track.
+    ///
+    /// The full layer paints the WHOLE image, not just the lit pixels. The renderer clips the
+    /// empty layer away across the full height of the filled band and shows the full layer
+    /// through the hole - so anything the full layer omits inside that band is a transparent
+    /// rectangle punched through the middle of the skin, which is what the first version of this
+    /// drew.</summary>
+    private static void DrawLayer(Graphics g, Palette p, bool airplay, bool lit)
     {
         int h = airplay ? AirPlayHeight : VolumeHeight;
         var body = new Rectangle(0, 0, Width - 1, h - 1);
@@ -123,15 +130,14 @@ public static class SkinArt
             }
         }
 
+        if (lit) DrawLit(g, p, track);
         if (airplay) DrawChevron(g, p);
     }
 
-    /// <summary>The lit layer: ONLY the pixels inside the fill range. Everything static belongs in
-    /// the empty layer, which is what makes the clip exact at 0% and at 100%.</summary>
-    private static void DrawFull(Graphics g, Palette p, bool airplay)
+    /// <summary>The accent inside the track - the only thing that distinguishes the full layer
+    /// from the empty one.</summary>
+    private static void DrawLit(Graphics g, Palette p, Rectangle track)
     {
-        var track = TrackRect(airplay);
-
         if (p.Bevel)
         {
             // XP filled its progress bars in discrete blocks. The clip reveals whole blocks as the

@@ -237,6 +237,10 @@ public sealed class AirPlayBarView : UserControl
         block.FontWeight = spec.Bold ? FontWeights.Bold : FontWeights.Normal;
         block.Foreground = ParseBrush(spec.Color);
 
+        // Zeroed BEFORE measuring. DesiredSize INCLUDES the margin, so measuring with the
+        // previous placement still applied feeds the offset back into itself - the right-aligned
+        // level walked further left on every render until it fell off the front of the bar.
+        block.Margin = new Thickness(0);
         block.Measure(new Size(width, double.PositiveInfinity));
         block.Margin = new Thickness(
             SkinMath.AlignedTextX(spec.X * _scale, block.DesiredSize.Width, spec.Align),
