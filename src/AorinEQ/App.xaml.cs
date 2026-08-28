@@ -255,6 +255,12 @@ public partial class App : System.Windows.Application
         // Windows gets a Japanese AorinEQ without the user finding a setting first.
         ApplyLanguage(_settings.Language);
 
+        // The three shipped skins, drawn into the user's skins folder if they are not already
+        // there. Called on EVERY launch rather than once, so a build that adds one lands it for
+        // existing installs too; it never overwrites a folder that exists, so a shipped skin the
+        // user has edited is theirs from then on.
+        DefaultSkins.EnsureInstalled(ApoPaths.GetSkinsRoot());
+
         // Cheap probe so a second launch doesn't pay for a pointless UAC prompt via the
         // elevated bounce below: if an instance is already running, its named event exists
         // and we can just signal it and exit. The mutex below remains the authoritative
