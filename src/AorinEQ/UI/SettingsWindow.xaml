@@ -830,6 +830,22 @@
                         <ui:ToggleSwitch x:Name="AirPlayDitherBox" Click="OnAirPlayDitherChanged" />
                     </ui:CardControl>
 
+                    <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-bar">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.air-play-bar.title}" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="{loc:T settings.air-play-bar.subtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox x:Name="AirPlayBarCombo" PreviewMouseWheel="OnComboWheel" MinWidth="190"
+                                  SelectionChanged="OnAirPlayBarVisibilityChanged">
+                            <ComboBoxItem Content="{loc:T settings.air-play-bar.never}" Tag="never" />
+                            <ComboBoxItem Content="{loc:T settings.air-play-bar.connected}" Tag="connected" />
+                            <ComboBoxItem Content="{loc:T settings.air-play-bar.enabled}" Tag="enabled" />
+                        </ComboBox>
+                    </ui:CardControl>
+
                     <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-idle-seconds">
                         <ui:CardControl.Header>
                             <StackPanel>

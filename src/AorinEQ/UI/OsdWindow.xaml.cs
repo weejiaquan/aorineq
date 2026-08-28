@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using AorinEQ.Core;
+using AorinEQ.Core.Raop;
 using AorinEQ.Input;
 
 namespace AorinEQ.UI;
@@ -52,6 +53,25 @@ public partial class OsdWindow : Window
     /// a notch means.</summary>
     public event Action<WheelNotch>? VolumeScrolled;
 
+    /// <summary>The AirPlay strip's requests, named like the tray's equivalents so the two read
+    /// as the same vocabulary: App wires both to the same handlers.</summary>
+    public event Action<AirPlayDevice>? AirPlayDeviceChosen;
+    public event Action? AirPlayDisconnectRequested;
+    public event Action? AirPlayRescanRequested;
+
+    /// <summary>The receiver's own level was set on the bar. Distinct from VolumeScrolled, which
+    /// is the SYSTEM volume - see AirPlayOwnsVolume for why the two never merge.</summary>
+    public event Action<int>? AirPlayVolumeSetByUser;
+
+    private IReadOnlyList<AirPlayDevice> _airPlayDevices = Array.Empty<AirPlayDevice>();
+    private string? _airPlayCurrentId;
+    private string? _airPlayChosenId;
+
+    /// <summary>True while the device menu is open. The hide timer already pauses on IsMouseOver,
+    /// but a ContextMenu is its OWN window - the pointer over it leaves IsMouseOver false, and the
+    /// OSD would fade out from under the menu it just opened.</summary>
+    private bool _airPlayMenuOpen;
+
     public OsdWindow()
     {
         InitializeComponent();
@@ -60,7 +80,7 @@ public partial class OsdWindow : Window
             // IsMouseOver: user is interacting; IsMouseCaptureWithin: the volume Slider's Thumb
             // holds mouse capture during a drag, which can continue with the pointer outside the
             // window's bounds (IsMouseOver false) — either way, stay open, timer keeps ticking.
-            if (IsMouseOver || IsMouseCaptureWithin) return;
+            if (IsMouseOver || IsMouseCaptureWithin || _airPlayMenuOpen) return;
             _hideTimer.Stop();
             if (!_animationEnabled)
             {
@@ -74,6 +94,9 @@ public partial class OsdWindow : Window
         };
         SourceInitialized += (_, _) => MakeNoActivate();
         MouseWheel += OnMouseWheel;
+
+        AirPlayBar.DropdownRequested += OpenAirPlayMenu;
+        AirPlayBar.VolumeSetByUser += percent => AirPlayVolumeSetByUser?.Invoke(percent);
         // Moving onto the OSD mid-fade-out rescues it: cancel the fade, restore full opacity and
         // restart the hide delay (whose tick then blocks on IsMouseOver for as long as the pointer
         // stays). Harmless when no fade is running — the timer restart just extends the delay.
@@ -136,6 +159,15 @@ public partial class OsdWindow : Window
             if (_style == OsdStyles.Fluent) ApplyFluentTheme(percent);
         }
 
+        // The AirPlay strip is a second row, so it has to be in the height BEFORE the anchor maths
+        // runs - otherwise a bottom-anchored OSD is positioned for a window shorter than the one
+        // that gets drawn, and hangs off the screen edge by exactly the strip.
+        if (AirPlayBar.Visibility == Visibility.Visible)
+        {
+            AirPlayBar.Measure(new System.Windows.Size(Width, double.PositiveInfinity));
+            Height += AirPlayBar.DesiredSize.Height + AirPlayBar.Margin.Top;
+        }
+
         // minimal-bar sits flush against the edge(s) its anchor names (margin 0); the two
         // center-vertical anchors (left-center/right-center) aren't against a top/bottom edge,
         // so they keep the standard margin. dark-pill always uses the standard margin.
@@ -162,6 +194,45 @@ public partial class OsdWindow : Window
         Show();
         _hideTimer.Stop();
         _hideTimer.Start(); // both paths auto-hide; IsMouseOver blocks the tick while hovered
+    }
+
+    /// <summary>Shows or hides the AirPlay strip and tells it what to draw.
+    ///
+    /// Called before ShowVolume, because ShowVolume measures the strip into the window height.</summary>
+    public void SetAirPlay(AirPlayBarState state, SkinAirPlay? skin, double scale)
+    {
+        AirPlayBar.SetSkin(skin, scale);
+        AirPlayBar.SetState(state);
+    }
+
+    /// <summary>The receivers the menu offers. Same shape as the tray's SetAirPlayDevices, and fed
+    /// from the same discovery, so the two lists cannot disagree.</summary>
+    public void SetAirPlayDevices(IReadOnlyList<AirPlayDevice> devices, string? currentId, string? chosenId)
+    {
+        _airPlayDevices = devices;
+        _airPlayCurrentId = currentId;
+        _airPlayChosenId = chosenId;
+    }
+
+    private void OpenAirPlayMenu()
+    {
+        _airPlayMenuOpen = true;
+
+        // The OSD is ShowActivated=False and Topmost; without this the menu can open behind it.
+        Activate();
+
+        AirPlayMenu.Show(AirPlayBar, _airPlayDevices, _airPlayCurrentId, _airPlayChosenId,
+            device => AirPlayDeviceChosen?.Invoke(device),
+            () => AirPlayDisconnectRequested?.Invoke(),
+            () => AirPlayRescanRequested?.Invoke(),
+            closed: () =>
+            {
+                _airPlayMenuOpen = false;
+                // Start counting again from the moment the menu closed rather than from whenever
+                // the OSD last appeared, which by now is long past.
+                _hideTimer.Stop();
+                _hideTimer.Start();
+            });
     }
 
     /// <summary>Stops a fade-out and restores full opacity, so the window this rescues stays up.

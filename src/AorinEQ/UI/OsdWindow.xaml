@@ -1,4 +1,4 @@
-<Window x:Class="AorinEQ.UI.OsdWindow"
+﻿<Window x:Class="AorinEQ.UI.OsdWindow"
         xmlns:loc="clr-namespace:AorinEQ.UI"
         FontFamily="{StaticResource AppFontFamily}"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -7,7 +7,12 @@
         WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True"
         Background="Transparent" Topmost="True"
         ShowInTaskbar="False" ShowActivated="False">
-    <Grid>
+    <!-- The three style roots overlap inside StyleHost exactly as they always have; the AirPlay
+         strip is stacked UNDER them rather than layered over, because it is a second row of the
+         OSD and not a second way of drawing the first one. It collapses when hidden, so an OSD
+         with no AirPlay bar measures exactly as it did before this existed. -->
+    <StackPanel x:Name="OsdStack">
+    <Grid x:Name="StyleHost">
         <!-- dark-pill style: rounded pill, glyph + slider + percent, drop shadow -->
         <Border x:Name="DarkPillRoot" CornerRadius="12" Background="#F2202020" Padding="16,10">
             <Border.Effect>
@@ -91,4 +96,6 @@
             </Grid>
         </Border>
     </Grid>
+    <loc:AirPlayBarView x:Name="AirPlayBar" Visibility="Collapsed" Margin="0,6,0,0" />
+    </StackPanel>
 </Window>

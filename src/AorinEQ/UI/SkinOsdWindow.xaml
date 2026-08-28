@@ -1,4 +1,4 @@
-<Window x:Class="AorinEQ.UI.SkinOsdWindow"
+﻿<Window x:Class="AorinEQ.UI.SkinOsdWindow"
         FontFamily="{StaticResource AppFontFamily}"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -9,5 +9,5 @@
          window adds is behaviour a TRANSIENT OSD needs and a persistent HUD widget does not:
          where it appears, the auto-hide fade, and drag/wheel-to-set-volume. The HUD's volume
          widget hosts the same SkinView with its own behaviour around it. -->
-    <Grid x:Name="ViewHost" />
+    <StackPanel x:Name="ViewHost" />
 </Window>

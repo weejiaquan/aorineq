@@ -608,5 +608,16 @@
   "settings.page-title.general": "Settings",
   "surface.general.name": "Settings",
   "settings.heading.links": "Links",
-  "settings.section-general.subtitle": "How AorinEQ itself behaves — what the tray icon does, whether it starts with Windows, and whether it runs with administrator rights."
+  "settings.section-general.subtitle": "How AorinEQ itself behaves — what the tray icon does, whether it starts with Windows, and whether it runs with administrator rights.",
+  "osd.airplay.no-device": "No receiver",
+  "osd.airplay.connect": "Connect",
+  "osd.airplay.disconnect": "Disconnect",
+  "osd.airplay.rescan": "Rescan",
+  "osd.airplay.none-found": "No receivers found",
+  "settings.air-play-bar.title": "AirPlay bar in the OSD",
+  "settings.air-play-bar.subtitle": "A strip under the volume bar showing the receiver and its level. Click it to pick a speaker; drag or scroll it to set that speaker’s own volume.",
+  "settings.air-play-bar.never": "Never",
+  "settings.air-play-bar.connected": "While connected",
+  "settings.air-play-bar.enabled": "Whenever AirPlay is on",
+  "help.settings.air-play-bar.body": "The bar is how you reach the receiver without opening anything: press a volume key, and it is already there under the volume bar. Clicking it lists the receivers on your network so you can connect or disconnect; dragging or scrolling it sets that receiver’s OWN volume, which is a different thing from your PC’s volume — in Equalizer APO mode the volume keys move the preamp, not the speaker. Choose \"While connected\" to keep the OSD quiet until you are actually streaming, or \"Whenever AirPlay is on\" if you want the speaker one click away at all times."
 }

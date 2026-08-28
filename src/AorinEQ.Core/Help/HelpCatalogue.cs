@@ -59,6 +59,8 @@ public static class HelpCatalogue
             "settings.air-play-mute-local.title", "settings.air-play-mute-local.subtitle", "#airplay"),
         new("settings.air-play-dither", SettingsSections.AirPlay,
             "settings.air-play-dither.title", "settings.air-play-dither.subtitle", "#airplay"),
+        new("settings.air-play-bar", SettingsSections.AirPlay,
+            "settings.air-play-bar.title", "settings.air-play-bar.subtitle", "#airplay"),
         new("settings.air-play-idle-seconds", SettingsSections.AirPlay,
             "settings.air-play-idle-seconds.title", "settings.air-play-idle-seconds.subtitle", "#airplay"),
         // ---- hud ----

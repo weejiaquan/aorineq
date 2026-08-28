@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using AorinEQ.Core;
@@ -42,6 +42,7 @@ public partial class SettingsWindow
 
         PopulateAirPlaySources();
         SelectByTag(AirPlayModeCombo, _airPlay.Mode);
+        SelectByTag(AirPlayBarCombo, AirPlayBarVisibility.Normalize(_airPlay.BarVisibility));
         AirPlayCustomMsBox.Text = _airPlay.CustomQueueMs.ToString();
         AirPlayCustomMsBox.IsEnabled = _airPlay.Mode == AirPlayModes.Custom;
         AirPlayVolumeSlider.Value = _airPlay.VolumePercent;
@@ -226,6 +227,18 @@ public partial class SettingsWindow
         string mode = AirPlayModes.Normalize(SelectedTag(AirPlayModeCombo), AirPlayModes.Normal);
         AirPlayCustomMsBox.IsEnabled = mode == AirPlayModes.Custom;
         RaiseAirPlay(_airPlay with { Mode = mode });
+    }
+
+    /// <summary>When the OSD draws its AirPlay strip. Normalised on the way out so an unknown
+    /// tag - from a newer build, or a hand-edited settings file - lands on the default rather
+    /// than silently removing a bar the user then cannot find the switch for.</summary>
+    private void OnAirPlayBarVisibilityChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing) return;
+        RaiseAirPlay(_airPlay with
+        {
+            BarVisibility = AirPlayBarVisibility.Normalize(SelectedTag(AirPlayBarCombo)),
+        });
     }
 
     private void OnAirPlayCustomMsChanged(object sender, RoutedEventArgs e)

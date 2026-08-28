@@ -608,5 +608,16 @@
   "settings.page-title.general": "設定",
   "surface.general.name": "設定",
   "settings.heading.links": "連結",
-  "settings.section-general.subtitle": "AorinEQ 本身的行為——工作列圖示做什麼、是否隨 Windows 啟動，以及是否以系統管理員身分執行。"
+  "settings.section-general.subtitle": "AorinEQ 本身的行為——工作列圖示做什麼、是否隨 Windows 啟動，以及是否以系統管理員身分執行。",
+  "osd.airplay.no-device": "未選擇接收器",
+  "osd.airplay.connect": "連線",
+  "osd.airplay.disconnect": "中斷連線",
+  "osd.airplay.rescan": "重新掃描",
+  "osd.airplay.none-found": "找不到接收器",
+  "settings.air-play-bar.title": "螢幕提示中的 AirPlay 列",
+  "settings.air-play-bar.subtitle": "在音量列下方顯示接收器及其音量。點擊可選擇揚聲器，拖曳或滾動可調整該揚聲器的音量。",
+  "settings.air-play-bar.never": "不顯示",
+  "settings.air-play-bar.connected": "已連線時",
+  "settings.air-play-bar.enabled": "啟用 AirPlay 時",
+  "help.settings.air-play-bar.body": "無需開啟任何視窗即可控制接收器：按下音量鍵，它就在音量列下方。點擊可列出網路上的接收器以連線或中斷；拖曳或滾動則設定該接收器本身的音量——這與電腦音量不同，在 Equalizer APO 模式下，音量鍵調整的是前置放大而非揚聲器。"
 }

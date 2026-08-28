@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using AorinEQ.Core;
 using AorinEQ.Core.Raop;
 using AorinEQ.UI;
@@ -128,6 +128,68 @@ public partial class App
     /// audio is going somewhere else.</summary>
     private void ShowAirPlayOsd(int percent) =>
         ShowOsdLevel(percent, muted: percent == 0, interactive: false);
+
+    /// <summary>Points an OSD's AirPlay strip at the same handlers the tray menu already uses.
+    ///
+    /// Both OSD windows expose the same four events on purpose: connecting from the strip and
+    /// connecting from the tray are the same act, and giving them separate paths is how the two
+    /// would end up disagreeing about what "connected" means. Written as one method taking the
+    /// pieces rather than twice, because SkinOsdWindow and OsdWindow share no base type - they are
+    /// different windows that happen to offer the same vocabulary.</summary>
+    private void WireAirPlayOsd(OsdWindow osd)
+    {
+        osd.AirPlayDeviceChosen += ConnectFromOsd;
+        osd.AirPlayDisconnectRequested += DisconnectAirPlay;
+        osd.AirPlayRescanRequested += () => _ = RefreshAirPlayForTrayAsync();
+        osd.AirPlayVolumeSetByUser += SetAirPlayVolumeFromOsd;
+    }
+
+    private void WireAirPlayOsd(SkinOsdWindow osd)
+    {
+        osd.AirPlayDeviceChosen += ConnectFromOsd;
+        osd.AirPlayDisconnectRequested += DisconnectAirPlay;
+        osd.AirPlayRescanRequested += () => _ = RefreshAirPlayForTrayAsync();
+        osd.AirPlayVolumeSetByUser += SetAirPlayVolumeFromOsd;
+    }
+
+    /// <summary>Connecting from the OSD also PERSISTS the choice, exactly as picking from the
+    /// tray does - otherwise the strip would connect to a receiver the settings file still says
+    /// is a different one, and the next start would disagree with what is playing.</summary>
+    private void ConnectFromOsd(AirPlayDevice device)
+    {
+        _settings = _settings with
+        {
+            AirPlay = (_settings.AirPlay ?? AirPlaySetting.Default) with
+            {
+                Enabled = true,
+                DeviceName = device.DisplayName,
+                DeviceId = device.Id,
+            },
+        };
+        SaveSettings();
+        ConnectAirPlay(device);
+    }
+
+    /// <summary>The RECEIVER's level, set by dragging or scrolling the strip. Deliberately not
+    /// routed through TryApplyAirPlayVolume: that one exists for the volume KEYS and declines in
+    /// Equalizer APO mode, because the preamp already attenuated upstream. This is a direct
+    /// request to change the speaker, so it applies in every mode.</summary>
+    private void SetAirPlayVolumeFromOsd(int percent)
+    {
+        int target = Math.Clamp(percent, 0, 100);
+        _airPlay?.SetVolumePercent(target);
+        _settings = _settings with
+        {
+            AirPlay = (_settings.AirPlay ?? AirPlaySetting.Default) with { VolumePercent = target },
+        };
+        SaveSettings();
+
+        // NOT ShowAirPlayOsd. That one exists for a retargeted volume KEY, where the level being
+        // shown IS the receiver's - here the volume bar must go on showing the system volume,
+        // which in Equalizer APO mode is a completely different number. Re-showing at the active
+        // level refreshes the strip underneath it and holds the OSD open through the drag.
+        ShowOsd(interactive: false);
+    }
 
     private void WireAirPlayTray()
     {

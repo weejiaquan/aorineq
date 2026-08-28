@@ -425,6 +425,7 @@ public partial class App : System.Windows.Application
             _osd = new OsdWindow();
             _osd.PercentChangedByUser += OnOsdPercentChanged;
             _osd.VolumeScrolled += OnVolumeWheel;
+            WireAirPlayOsd(_osd);
 
             _tray = new TrayIcon();
             _tray.ActionRequested += RunTrayAction;
@@ -2761,10 +2762,25 @@ public partial class App : System.Windows.Application
     /// feedback would defeat the point of this app.</summary>
     private void ShowOsdLevel(int percent, bool muted, bool interactive)
     {
+        // Set BEFORE ShowVolume: both windows measure the strip into their own height, and
+        // ShowVolume is what positions them against that height.
+        var bar = AirPlayBarState.From(
+            _settings.AirPlay, connected: _airPlay is not null, streaming: _airPlay?.IsStreaming == true);
+
         if (_useSkinOsd && _skinOsd is not null)
+        {
+            _skinOsd.SetAirPlay(bar);
+            _skinOsd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id,
+                (_settings.AirPlay ?? AirPlaySetting.Default).DeviceId is { Length: > 0 } id ? id : null);
             _skinOsd.ShowVolume(percent, muted, interactive);
+        }
         else
-            _osd!.ShowVolume(percent, muted, interactive);
+        {
+            _osd!.SetAirPlay(bar, skin: null, scale: 1.0);
+            _osd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id,
+                (_settings.AirPlay ?? AirPlaySetting.Default).DeviceId is { Length: > 0 } id ? id : null);
+            _osd.ShowVolume(percent, muted, interactive);
+        }
     }
 
     /// <summary>Shared handler for both OsdWindow's and SkinOsdWindow's PercentChangedByUser —
@@ -2877,6 +2893,7 @@ public partial class App : System.Windows.Application
                 _skinOsd = next;
                 _skinOsd.PercentChangedByUser += OnOsdPercentChanged;
                 _skinOsd.VolumeScrolled += OnVolumeWheel;
+                WireAirPlayOsd(_skinOsd);
                 _loadedSkinFolder = info.Folder;
                 _loadedSkinStamp = stamp;
             }

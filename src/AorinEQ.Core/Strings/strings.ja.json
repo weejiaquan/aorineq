@@ -608,5 +608,16 @@
   "settings.page-title.general": "設定",
   "surface.general.name": "設定",
   "settings.heading.links": "リンク",
-  "settings.section-general.subtitle": "AorinEQ 自体の動作です。トレイアイコンの役割、Windows と一緒に起動するか、管理者権限で実行するかを設定します。"
+  "settings.section-general.subtitle": "AorinEQ 自体の動作です。トレイアイコンの役割、Windows と一緒に起動するか、管理者権限で実行するかを設定します。",
+  "osd.airplay.no-device": "受信先なし",
+  "osd.airplay.connect": "接続",
+  "osd.airplay.disconnect": "切断",
+  "osd.airplay.rescan": "再スキャン",
+  "osd.airplay.none-found": "受信先が見つかりません",
+  "settings.air-play-bar.title": "画面表示の AirPlay バー",
+  "settings.air-play-bar.subtitle": "音量バーの下に受信先とその音量を表示します。クリックでスピーカーを選び、ドラッグまたはスクロールでその音量を変えます。",
+  "settings.air-play-bar.never": "表示しない",
+  "settings.air-play-bar.connected": "接続中のみ",
+  "settings.air-play-bar.enabled": "AirPlay が有効なとき",
+  "help.settings.air-play-bar.body": "何も開かずに受信先を操作できます。音量キーを押せば、音量バーの下にすでにあります。クリックするとネットワーク上の受信先が一覧され、接続や切断ができます。ドラッグまたはスクロールで変わるのは受信先自身の音量で、PC の音量とは別ものです。Equalizer APO モードでは音量キーはプリアンプを動かします。"
 }

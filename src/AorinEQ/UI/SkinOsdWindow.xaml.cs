@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -23,6 +23,25 @@ public partial class SkinOsdWindow : Window
 {
     private readonly SkinView _view;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+
+    /// <summary>The AirPlay strip, stacked under the skin's own artwork. It draws the SKIN's
+    /// AirPlay bar when the skin ships one and a native strip when it does not - which is what
+    /// every skin written before this release gets, and is the whole of the legacy story.</summary>
+    private readonly AirPlayBarView _airPlayBar = new() { Visibility = Visibility.Collapsed };
+
+    /// <summary>True while the device menu is open: a ContextMenu is its own window, so the
+    /// pointer being over it leaves IsMouseOver false and the OSD would fade out underneath it.</summary>
+    private bool _airPlayMenuOpen;
+
+    private IReadOnlyList<AorinEQ.Core.Raop.AirPlayDevice> _airPlayDevices =
+        Array.Empty<AorinEQ.Core.Raop.AirPlayDevice>();
+    private string? _airPlayCurrentId;
+    private string? _airPlayChosenId;
+
+    public event Action<AorinEQ.Core.Raop.AirPlayDevice>? AirPlayDeviceChosen;
+    public event Action? AirPlayDisconnectRequested;
+    public event Action? AirPlayRescanRequested;
+    public event Action<int>? AirPlayVolumeSetByUser;
     /// <summary>Which fade-out is still allowed to hide this window. Cancelling a fade does not
     /// cancel its Completed event — see <see cref="OsdFade"/> for the crash-free but very visible
     /// bug that came of assuming it did.</summary>
@@ -51,9 +70,13 @@ public partial class SkinOsdWindow : Window
 
         _view = new SkinView(info);
         ViewHost.Children.Add(_view);
+        ViewHost.Children.Add(_airPlayBar);
 
         Width = _view.LogicalWidth;
         Height = _view.LogicalHeight;
+
+        _airPlayBar.DropdownRequested += OpenAirPlayMenu;
+        _airPlayBar.VolumeSetByUser += percent => AirPlayVolumeSetByUser?.Invoke(percent);
 
         _hideTimer.Tick += (_, _) =>
         {
@@ -61,7 +84,7 @@ public partial class SkinOsdWindow : Window
             // outside the window's bounds (IsMouseOver false) since OnMouseMove requires only
             // _dragging + the left button, not IsMouseOver — either way, stay open, timer keeps
             // ticking, and hiding resumes on its own once the drag ends.
-            if (IsMouseOver || _dragging) return;
+            if (IsMouseOver || _dragging || _airPlayMenuOpen) return;
             _hideTimer.Stop();
             ReleaseDragIfActive(); // never hide out from under an in-progress drag's capture
             if (!_animationEnabled)
@@ -125,6 +148,47 @@ public partial class SkinOsdWindow : Window
         _animationEnabled = s.AnimationEnabled;
         _fadeDuration = TimeSpan.FromMilliseconds(s.AnimationMs);
         _hideTimer.Interval = TimeSpan.FromSeconds(s.HideDelaySeconds);
+    }
+
+    /// <summary>Shows or hides the AirPlay strip. The skin's own AirPlay artwork is preferred;
+    /// null falls back to the native strip, which is what a skin without one gets.</summary>
+    public void SetAirPlay(AirPlayBarState state)
+    {
+        _airPlayBar.SetSkin(_view.Info.AirPlay, _view.RenderScale);
+        _airPlayBar.SetState(state);
+
+        // The window is sized explicitly rather than by SizeToContent, so the strip has to be
+        // measured into the height here - before ShowVolume positions against it.
+        double extra = 0;
+        if (state.Visible)
+        {
+            _airPlayBar.Measure(new System.Windows.Size(_view.LogicalWidth, double.PositiveInfinity));
+            extra = _airPlayBar.DesiredSize.Height;
+        }
+        Height = _view.LogicalHeight + extra;
+    }
+
+    public void SetAirPlayDevices(IReadOnlyList<AorinEQ.Core.Raop.AirPlayDevice> devices, string? currentId, string? chosenId)
+    {
+        _airPlayDevices = devices;
+        _airPlayCurrentId = currentId;
+        _airPlayChosenId = chosenId;
+    }
+
+    private void OpenAirPlayMenu()
+    {
+        _airPlayMenuOpen = true;
+        Activate();
+        AirPlayMenu.Show(_airPlayBar, _airPlayDevices, _airPlayCurrentId, _airPlayChosenId,
+            device => AirPlayDeviceChosen?.Invoke(device),
+            () => AirPlayDisconnectRequested?.Invoke(),
+            () => AirPlayRescanRequested?.Invoke(),
+            closed: () =>
+            {
+                _airPlayMenuOpen = false;
+                _hideTimer.Stop();
+                _hideTimer.Start();
+            });
     }
 
     public void ShowVolume(int percent, bool muted, bool interactive)
