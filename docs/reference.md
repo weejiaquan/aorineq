@@ -151,6 +151,8 @@ A skin is a folder in `%APPDATA%\AorinEQ\skins\<name>\`:
 | `empty.png` or `empty.gif` | **required** — artwork at 0 % |
 | `full.png` or `full.gif` | **required** — artwork at 100 % |
 | `muted.png` or `muted.gif` | optional — shown alone while muted |
+| `airplay-empty.png` or `.gif` | optional — the AirPlay strip at 0 % |
+| `airplay-full.png` or `.gif` | optional — the AirPlay strip at 100 % |
 | `skin.json` | optional — everything below |
 
 `.png` wins over `.gif` if both exist. All layers must share one logical frame size.
@@ -211,6 +213,17 @@ static skin with no number.
     "shadowDepth": 2             // clamped 0–50
   },
 
+  // --- the AirPlay strip (optional; omit the whole block for a volume-only skin) ---
+  "airplay": {
+    "fillStartX": 16,            // as above, but for the strip's own artwork
+    "fillEndX": 248,
+    "emptyFrames": 1,            // sprite-sheet frame counts, as above
+    "fullFrames": 1,
+    "nameText":    { "show": true, "x": 16,  "y": 5 },   // the receiver's name
+    "percentText": { "show": true, "x": 248, "y": 5, "align": "right" },
+    "dropdownHit": { "x": 258, "y": 4, "w": 30, "h": 24 }  // where a click opens the device list
+  },
+
   // --- credits, used by the skin picker and the gallery ---
   "title": "mika bar",
   "author": "your name",
@@ -220,6 +233,27 @@ static skin with no number.
   "sourceUrl": "https://example.com/mika-bar"   // https only, dropped otherwise
 }
 ```
+
+### The AirPlay strip
+
+A second, optional bar drawn **under** the volume bar whenever the OSD is showing AirPlay — see
+Settings ▸ AirPlay ▸ *AirPlay bar in the OSD* for when that is. It shows the receiver's name and
+**the receiver's own volume**, which is a different number from your PC's: dragging or scrolling
+the strip changes the speaker, not the preamp.
+
+It has its own size and is not tied to the volume bar's. Both its layers paint the **whole** image
+and differ only in what is lit, exactly like `empty`/`full`.
+
+`dropdownHit` is the rectangle that opens the device list instead of setting a volume; it is
+clamped into the artwork, and omitting it makes the whole strip open the list. Draw your own
+chevron (or whatever says "this opens something") inside that rectangle in `airplay-empty`.
+
+A skin **without** these files is not missing anything — AorinEQ draws its own plain AirPlay strip
+under your artwork instead, so every skin written before this existed keeps working untouched. A
+skin whose AirPlay artwork is broken or half-written loses only the strip: the volume bar is
+unaffected and the plain strip is used, because a partly-drawn extra should never cost you the
+control you actually use. The three skins that ship with AorinEQ (*Windows 11*, *Windows 10*,
+*Windows XP*) all include one and are the easiest thing to copy.
 
 An unparseable `skin.json` fails the whole skin, and AorinEQ falls back to the Dark pill style
 with a tray warning. Metadata is normalised on load: trimmed, length-capped by text element, and

@@ -42,6 +42,11 @@ public partial class SkinOsdWindow : Window
     public event Action? AirPlayDisconnectRequested;
     public event Action? AirPlayRescanRequested;
     public event Action<int>? AirPlayVolumeSetByUser;
+
+    /// <summary>A raw wheel notch over the strip. Raw on purpose: App runs it through the
+    /// same ScrollStep accumulator the volume bar uses, so a high-resolution wheel does not
+    /// move the receiver a whole step per message.</summary>
+    public event Action<WheelNotch>? AirPlayVolumeScrolled;
     /// <summary>Which fade-out is still allowed to hide this window. Cancelling a fade does not
     /// cancel its Completed event — see <see cref="OsdFade"/> for the crash-free but very visible
     /// bug that came of assuming it did.</summary>
@@ -77,6 +82,7 @@ public partial class SkinOsdWindow : Window
 
         _airPlayBar.DropdownRequested += OpenAirPlayMenu;
         _airPlayBar.VolumeSetByUser += percent => AirPlayVolumeSetByUser?.Invoke(percent);
+        _airPlayBar.VolumeScrolled += notch => AirPlayVolumeScrolled?.Invoke(notch);
 
         _hideTimer.Tick += (_, _) =>
         {
@@ -163,13 +169,18 @@ public partial class SkinOsdWindow : Window
         double width = _view.LogicalWidth;
         if (state.Visible)
         {
-            _airPlayBar.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
-            extra = _airPlayBar.DesiredSize.Height;
+            // A SKINNED strip has a size of its own, declared by its artwork, and the window has
+            // to be the wider of the two or a strip wider than the volume bar loses its right-hand
+            // end - including any dropdown region near it.
+            //
+            // A NATIVE strip must NOT get a vote. It is measured unconstrained, and its device
+            // name only trims under a constraint - so "Living room speaker (upstairs)" would
+            // stretch the entire OSD to fit a name that is supposed to ellipsise instead.
+            if (_view.Info.AirPlay is { } bar)
+                width = Math.Max(width, bar.Width * _view.RenderScale);
 
-            // The strip is allowed its own size by the format, so the window has to be the wider
-            // of the two - otherwise a strip wider than the volume bar is clipped, and a dropdown
-            // hit region near its right-hand end becomes unreachable.
-            width = Math.Max(width, _airPlayBar.DesiredSize.Width);
+            _airPlayBar.Measure(new System.Windows.Size(width, double.PositiveInfinity));
+            extra = _airPlayBar.DesiredSize.Height;
         }
         Width = width;
         Height = _view.LogicalHeight + extra;

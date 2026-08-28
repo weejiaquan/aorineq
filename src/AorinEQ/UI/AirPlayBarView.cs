@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using AorinEQ.Core;
+using AorinEQ.Input;
 using Brush = System.Windows.Media.Brush;
 using Brushes = System.Windows.Media.Brushes;
 using Color = System.Windows.Media.Color;
@@ -41,9 +42,15 @@ public sealed class AirPlayBarView : UserControl
     /// <summary>The user clicked the part of the bar that opens the device list.</summary>
     public event Action? DropdownRequested;
 
-    /// <summary>The user set the RECEIVER's level, by dragging or scrolling the bar. Not the
-    /// system volume - see AirPlayOwnsVolume in App.AirPlay for why those stay separate.</summary>
+    /// <summary>The user set the RECEIVER's level by dragging the bar. Not the system volume -
+    /// see AirPlayOwnsVolume in App.AirPlay for why those stay separate.</summary>
     public event Action<int>? VolumeSetByUser;
+
+    /// <summary>A wheel notch over the strip, RAW. It is not turned into a percentage here: a
+    /// high-resolution wheel or a precision touchpad sends many small deltas per detent, and
+    /// treating each as a whole step overshoots wildly. App feeds them through the same
+    /// ScrollStep accumulator the volume bar already uses.</summary>
+    public event Action<WheelNotch>? VolumeScrolled;
 
     private const double NativeHeight = 30;
     private const double NativeCorner = 6;
@@ -326,8 +333,10 @@ public sealed class AirPlayBarView : UserControl
     {
         if (!_state.Visible || !_state.HasDevice) return;
 
-        int step = e.Delta > 0 ? 2 : -2;
-        VolumeSetByUser?.Invoke(Math.Clamp(_state.VolumePercent + step, 0, 100));
+        VolumeScrolled?.Invoke(new WheelNotch(
+            e.Delta,
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control),
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)));
         e.Handled = true;
     }
 

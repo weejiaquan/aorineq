@@ -63,6 +63,11 @@ public partial class OsdWindow : Window
     /// is the SYSTEM volume - see AirPlayOwnsVolume for why the two never merge.</summary>
     public event Action<int>? AirPlayVolumeSetByUser;
 
+    /// <summary>A raw wheel notch over the strip. Raw on purpose: App runs it through the
+    /// same ScrollStep accumulator the volume bar uses, so a high-resolution wheel does not
+    /// move the receiver a whole step per message.</summary>
+    public event Action<WheelNotch>? AirPlayVolumeScrolled;
+
     private IReadOnlyList<AirPlayDevice> _airPlayDevices = Array.Empty<AirPlayDevice>();
     private string? _airPlayCurrentId;
     private string? _airPlayChosenId;
@@ -97,6 +102,7 @@ public partial class OsdWindow : Window
 
         AirPlayBar.DropdownRequested += OpenAirPlayMenu;
         AirPlayBar.VolumeSetByUser += percent => AirPlayVolumeSetByUser?.Invoke(percent);
+        AirPlayBar.VolumeScrolled += notch => AirPlayVolumeScrolled?.Invoke(notch);
         // Moving onto the OSD mid-fade-out rescues it: cancel the fade, restore full opacity and
         // restart the hide delay (whose tick then blocks on IsMouseOver for as long as the pointer
         // stays). Harmless when no fade is running — the timer restart just extends the delay.

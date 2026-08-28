@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 using AorinEQ.Core;
+using AorinEQ.Input;
 using AorinEQ.Core.Raop;
 using AorinEQ.UI;
 
@@ -85,8 +86,41 @@ public partial class App
         AirPlay.SetVolumePercent(setting.VolumePercent);
     }
 
+    /// <summary>What the AirPlay strip should be showing right now. One answer, asked by both the
+    /// show path and the live-refresh path, so the two can never disagree.</summary>
+    private AirPlayBarState CurrentAirPlayBarState() =>
+        AirPlayBarState.From(
+            _settings.AirPlay,
+            connected: _airPlay?.IsConnected == true,
+            streaming: _airPlay?.IsStreaming == true);
+
+    /// <summary>The receiver named in SETTINGS, which is not the one we hold a session with -
+    /// that is the whole point of offering an explicit Connect in the menu.</summary>
+    private string? ChosenAirPlayId() =>
+        (_settings.AirPlay ?? AirPlaySetting.Default).DeviceId is { Length: > 0 } id ? id : null;
+
+    /// <summary>Repaints the OSD's AirPlay strip if it is currently on screen.
+    ///
+    /// ShowOsdLevel is the only other place the strip is told anything, and it runs on a volume
+    /// event - so connecting or disconnecting FROM the strip's own menu left the name and the
+    /// connected state stale until the user happened to press a volume key.</summary>
+    private void RefreshAirPlayOsd()
+    {
+        if (_useSkinOsd && _skinOsd is { IsVisible: true })
+        {
+            _skinOsd.SetAirPlay(CurrentAirPlayBarState());
+            _skinOsd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id, ChosenAirPlayId());
+        }
+        else if (_osd is { IsVisible: true })
+        {
+            _osd.SetAirPlay(CurrentAirPlayBarState(), skin: null, scale: 1.0);
+            _osd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id, ChosenAirPlayId());
+        }
+    }
+
     private void OnAirPlayStateChanged()
     {
+        RefreshAirPlayOsd();
         // Raised from a background thread — see AirPlayController.StateChanged.
         Dispatcher.BeginInvoke(() =>
         {
@@ -142,6 +176,7 @@ public partial class App
         osd.AirPlayDisconnectRequested += DisconnectAirPlay;
         osd.AirPlayRescanRequested += () => _ = RefreshAirPlayForTrayAsync();
         osd.AirPlayVolumeSetByUser += SetAirPlayVolumeFromOsd;
+        osd.AirPlayVolumeScrolled += OnAirPlayWheel;
     }
 
     private void WireAirPlayOsd(SkinOsdWindow osd)
@@ -150,7 +185,26 @@ public partial class App
         osd.AirPlayDisconnectRequested += DisconnectAirPlay;
         osd.AirPlayRescanRequested += () => _ = RefreshAirPlayForTrayAsync();
         osd.AirPlayVolumeSetByUser += SetAirPlayVolumeFromOsd;
+        osd.AirPlayVolumeScrolled += OnAirPlayWheel;
     }
+
+    /// <summary>A wheel notch over the AirPlay strip, through the SAME accumulator the volume bar
+    /// uses. A high-resolution wheel sends many small deltas per detent; treating each as a whole
+    /// step is the overshoot bug the volume bar already fixed once, and the strip must not
+    /// reintroduce it.</summary>
+    private void OnAirPlayWheel(WheelNotch notch)
+    {
+        int step = ScrollStep.StepFor(notch.Ctrl, notch.Shift, _settings.StepPercent);
+        int delta = _airPlayScroll.Feed(notch.RawDelta, step, _settings.ScrollInverted);
+        if (delta == 0) return;
+
+        var current = (_settings.AirPlay ?? AirPlaySetting.Default).VolumePercent;
+        SetAirPlayVolumeFromOsd(current + delta);
+    }
+
+    /// <summary>Its own accumulator, not the volume bar's. They are two different volumes and a
+    /// partial notch carried from one must never land on the other.</summary>
+    private readonly ScrollStep _airPlayScroll = new();
 
     /// <summary>Connecting from the OSD also PERSISTS the choice, exactly as picking from the
     /// tray does - otherwise the strip would connect to a receiver the settings file still says

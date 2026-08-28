@@ -62,14 +62,22 @@ public static class SkinWriter
             // stripped of its fill range, its text anchors and its hit region, and the author
             // would have no way to tell which save did it. Silent partial loss is worse than
             // either keeping it or refusing to save.
-            // Read from the SOURCE skin, not the destination. The destination is right only for
-            // an in-place save; a save-as lands in an empty folder and would find nothing to keep,
-            // and a plain skin written over a name that used to hold an AirPlay skin would inherit
-            // that skin's block and describe artwork it has nothing to do with.
+            // Which folder describes the skin being saved? The SOURCE, when the source folder is
+            // itself a skin - that is a save-as, and the block belongs to the skin being copied.
+            // Otherwise the DESTINATION, because the designer lets you swap in loose PNGs from
+            // anywhere before saving, and then the only folder that knows what this skin is is the
+            // one being written over.
+            //
+            // The gap that leaves is a save-as whose art was swapped for loose files first: no
+            // folder knows, and the block is not carried. That is the price of the designer not
+            // yet editing this block, and it is documented rather than silently wrong.
             var sourceFolder = Path.GetDirectoryName(Path.GetFullPath(emptySourcePath));
-            var preservedAirPlay = sourceFolder is null
-                ? null
-                : ReadPreservedAirPlay(Path.Combine(sourceFolder, "skin.json"));
+            var sourceJson = sourceFolder is null ? null : Path.Combine(sourceFolder, "skin.json");
+            var preservedAirPlay =
+                (sourceJson is not null && File.Exists(sourceJson)
+                    ? ReadPreservedAirPlay(sourceJson)
+                    : null)
+                ?? ReadPreservedAirPlay(jsonPath);
 
             // The artwork the block names has to travel with it, or the copy declares a bar it
             // cannot draw and the loader reports it as broken.
@@ -184,8 +192,15 @@ public static class SkinWriter
             foreach (var extension in new[] { ".png", ".gif" })
             {
                 var source = Path.Combine(sourceFolder, layer + extension);
-                if (File.Exists(source))
-                    File.Copy(source, Path.Combine(destFolder, layer + extension), overwrite: true);
+                if (!File.Exists(source)) continue;
+
+                File.Copy(source, Path.Combine(destFolder, layer + extension), overwrite: true);
+
+                // And drop the other extension, exactly as CopyLayer does. The loader prefers
+                // .png, so copying a GIF strip into a folder that still holds an old .png would
+                // leave the OLD artwork winning - the save would appear to do nothing.
+                var stale = Path.Combine(destFolder, layer + (extension == ".png" ? ".gif" : ".png"));
+                if (File.Exists(stale)) File.Delete(stale);
             }
         }
     }

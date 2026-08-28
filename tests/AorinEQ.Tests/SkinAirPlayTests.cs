@@ -327,41 +327,59 @@ public class SkinAirPlayTests : IDisposable
         Assert.Equal(260, copy.AirPlay.DropdownHit.X);
     }
 
-    /// <summary>The other half: a plain skin saved over a name that used to hold an AirPlay skin
-    /// must NOT inherit the old one's block. That produced a skin.json describing artwork the
-    /// folder no longer had anything to do with.</summary>
+    /// <summary>Which folder describes the skin being saved.
+    ///
+    /// The designer lets you swap in loose PNGs from anywhere and then save, so the source folder
+    /// is often not a skin at all. When it is not, the DESTINATION is the only folder that knows
+    /// what this skin is, and its block is kept - that is an in-place edit with new artwork, which
+    /// is the commonest thing the designer does. When the source IS a skin, it wins, because that
+    /// is a save-as and the block belongs to the skin being copied.
+    ///
+    /// Both halves matter: preferring the destination always loses the bar on save-as, and
+    /// preferring the source always loses it on an in-place edit with swapped art.</summary>
     [Fact]
-    public void Saving_a_plain_skin_over_an_airplay_one_does_not_inherit_its_block()
+    public void An_in_place_save_with_loose_artwork_keeps_the_skins_own_block()
     {
         var json = """{ "airplay": { "fillStartX": 8, "fillEndX": 292 } }""";
         MakeSkin("target", airPlayArt: true, airPlayJson: json);
 
-        var plain = MakeSkin("plain-source");
+        // Loose files from somewhere that is not a skin folder - what "Choose empty.png..." gives.
+        var loose = MakeSkin("loose-art");
 
         SkinWriter.Save(_dir, "target",
-            Path.Combine(plain, "empty.png"), Path.Combine(plain, "full.png"),
+            Path.Combine(loose, "empty.png"), Path.Combine(loose, "full.png"),
             new SkinConfig(null, Scale: 1.0));
 
-        // A plain skin at every default writes NO skin.json at all - the byte-identical contract
-        // that predates any of this - so "no block inherited" and "no file" are the same outcome.
-        var jsonPath = Path.Combine(_dir, "target", "skin.json");
-        string text = File.Exists(jsonPath) ? File.ReadAllText(jsonPath) : "(no skin.json)";
-        _out.WriteLine("skin.json after overwrite: " + text);
-
-        Assert.DoesNotContain("airplay", text, StringComparison.OrdinalIgnoreCase);
-
-        // The ARTWORK the old skin left behind is deliberately not deleted. Removing files the
-        // designer does not understand is the more destructive choice, and artwork alone yields a
-        // bar with default geometry - a plain degradation, not the hybrid this test was written
-        // for, where the kept block described a fill range the new artwork never had.
         var reloaded = SkinLoader.Load(Path.Combine(_dir, "target"));
-        _out.WriteLine($"reloaded: valid={reloaded.IsValid} airplay=" +
+        _out.WriteLine($"reloaded airplay = " +
                        (reloaded.AirPlay is null ? "(none)" : $"{reloaded.AirPlay.FillStartX}..{reloaded.AirPlay.FillEndX}"));
+
         Assert.True(reloaded.IsValid, reloaded.Error);
-        if (reloaded.AirPlay is { } bar)
-        {
-            Assert.Equal(0, bar.FillStartX);
-            Assert.Equal(bar.Width, bar.FillEndX);
-        }
+        Assert.NotNull(reloaded.AirPlay);
+        Assert.Equal(8, reloaded.AirPlay!.FillStartX);
+        Assert.Equal(292, reloaded.AirPlay.FillEndX);
+    }
+
+    /// <summary>Saving a GIF-backed strip over a folder that still holds the PNG one must remove
+    /// the PNG. The loader prefers .png, so leaving it would keep the OLD artwork winning and the
+    /// save would appear to have done nothing at all.</summary>
+    [Fact]
+    public void Replacing_a_png_strip_with_a_gif_one_removes_the_stale_png()
+    {
+        var target = MakeSkin("gif-target", airPlayArt: true);          // has airplay-*.png
+        var source = MakeSkin("gif-source");
+        TestPngs.WriteGif(Path.Combine(source, "airplay-empty.gif"), 300, 32);
+        TestPngs.WriteGif(Path.Combine(source, "airplay-full.gif"), 300, 32);
+
+        SkinWriter.Save(_dir, "gif-target",
+            Path.Combine(source, "empty.png"), Path.Combine(source, "full.png"),
+            new SkinConfig(null, Scale: 1.0));
+
+        bool png = File.Exists(Path.Combine(target, "airplay-empty.png"));
+        bool gif = File.Exists(Path.Combine(target, "airplay-empty.gif"));
+        _out.WriteLine($"after save: airplay-empty.png={png} airplay-empty.gif={gif}");
+
+        Assert.False(png, "the stale PNG survived, so the loader would keep showing it");
+        Assert.True(gif);
     }
 }

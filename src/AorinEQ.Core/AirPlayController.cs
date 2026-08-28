@@ -1,4 +1,4 @@
-using AorinEQ.Core.Raop;
+﻿using AorinEQ.Core.Raop;
 
 namespace AorinEQ.Core;
 
@@ -32,6 +32,18 @@ public sealed class AirPlayController : IDisposable
     public bool IsStreaming
     {
         get { lock (_gate) return _session?.IsStreaming == true; }
+    }
+
+    /// <summary>Whether there is a LIVE session - the control connection is up, streaming or in
+    /// standby.
+    ///
+    /// Not the same question as <see cref="Current"/>, which is deliberately retained after a
+    /// FAILED connect so Snapshot() can still report what was attempted and why it did not work.
+    /// Anything asking "are we connected" has to ask this, or a receiver that refused the
+    /// connection still reads as ours.</summary>
+    public bool IsConnected
+    {
+        get { lock (_gate) return _session?.ControlConnectionAlive == true; }
     }
 
     public AirPlayDevice? Current

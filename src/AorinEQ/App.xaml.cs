@@ -2770,26 +2770,18 @@ public partial class App : System.Windows.Application
     {
         // Set BEFORE ShowVolume: both windows measure the strip into their own height, and
         // ShowVolume is what positions them against that height.
-        // Current, not "_airPlay is not null". The controller outlives a session - Stop() does not
-        // dispose it - so testing the field would leave the strip claiming a receiver for the rest
-        // of the run after a single disconnect.
-        var bar = AirPlayBarState.From(
-            _settings.AirPlay,
-            connected: _airPlay?.Current is not null,
-            streaming: _airPlay?.IsStreaming == true);
+        var bar = CurrentAirPlayBarState();
 
         if (_useSkinOsd && _skinOsd is not null)
         {
             _skinOsd.SetAirPlay(bar);
-            _skinOsd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id,
-                (_settings.AirPlay ?? AirPlaySetting.Default).DeviceId is { Length: > 0 } id ? id : null);
+            _skinOsd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id, ChosenAirPlayId());
             _skinOsd.ShowVolume(percent, muted, interactive);
         }
         else
         {
             _osd!.SetAirPlay(bar, skin: null, scale: 1.0);
-            _osd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id,
-                (_settings.AirPlay ?? AirPlaySetting.Default).DeviceId is { Length: > 0 } id ? id : null);
+            _osd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id, ChosenAirPlayId());
             _osd.ShowVolume(percent, muted, interactive);
         }
     }
