@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using AorinEQ.Core;
 using Xunit;
 using Xunit.Abstractions;
@@ -509,5 +509,38 @@ public class SkinArchiveTests : IDisposable
         Assert.Equal("Adagnp.exe", info.Meta.Author);
         Assert.Null(info.Meta.SourceUrl);
         Assert.Equal(new[] { "ok" }, info.Meta.Tags);
+    }
+
+    /// <summary>A shared skin must arrive with its AirPlay bar.
+    ///
+    /// The allowed-files list is what an import writes to disk, and it is also what an export
+    /// packs. Leaving the AirPlay artwork out of it meant a zip that carried the airplay block in
+    /// skin.json and none of the images it names - so the skin loaded on the other machine as a
+    /// legacy one at best, and reported a broken AirPlay bar at worst. Silent on the sending end,
+    /// which is the worst place for it to be silent.</summary>
+    [Fact]
+    public void Export_then_import_carries_the_airplay_bar()
+    {
+        var skin = MakeSkinFolder("airplay-share", withJson: false);
+        TestPngs.Write(Path.Combine(skin, "airplay-empty.png"), 300, 32);
+        TestPngs.Write(Path.Combine(skin, "airplay-full.png"), 300, 32);
+        File.WriteAllText(Path.Combine(skin, "skin.json"),
+            "{ \"airplay\": { \"fillStartX\": 8, \"fillEndX\": 292 } }");
+
+        var zip = Path.Combine(_dir, "airplay-share.zip");
+        SkinArchive.Export(skin, zip);
+        SkinArchive.Import(zip, _root, "airplay-share");
+
+        var imported = SkinLoader.Load(Path.Combine(_root, "airplay-share"));
+
+        _out.WriteLine($"imported valid={imported.IsValid} error={imported.Error ?? "(none)"}");
+        _out.WriteLine($"airplay={(imported.AirPlay is null ? "(none)" : $"{imported.AirPlay.Width}x{imported.AirPlay.Height}")}" +
+                       $" airplayError={imported.AirPlayError ?? "(none)"}");
+
+        Assert.True(imported.IsValid, imported.Error);
+        Assert.Null(imported.AirPlayError);
+        Assert.NotNull(imported.AirPlay);
+        Assert.Equal(8, imported.AirPlay!.FillStartX);
+        Assert.Equal(292, imported.AirPlay.FillEndX);
     }
 }

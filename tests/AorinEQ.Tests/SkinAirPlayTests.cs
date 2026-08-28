@@ -293,4 +293,75 @@ public class SkinAirPlayTests : IDisposable
 
         Assert.DoesNotContain("airplay", text, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>Saving a skin under a NEW name must carry its AirPlay bar with it.
+    ///
+    /// The writer preserved the airplay block from the DESTINATION folder, which is right for an
+    /// in-place save and wrong for every other kind: a save-as landed in an empty folder, found no
+    /// block to keep, and produced a copy with the artwork but none of the geometry - and a plain
+    /// skin saved OVER an existing AirPlay skin inherited that skin's block, hybridising the two.
+    /// The source is the only folder that can answer "what is this skin".</summary>
+    [Fact]
+    public void Saving_a_skin_under_a_new_name_carries_its_airplay_bar()
+    {
+        var json = """
+        {
+          "airplay": { "fillStartX": 8, "fillEndX": 292,
+                       "dropdownHit": { "x": 260, "y": 4, "w": 30, "h": 30 } }
+        }
+        """;
+        var source = MakeSkin("original", airPlayArt: true, airPlayJson: json);
+
+        SkinWriter.Save(_dir, "copied",
+            Path.Combine(source, "empty.png"), Path.Combine(source, "full.png"),
+            new SkinConfig(null, Scale: 1.0));
+
+        var copy = SkinLoader.Load(Path.Combine(_dir, "copied"));
+
+        _out.WriteLine($"copy valid={copy.IsValid} airplay={(copy.AirPlay is null ? "(none)" : "present")}");
+        _out.WriteLine($"airplayError={copy.AirPlayError ?? "(none)"}");
+
+        Assert.True(copy.IsValid, copy.Error);
+        Assert.NotNull(copy.AirPlay);
+        Assert.Equal(8, copy.AirPlay!.FillStartX);
+        Assert.Equal(260, copy.AirPlay.DropdownHit.X);
+    }
+
+    /// <summary>The other half: a plain skin saved over a name that used to hold an AirPlay skin
+    /// must NOT inherit the old one's block. That produced a skin.json describing artwork the
+    /// folder no longer had anything to do with.</summary>
+    [Fact]
+    public void Saving_a_plain_skin_over_an_airplay_one_does_not_inherit_its_block()
+    {
+        var json = """{ "airplay": { "fillStartX": 8, "fillEndX": 292 } }""";
+        MakeSkin("target", airPlayArt: true, airPlayJson: json);
+
+        var plain = MakeSkin("plain-source");
+
+        SkinWriter.Save(_dir, "target",
+            Path.Combine(plain, "empty.png"), Path.Combine(plain, "full.png"),
+            new SkinConfig(null, Scale: 1.0));
+
+        // A plain skin at every default writes NO skin.json at all - the byte-identical contract
+        // that predates any of this - so "no block inherited" and "no file" are the same outcome.
+        var jsonPath = Path.Combine(_dir, "target", "skin.json");
+        string text = File.Exists(jsonPath) ? File.ReadAllText(jsonPath) : "(no skin.json)";
+        _out.WriteLine("skin.json after overwrite: " + text);
+
+        Assert.DoesNotContain("airplay", text, StringComparison.OrdinalIgnoreCase);
+
+        // The ARTWORK the old skin left behind is deliberately not deleted. Removing files the
+        // designer does not understand is the more destructive choice, and artwork alone yields a
+        // bar with default geometry - a plain degradation, not the hybrid this test was written
+        // for, where the kept block described a fill range the new artwork never had.
+        var reloaded = SkinLoader.Load(Path.Combine(_dir, "target"));
+        _out.WriteLine($"reloaded: valid={reloaded.IsValid} airplay=" +
+                       (reloaded.AirPlay is null ? "(none)" : $"{reloaded.AirPlay.FillStartX}..{reloaded.AirPlay.FillEndX}"));
+        Assert.True(reloaded.IsValid, reloaded.Error);
+        if (reloaded.AirPlay is { } bar)
+        {
+            Assert.Equal(0, bar.FillStartX);
+            Assert.Equal(bar.Width, bar.FillEndX);
+        }
+    }
 }

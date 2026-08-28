@@ -160,11 +160,18 @@ public partial class SkinOsdWindow : Window
         // The window is sized explicitly rather than by SizeToContent, so the strip has to be
         // measured into the height here - before ShowVolume positions against it.
         double extra = 0;
+        double width = _view.LogicalWidth;
         if (state.Visible)
         {
-            _airPlayBar.Measure(new System.Windows.Size(_view.LogicalWidth, double.PositiveInfinity));
+            _airPlayBar.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
             extra = _airPlayBar.DesiredSize.Height;
+
+            // The strip is allowed its own size by the format, so the window has to be the wider
+            // of the two - otherwise a strip wider than the volume bar is clipped, and a dropdown
+            // hit region near its right-hand end becomes unreachable.
+            width = Math.Max(width, _airPlayBar.DesiredSize.Width);
         }
+        Width = width;
         Height = _view.LogicalHeight + extra;
     }
 
@@ -232,7 +239,31 @@ public partial class SkinOsdWindow : Window
         Opacity = 1;
     }
 
-    private bool IsOpaqueAt(System.Windows.Point windowPoint) => _view.IsOpaqueAt(windowPoint);
+    /// <summary>Whether a point in this window is "solid" - which decides both the drag handling
+    /// and, through WM_NCHITTEST, whether the click reaches this window at all.
+    ///
+    /// The AirPlay strip has to be included or it is DEAD on a skinned OSD: it is stacked below
+    /// the skin rather than drawn inside it, so asking only the skin returns transparent for every
+    /// pixel of the strip, the window reports HTTRANSPARENT, and the click lands on whatever is
+    /// behind the OSD. Nothing about the strip looked wrong on screen - it simply never received
+    /// a mouse event.
+    ///
+    /// Its whole rectangle counts as solid, rather than alpha-testing its artwork the way the
+    /// volume bar does. A control you have to be able to press should not have holes in it, and a
+    /// skin author who draws a strip with transparent gaps has not asked for those gaps to fall
+    /// through to the desktop.</summary>
+    private bool IsOpaqueAt(System.Windows.Point windowPoint)
+    {
+        if (_airPlayBar.Visibility == Visibility.Visible
+            && windowPoint.Y >= _view.LogicalHeight
+            && windowPoint.Y < _view.LogicalHeight + _airPlayBar.ActualHeight
+            && windowPoint.X >= 0 && windowPoint.X < _airPlayBar.ActualWidth)
+        {
+            return true;
+        }
+
+        return _view.IsOpaqueAt(windowPoint);
+    }
 
     private void RaisePercentFromWindowPoint(System.Windows.Point windowPoint) =>
         PercentChangedByUser?.Invoke(_view.PercentFromX(windowPoint.X));
@@ -240,6 +271,9 @@ public partial class SkinOsdWindow : Window
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         var pos = e.GetPosition(this);
+        // The strip handles its own press - dropdown or receiver volume. Without this the window
+        // would ALSO read it as a volume-bar drag and set the system volume from the x position.
+        if (IsInAirPlayStrip(pos)) return;
         if (!IsOpaqueAt(pos)) return;
         // The initial click always sets the percent; CaptureMouse() additionally keeps the drag
         // alive even if the pointer crosses a transparent pixel mid-drag. Capture can fail, so
@@ -247,6 +281,10 @@ public partial class SkinOsdWindow : Window
         _dragging = CaptureMouse();
         RaisePercentFromWindowPoint(pos);
     }
+
+    private bool IsInAirPlayStrip(System.Windows.Point windowPoint) =>
+        _airPlayBar.Visibility == Visibility.Visible
+        && windowPoint.Y >= _view.LogicalHeight;
 
     private void OnMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {

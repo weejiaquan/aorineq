@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 
 namespace AorinEQ.Core;
 
@@ -10,7 +10,14 @@ public static class SkinArchive
     /// <summary>The files that MAKE a skin, and the only ones an import ever writes to disk.
     /// <see cref="SkinPreview.FileName"/> is deliberately absent: see <see cref="Import"/>.</summary>
     private static readonly string[] AllowedFiles =
-        { "empty.png", "empty.gif", "full.png", "full.gif", "muted.png", "muted.gif", "skin.json" };
+    {
+        "empty.png", "empty.gif", "full.png", "full.gif", "muted.png", "muted.gif",
+        // Without these a shared skin silently arrives as a legacy one: the zip would carry the
+        // airplay block in skin.json and none of the artwork it names, which the loader then
+        // reports as a broken AirPlay bar on somebody else's machine.
+        "airplay-empty.png", "airplay-empty.gif", "airplay-full.png", "airplay-full.gif",
+        "skin.json",
+    };
 
     /// <summary>Size cap for a skin zip fetched from an aorineq:// link — generous for
     /// animated skins, tiny next to the updater's exe cap.</summary>

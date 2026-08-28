@@ -2770,8 +2770,13 @@ public partial class App : System.Windows.Application
     {
         // Set BEFORE ShowVolume: both windows measure the strip into their own height, and
         // ShowVolume is what positions them against that height.
+        // Current, not "_airPlay is not null". The controller outlives a session - Stop() does not
+        // dispose it - so testing the field would leave the strip claiming a receiver for the rest
+        // of the run after a single disconnect.
         var bar = AirPlayBarState.From(
-            _settings.AirPlay, connected: _airPlay is not null, streaming: _airPlay?.IsStreaming == true);
+            _settings.AirPlay,
+            connected: _airPlay?.Current is not null,
+            streaming: _airPlay?.IsStreaming == true);
 
         if (_useSkinOsd && _skinOsd is not null)
         {
@@ -2937,6 +2942,13 @@ public partial class App : System.Windows.Application
                 File.GetLastWriteTimeUtc(info.FullPath).Ticks);
             if (info.MutedPath is not null)
                 stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(info.MutedPath).Ticks);
+            // The AirPlay layers count too, or editing only the strip leaves the OSD showing the
+            // old one until something else in the folder changes.
+            if (info.AirPlay is { } bar)
+            {
+                stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(bar.EmptyPath).Ticks);
+                stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(bar.FullPath).Ticks);
+            }
             string jsonPath = Path.Combine(info.Folder, "skin.json");
             if (File.Exists(jsonPath))
                 stamp = Math.Max(stamp, File.GetLastWriteTimeUtc(jsonPath).Ticks);

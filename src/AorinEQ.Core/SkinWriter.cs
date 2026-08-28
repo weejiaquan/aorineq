@@ -62,7 +62,18 @@ public static class SkinWriter
             // stripped of its fill range, its text anchors and its hit region, and the author
             // would have no way to tell which save did it. Silent partial loss is worse than
             // either keeping it or refusing to save.
-            var preservedAirPlay = ReadPreservedAirPlay(jsonPath);
+            // Read from the SOURCE skin, not the destination. The destination is right only for
+            // an in-place save; a save-as lands in an empty folder and would find nothing to keep,
+            // and a plain skin written over a name that used to hold an AirPlay skin would inherit
+            // that skin's block and describe artwork it has nothing to do with.
+            var sourceFolder = Path.GetDirectoryName(Path.GetFullPath(emptySourcePath));
+            var preservedAirPlay = sourceFolder is null
+                ? null
+                : ReadPreservedAirPlay(Path.Combine(sourceFolder, "skin.json"));
+
+            // The artwork the block names has to travel with it, or the copy declares a bar it
+            // cannot draw and the loader reports it as broken.
+            if (sourceFolder is not null) CopyAirPlayLayers(sourceFolder, folder);
 
             if (preservedAirPlay is not null || showText || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
@@ -153,6 +164,31 @@ public static class SkinWriter
         shadowDepth = t.ShadowColor is null || t.ShadowDepth == 2 ? (double?)null : t.ShadowDepth,
         align = t.Align == "left" ? null : t.Align,
     };
+
+    /// <summary>Copies whichever AirPlay layers the source skin has into the destination.
+    ///
+    /// Optional on both sides: a source without them copies nothing, and a destination that had
+    /// them keeps whatever the source did not overwrite - the same posture CopyLayer takes for
+    /// the muted layer. Skipped entirely when source and destination are the same folder, which
+    /// is the in-place save the designer does most often.</summary>
+    private static void CopyAirPlayLayers(string sourceFolder, string destFolder)
+    {
+        if (string.Equals(Path.GetFullPath(sourceFolder), Path.GetFullPath(destFolder),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        foreach (var layer in new[] { "airplay-empty", "airplay-full" })
+        {
+            foreach (var extension in new[] { ".png", ".gif" })
+            {
+                var source = Path.Combine(sourceFolder, layer + extension);
+                if (File.Exists(source))
+                    File.Copy(source, Path.Combine(destFolder, layer + extension), overwrite: true);
+            }
+        }
+    }
 
     private static void CopyLayer(string source, string folder, string layer)
     {
