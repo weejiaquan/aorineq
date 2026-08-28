@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
@@ -143,8 +143,18 @@ public partial class SettingsWindow
         if (!_helpTargets.TryGetValue(key, out var element)) return;
 
         element.BringIntoView();
-        HelpDecorator.Expand(element);
-        Pulse(element);
+
+        // Opened AFTER the scroll, not with it. BringIntoView is honoured during the next layout
+        // pass, and the help is now a Popup placed in screen coordinates: opening it first would
+        // place the paragraph against the row's OLD position, and then the scroll arriving behind
+        // it would trip CloseOnScroll and shut the help the user just asked for. Loaded priority
+        // is the same queue the window already uses to wait for a layout pass in DecorateHelpFor
+        // and FocusPrimaryControl.
+        Dispatcher.BeginInvoke(() =>
+        {
+            HelpDecorator.Expand(element);
+            Pulse(element);
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     /// <summary>One soft pulse of the card.

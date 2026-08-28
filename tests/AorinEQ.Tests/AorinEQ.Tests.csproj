@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -47,6 +47,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AorinEQ.Core\AorinEQ.Core.csproj" />
+    <!-- The APP, not just Core, so HelpDecoratorTests can decorate a real CardControl and measure
+         it. Referencing a WinExe is legal and runs nothing: the reference only makes the types
+         available, and the fixture builds its own Application rather than starting AorinEQ's.
+
+         This is the only test that needs the app assembly. It is here rather than in a separate
+         project because a second test project would need its own copy of the runner, the xunit
+         settings and the single-collection rule the comment above depends on. -->
+    <ProjectReference Include="..\..\src\AorinEQ\AorinEQ.csproj" />
   </ItemGroup>
 
   <ItemGroup>
