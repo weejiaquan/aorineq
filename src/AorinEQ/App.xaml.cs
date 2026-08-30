@@ -1671,12 +1671,12 @@ public partial class App : System.Windows.Application
                 result = guid is null
                     ? new EapoRepairResult(EapoRepairOutcome.Refused,
                         Loc.T("app.windows-isn-t-reporting-a-playback"))
-                    : EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid));
+                    : EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid),
+                        endpointStillExists: AudioEndpoint.IsEndpointPresent);
             }
 
             EapoRepair.SaveResult(result with { Token = token });
-            return result.Outcome is EapoRepairOutcome.Repaired or EapoRepairOutcome.AlreadyActive
-                or EapoRepairOutcome.Undone ? 0 : 1;
+            return result.IsSuccess ? 0 : 1;
         }
         catch (Exception ex)
         {
@@ -1786,10 +1786,23 @@ public partial class App : System.Windows.Application
             // Matched on this run's token, so a verdict left behind by an earlier run can never be
             // shown as this one's outcome.
             var result = EapoRepair.ReadResult(token);
-            _settingsWindow?.SetEapoRepairStatus(
-                result?.Message ?? NoVerdictMessage(proc.ExitCode), busy: false);
+            var message = result?.Message ?? NoVerdictMessage(proc.ExitCode);
+            _settingsWindow?.SetEapoRepairStatus(message, busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
                 _tray?.ShowInfo(Loc.T("app.equalizer-apo-is-switched-on-for"));
+            // Anything short of success is said in a dialog, not only in the status line. The user
+            // sat through a UAC prompt; a refusal whispered under the buttons reads as "I clicked
+            // repair and nothing happened" — which is exactly how it was reported (2026-08-30).
+            // The no-verdict case counts too: a helper that died without reporting is a failure.
+            if (result?.IsSuccess != true)
+            {
+                if (_settingsWindow is { IsVisible: true } owner)
+                    System.Windows.MessageBox.Show(owner, message, "AorinEQ",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                else
+                    System.Windows.MessageBox.Show(message, "AorinEQ",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         finally
         {

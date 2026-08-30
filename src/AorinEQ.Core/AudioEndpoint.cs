@@ -37,7 +37,24 @@ public static class AudioEndpoint
     /// <summary>Enumerates the ACTIVE render endpoints with their display names (the EQ
     /// editor's device tabs). Best-effort like the default-endpoint read: failures shrink the
     /// list (possibly to empty) instead of throwing.</summary>
-    public static IReadOnlyList<RenderEndpoint> GetRenderEndpoints()
+    public static IReadOnlyList<RenderEndpoint> GetRenderEndpoints() =>
+        Enumerate(DeviceStateActive) ?? [];
+
+    /// <summary>Whether Windows still has this endpoint at all — attached, disabled, or with its
+    /// jack unplugged. NOT-PRESENT is deliberately outside the mask: it is what an endpoint
+    /// becomes when a driver update replaces it under a new GUID, which is the one state the
+    /// repair's backup guard must read as "gone" (see <see cref="EapoRepair.Repair"/>).
+    ///
+    /// An unreadable device list answers TRUE: this gates overwriting the user's only undo
+    /// record, and a COM failure is not evidence the device left.</summary>
+    public static bool IsEndpointPresent(string endpointGuid) =>
+        Enumerate(DeviceStateActive | DeviceStateDisabled | DeviceStateUnplugged) is not { } endpoints
+        || endpoints.Any(e => string.Equals(e.Guid, endpointGuid, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The shared enumeration. Null means the LIST could not be read (as opposed to an
+    /// empty machine) — <see cref="IsEndpointPresent"/> needs that distinction; per-device
+    /// failures still just shrink the list.</summary>
+    private static List<RenderEndpoint>? Enumerate(int stateMask)
     {
         var result = new List<RenderEndpoint>();
         try
@@ -45,13 +62,13 @@ public static class AudioEndpoint
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
             try
             {
-                if (enumerator.EnumAudioEndpoints(EDataFlow.Render, DeviceStateActive, out var collection) < 0
+                if (enumerator.EnumAudioEndpoints(EDataFlow.Render, stateMask, out var collection) < 0
                     || collection is null)
-                    return result;
+                    return null;
                 try
                 {
                     if (collection.GetCount(out int count) < 0)
-                        return result;
+                        return null;
                     for (int i = 0; i < count; i++)
                     {
                         if (collection.Item(i, out var device) < 0 || device is null)
@@ -82,8 +99,8 @@ public static class AudioEndpoint
                 Marshal.ReleaseComObject(enumerator);
             }
         }
-        catch (COMException) { }
-        catch (InvalidCastException) { }
+        catch (COMException) { return null; }
+        catch (InvalidCastException) { return null; }
         return result;
     }
 
@@ -145,7 +162,10 @@ public static class AudioEndpoint
         return Guid.TryParse(guid, out _) ? guid : null;
     }
 
-    private const int DeviceStateActive = 0x1; // DEVICE_STATE_ACTIVE
+    private const int DeviceStateActive = 0x1;    // DEVICE_STATE_ACTIVE
+    private const int DeviceStateDisabled = 0x2;  // DEVICE_STATE_DISABLED
+    private const int DeviceStateUnplugged = 0x8; // DEVICE_STATE_UNPLUGGED — NOTPRESENT (0x4) is
+                                                  // deliberately never asked for; see IsEndpointPresent
     private const ushort VtLpwstr = 31;        // VT_LPWSTR
     private static readonly Guid PkeyDeviceFriendlyNameFmtId =
         new("a45c254e-df1c-4efd-8020-67d146a850e0");
@@ -260,6 +280,7 @@ public static class AudioEndpoint
     }
 }
 
-/// <summary>One active render endpoint: full id (settings key), braced GUID (EAPO's Device
-/// guard / Child APOs key), and the human display name for UI.</summary>
+/// <summary>One render endpoint: full id (settings key), braced GUID (EAPO's Device
+/// guard / Child APOs key), and the human display name for UI. Active in every list the UI
+/// consumes; the presence check also sees disabled and unplugged ones.</summary>
 public sealed record RenderEndpoint(string Id, string Guid, string FriendlyName);

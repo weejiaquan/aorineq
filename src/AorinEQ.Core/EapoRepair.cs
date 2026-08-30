@@ -104,7 +104,15 @@ public enum EapoRepairOutcome
 /// <summary>How a repair ended. <paramref name="Token"/> identifies the RUN: the launching process
 /// generates it, the elevated helper echoes it back, and a verdict carrying any other token is
 /// somebody else's — see <see cref="EapoRepair.ReadResult"/>.</summary>
-public sealed record EapoRepairResult(EapoRepairOutcome Outcome, string Message, string Token = "");
+public sealed record EapoRepairResult(EapoRepairOutcome Outcome, string Message, string Token = "")
+{
+    /// <summary>Whether the run completed what the user asked for. The one set both the helper's
+    /// exit code and the launcher's "does this deserve a dialog?" decision come from — everything
+    /// outside it is an answer the UI must say out loud, because a refusal that only reaches a
+    /// status line reads as "I clicked repair and nothing happened".</summary>
+    public bool IsSuccess => Outcome is EapoRepairOutcome.Repaired
+        or EapoRepairOutcome.AlreadyActive or EapoRepairOutcome.Undone;
+}
 
 /// <summary>The repair itself: back up, write, restart audio, verify, and put everything back if
 /// the verification does not hold.
@@ -327,9 +335,13 @@ public static class EapoRepair
     /// test can point the one backup SLOT at a file it owns. Tests that wrote to the real path
     /// asserted the machine started with no backup and deleted it afterwards, which made an
     /// unrelated suite run able to destroy a real pending undo.</param>
+    /// <param name="endpointStillExists">Whether Windows still has the endpoint a HELD BACKUP
+    /// names — asked about the backup's device, never the one being repaired. Null means "cannot
+    /// ask", which is treated as "still there": absence of evidence must not unlock the guard
+    /// below. The product passes <see cref="AudioEndpoint.IsEndpointPresent"/>.</param>
     public static EapoRepairResult Repair(
         string endpointGuid, Func<bool> restartAudio, Func<bool> verifyEndpointUsable,
-        string? backupPath = null)
+        string? backupPath = null, Func<string, bool>? endpointStillExists = null)
     {
         var slot = backupPath ?? BackupPath;
         if (!Guid.TryParse(endpointGuid, out _))
@@ -358,14 +370,24 @@ public static class EapoRepair
         // and treating it as one would refuse every future repair with no way out from the UI. The
         // fresh capture that replaces it is a usable record of the same machine, which is strictly
         // better than an unusable one.
-        if (EapoRepairBackup.Load(slot) is { IsRestorable: true } existing
-            && (existing.IsInterrupted
-                || !string.Equals(existing.EndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
+        //
+        // Nor is a COMPLETED repair of a device Windows no longer has. A driver update replaces
+        // the endpoint under a NEW GUID — the very event this feature repairs — so the old GUID's
+        // backup would otherwise refuse every repair of its successor, protecting an undo for
+        // hardware that is gone (measured on a real machine, 2026-08-30). An INTERRUPTED backup
+        // still blocks even then: it describes changes nothing has verified, the device can come
+        // back (a USB interface re-attached), and Undo — the designed way out — writes to the
+        // orphaned key just fine.
+        if (EapoRepairBackup.Load(slot) is { IsRestorable: true } existing)
         {
-            return new(EapoRepairOutcome.Refused, existing.IsInterrupted
-                ? "An earlier repair didn't finish, and AorinEQ won't start another one over it. Undo the "
-                    + "earlier repair first — that puts the device back exactly as it was."
-                : "AorinEQ is still holding an undo for a different playback device. Undo that repair "
+            if (existing.IsInterrupted)
+                return new(EapoRepairOutcome.Refused,
+                    "An earlier repair didn't finish, and AorinEQ won't start another one over it. Undo the "
+                    + "earlier repair first — that puts the device back exactly as it was.");
+            if (!string.Equals(existing.EndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase)
+                && (endpointStillExists?.Invoke(existing.EndpointGuid) ?? true))
+                return new(EapoRepairOutcome.Refused,
+                    "AorinEQ is still holding an undo for a different playback device. Undo that repair "
                     + "first, so you don't lose the ability to put it back.");
         }
 

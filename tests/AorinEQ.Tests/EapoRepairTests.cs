@@ -841,6 +841,142 @@ public class EapoRepairTests
         }
     }
 
+    // ------------------------------------------------- the backup guard vs a device that is gone
+
+    /// <summary>The GUID every test in this section backs up — never this machine's, so nothing
+    /// here can collide with a real pending undo.</summary>
+    private const string OtherDevice = "{99999999-8888-7777-6666-555555555555}";
+
+    [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
+    public void An_undo_for_a_device_Windows_no_longer_has_does_not_block_repairing_the_new_one()
+    {
+        // The lockout this guards against, seen on a real machine: a driver update re-creates the
+        // endpoint under a NEW GUID, the old GUID goes not-present, and the applied backup for it
+        // refused every repair of the new endpoint with "undo the other device first" — protecting
+        // an undo for hardware Windows no longer has. When the backed-up endpoint is gone, the
+        // guard must stand aside.
+        var path = OwnSlot();
+        try
+        {
+            new EapoRepairBackup(OtherDevice, EapoRepairBackup.Applied,
+                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
+            // The slot is made unwritable so the repair fails at its own backup save — the first
+            // step AFTER the guard — proving the guard was passed without one registry write.
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+
+            string? asked = null;
+            var result = EapoRepair.Repair(NoSuchDevice,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"),
+                backupPath: path,
+                endpointStillExists: guid => { asked = guid; return false; });
+
+            _out.WriteLine(result.Message);
+            Assert.Equal(OtherDevice, asked); // judged on the BACKED-UP device, not the new one
+            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
+            Assert.DoesNotContain("different playback device", result.Message);
+            Assert.Contains("couldn't save a record", result.Message);
+        }
+        finally
+        {
+            if (File.Exists(path)) { File.SetAttributes(path, FileAttributes.Normal); File.Delete(path); }
+            if (File.Exists(path + ".new")) File.Delete(path + ".new");
+        }
+    }
+
+    [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
+    public void The_guard_still_blocks_while_the_other_device_exists_or_nobody_can_ask()
+    {
+        var path = OwnSlot();
+        try
+        {
+            new EapoRepairBackup(OtherDevice, EapoRepairBackup.Applied,
+                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
+
+            // The device is still there: its undo still wins over a new repair.
+            var blocked = EapoRepair.Repair(NoSuchDevice,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"),
+                backupPath: path, endpointStillExists: _ => true);
+            Assert.Equal(EapoRepairOutcome.Refused, blocked.Outcome);
+            Assert.Contains("different playback device", blocked.Message);
+
+            // A caller that cannot ask (no predicate) must assume the device is present — absence
+            // of evidence is not licence to overwrite the only undo.
+            var stillBlocked = EapoRepair.Repair(NoSuchDevice,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"),
+                backupPath: path);
+            Assert.Equal(EapoRepairOutcome.Refused, stillBlocked.Outcome);
+            Assert.Contains("different playback device", stillBlocked.Message);
+            Assert.Equal(OtherDevice, EapoRepairBackup.Load(path)!.EndpointGuid);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
+    public void An_unfinished_repair_blocks_even_when_its_device_is_gone()
+    {
+        // Deliberately conservative: an interrupted backup describes changes nothing has verified,
+        // and a not-present device can come back (a USB interface re-attached). Overwriting the
+        // only record of what was displaced is not an option; Undo is the designed way out and
+        // writes to the orphaned key just fine.
+        var path = OwnSlot();
+        try
+        {
+            new EapoRepairBackup(OtherDevice, EapoRepairBackup.Applying,
+                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
+
+            var result = EapoRepair.Repair(NoSuchDevice,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"),
+                backupPath: path, endpointStillExists: _ => false);
+
+            _out.WriteLine(result.Message);
+            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
+            Assert.Contains("didn't finish", result.Message);
+            Assert.True(EapoRepairBackup.Load(path)!.IsInterrupted);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void The_machines_own_default_endpoint_is_present_and_a_made_up_one_is_not()
+    {
+        // The real predicate the elevated helper hands the guard. The default endpoint is by
+        // definition still attached; the deadbeef GUID never is. (When the device list cannot be
+        // read at all the answer is "present" — an unreadable list must not unlock the guard —
+        // but on a machine with an endpoint the list IS readable, which is what the trait says.)
+        var real = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId())!;
+        Assert.True(AudioEndpoint.IsEndpointPresent(real));
+        Assert.False(AudioEndpoint.IsEndpointPresent(NoSuchDevice));
+    }
+
+    [Fact]
+    public void Only_a_completed_outcome_reads_as_success()
+    {
+        // The one set both the helper's exit code and the launcher's "does this deserve a dialog?"
+        // decision are derived from. A refusal that is only whispered into a status line is how a
+        // user reports "I clicked repair and nothing happened" — so everything that is not one of
+        // the three completed outcomes must read as a failure the UI has to say out loud.
+        foreach (var outcome in Enum.GetValues<EapoRepairOutcome>())
+        {
+            bool expected = outcome is EapoRepairOutcome.Repaired
+                or EapoRepairOutcome.AlreadyActive or EapoRepairOutcome.Undone;
+            Assert.Equal(expected, new EapoRepairResult(outcome, "m").IsSuccess);
+        }
+    }
+
     [Fact]
     public void The_audio_restart_helper_is_the_one_the_setup_guide_already_uses()
     {
