@@ -56,6 +56,11 @@ public partial class OsdWindow : Window
     /// <summary>The AirPlay strip's requests, named like the tray's equivalents so the two read
     /// as the same vocabulary: App wires both to the same handlers.</summary>
     public event Action<AirPlayDevice>? AirPlayDeviceChosen;
+    /// <summary>Connect to the receiver already named in settings. Distinct from
+    /// <see cref="AirPlayDeviceChosen"/>, which carries a device the menu had in hand: this one
+    /// is raised when it does not, which is every menu opened before anything has been
+    /// discovered.</summary>
+    public event Action? AirPlayConnectChosenRequested;
     public event Action? AirPlayDisconnectRequested;
     public event Action? AirPlayRescanRequested;
 
@@ -101,6 +106,11 @@ public partial class OsdWindow : Window
         MouseWheel += OnMouseWheel;
 
         AirPlayBar.DropdownRequested += OpenAirPlayMenu;
+        // The strip's own power button. It raises the SAME two events the dropdown's
+        // Connect and Disconnect rows do, so the button and the menu can never mean
+        // different things.
+        AirPlayBar.ConnectChosenRequested += () => AirPlayConnectChosenRequested?.Invoke();
+        AirPlayBar.DisconnectRequested += () => AirPlayDisconnectRequested?.Invoke();
         AirPlayBar.VolumeSetByUser += percent => AirPlayVolumeSetByUser?.Invoke(percent);
         AirPlayBar.VolumeScrolled += notch => AirPlayVolumeScrolled?.Invoke(notch);
         // Moving onto the OSD mid-fade-out rescues it: cancel the fade, restore full opacity and
@@ -229,6 +239,7 @@ public partial class OsdWindow : Window
 
         AirPlayMenu.Show(AirPlayBar, _airPlayDevices, _airPlayCurrentId, _airPlayChosenId,
             device => AirPlayDeviceChosen?.Invoke(device),
+            () => AirPlayConnectChosenRequested?.Invoke(),
             () => AirPlayDisconnectRequested?.Invoke(),
             () => AirPlayRescanRequested?.Invoke(),
             closed: () =>

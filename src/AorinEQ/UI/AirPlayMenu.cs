@@ -26,6 +26,12 @@ public static class AirPlayMenu
     /// <param name="chosenId">The receiver SETTINGS name, which is not the same thing: a device
     /// can be chosen and not connected - after a restart, or once it has been disconnected - and
     /// that is exactly when an explicit Connect is worth having.</param>
+    /// <param name="onConnectChosen">Connect to <paramref name="chosenId"/>, resolving it first if
+    /// it is not in <paramref name="devices"/>. Separate from <paramref name="onConnect"/> because
+    /// the whole point is the case where there IS no device object yet: nothing discovers until
+    /// the user asks, and this menu is where they would ask, so a menu opened before any scan used
+    /// to offer Rescan and nothing else - no Connect, no way to reach the receiver already named
+    /// in the settings file.</param>
     /// <param name="closed">Raised once the menu goes away, whatever closed it. The OSD hides
     /// itself on a timer that pauses while the pointer is over it - and the pointer is over the
     /// MENU, which is a different window - so it needs telling when to start counting again.</param>
@@ -35,6 +41,7 @@ public static class AirPlayMenu
         string? currentId,
         string? chosenId,
         Action<AirPlayDevice> onConnect,
+        Action onConnectChosen,
         Action onDisconnect,
         Action onRescan,
         Action? closed = null)
@@ -45,7 +52,12 @@ public static class AirPlayMenu
             Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
         };
 
-        if (devices.Count == 0)
+        // WHICH items appear is AirPlayMenuModel's decision, in Core, where it is tested. This
+        // method only renders the answer - the condition that made Connect vanish on a cold start
+        // lived here, where nothing could reach it.
+        var model = AirPlayMenuModel.For(devices.Count, currentId, chosenId);
+
+        if (model.NoneFound)
         {
             menu.Items.Add(new MenuItem
             {
@@ -77,20 +89,23 @@ public static class AirPlayMenu
 
         menu.Items.Add(new Separator());
 
-        if (currentId is not null)
+        if (model.Disconnect)
         {
             var disconnect = new MenuItem { Header = Loc.T("osd.airplay.disconnect") };
             disconnect.Click += (_, _) => onDisconnect();
             menu.Items.Add(disconnect);
         }
-        else if (chosenId is not null
-                 && devices.FirstOrDefault(d => d.Id == chosenId) is { } chosen)
+        else if (model.Connect)
         {
             // Chosen but not connected. Clicking its row would do this too, but the row is one of
             // possibly a dozen and this is the one the user already picked - it should not need
             // finding again.
+            //
+            // Offered whether or not the receiver is in the list. Requiring it to be there is what
+            // made this menu useless on a cold start: nothing discovers until asked, so the first
+            // time it is ever opened the chosen receiver is absent and Connect vanished with it.
             var connect = new MenuItem { Header = Loc.T("osd.airplay.connect") };
-            connect.Click += (_, _) => onConnect(chosen);
+            connect.Click += (_, _) => onConnectChosen();
             menu.Items.Add(connect);
         }
 

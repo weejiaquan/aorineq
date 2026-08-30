@@ -157,12 +157,37 @@ A skin is a folder in `%APPDATA%\AorinEQ\skins\<name>\`:
 
 `.png` wins over `.gif` if both exist. All layers must share one logical frame size.
 
+### The skins that ship
+
+Four are written into your skins folder the first time they are missing, and are **never**
+overwritten afterwards - one you have edited stays yours.
+
+| Skin | |
+| --- | --- |
+| **AorinEQ** | The house style, and what *Custom skin* shows before you pick anything. |
+| **Windows 11** | The Windows 11 volume flyout: rounded, translucent, thin accent bar. |
+| **Windows 10** | The Windows 10 flyout: square and opaque, an icon block and a big number. |
+| **Windows XP** | XP shipped no volume OSD, so this is its tray volume popup - Luna, a trackbar with ticks, and a Mute box that ticks via the `muted` layer. |
+
+Each is a different size and layout, not one shape recoloured, so between them they demonstrate
+most of what the format can express. Copy the folder of whichever is closest to what you want.
+
 ### How fill works
 
 `full` is revealed left-to-right through a rectangular clip whose width tracks the volume; `empty`
 shows everywhere the fill is not, so a translucent `full` never double-darkens. The clip always
 follows the x-axis whatever the artwork's shape — a circular skin fills left-to-right, not
 radially.
+
+A **thumb that tracks the level is not expressible**, and this is the one thing worth knowing
+before you design: nothing about the artwork depends on the volume except which side of a single
+vertical edge a pixel falls on. Draw a filled bar, not a knob on a rail. (The real Windows volume
+OSD is a plain filled bar in both 10 and 11 for what it is worth — the knob belongs to the taskbar
+flyout, which is a different control.)
+
+Anything `empty` draws **between `fillStartX` and `fillEndX`** is replaced by `full` as the level
+rises, across the full height of the image — so keep glyphs, labels and decoration outside that
+range unless both layers draw them identically.
 
 Hit-testing is per pixel, from the union of every frame's opaque pixels of both layers:
 transparent pixels click through to whatever is beneath, opaque pixels take clicks, drags and the
@@ -248,12 +273,24 @@ and differ only in what is lit, exactly like `empty`/`full`.
 clamped into the artwork, and omitting it makes the whole strip open the list. Draw your own
 chevron (or whatever says "this opens something") inside that rectangle in `airplay-empty`.
 
+`connectHit` is an optional second rectangle: **one tap connects or disconnects**, without going
+through the list. It is opt-in and has **no default** — unlike `dropdownHit`, omitting it means no
+power button at all, because a hidden switch under every pixel of every older skin is not a good
+way to connect to a speaker. It is tested *before* `dropdownHit`, so it can sit inside a strip that
+declares no dropdown region; keep the two from overlapping or the power button eats the chevron.
+
+**Leave the space empty in your artwork.** AorinEQ draws the power glyph itself, the way it draws
+the name and the level, because what it shows changes with the session and a PNG cannot: dim while
+tapping would connect, lit while tapping would disconnect, and hidden entirely when no receiver has
+been chosen — then a tap there falls through to the list, which is where a first one gets picked.
+`connectColor` is the lit colour; the dim state uses `nameText`'s colour. Both default to white.
+
 A skin **without** these files is not missing anything — AorinEQ draws its own plain AirPlay strip
 under your artwork instead, so every skin written before this existed keeps working untouched. A
 skin whose AirPlay artwork is broken or half-written loses only the strip: the volume bar is
 unaffected and the plain strip is used, because a partly-drawn extra should never cost you the
-control you actually use. The three skins that ship with AorinEQ (*Windows 11*, *Windows 10*,
-*Windows XP*) all include one and are the easiest thing to copy.
+control you actually use. The four skins that ship with AorinEQ (*AorinEQ*, *Windows 11*,
+*Windows 10*, *Windows XP*) all include one and are the easiest thing to copy.
 
 An unparseable `skin.json` fails the whole skin, and AorinEQ falls back to the Dark pill style
 with a tray warning. Metadata is normalised on load: trimmed, length-capped by text element, and
@@ -373,6 +410,15 @@ receiver still accepts.
 
 **Experimental.** It works, and it has been run for sustained sessions against real hardware, but it
 has had far less exposure than the rest of the app.
+
+### Enable AirPlay
+
+The master switch. While it is off there is no AirPlay bar on the OSD whichever *AirPlay bar in
+the OSD* mode is picked — turning the feature off should not leave its bar sitting there with
+nothing behind it.
+
+You do not have to reach for it first: **connecting to a receiver switches it on**, from wherever
+you connect — this page, the tray menu, or the bar itself.
 
 ### Receiver
 

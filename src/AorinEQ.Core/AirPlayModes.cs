@@ -114,6 +114,25 @@ public sealed record AirPlaySetting(
 {
     public static AirPlaySetting Default { get; } = new();
 
+    /// <summary>What settings become when the user connects to <paramref name="deviceId"/>.
+    ///
+    /// The rule is that CONNECTING IS SWITCHING AIRPLAY ON, and it lives here rather than at the
+    /// three call sites - the OSD strip's menu, the tray's menu and the settings page's Connect
+    /// button - because it was written at only one of them once, and the feature became
+    /// unreachable: <see cref="AirPlayBarState.From"/> hides the bar while
+    /// <see cref="Enabled"/> is false, so the only control that armed it was one that setting
+    /// kept off screen.
+    ///
+    /// Applied whether or not the attempt succeeded, on the same reasoning the device name is:
+    /// the user is more likely to retry the same receiver than to want the choice reset, and a
+    /// receiver that refused us is still the one they meant.</summary>
+    public AirPlaySetting Connecting(string deviceId, string deviceName) => this with
+    {
+        Enabled = true,
+        DeviceId = deviceId,
+        DeviceName = deviceName,
+    };
+
     /// <summary>Seconds of continuous silence after which the session is dropped, or 0 to stay
     /// connected indefinitely. Standby IS staying connected, so enabling it means no timeout.</summary>
     public int EffectiveIdleSeconds => StandbyEnabled

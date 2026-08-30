@@ -41,6 +41,7 @@ public partial class SettingsWindow
         _airPlayVolumeMode = settings.VolumeMode;
 
         PopulateAirPlaySources();
+        AirPlayEnabledBox.IsChecked = _airPlay.Enabled;
         SelectByTag(AirPlayModeCombo, _airPlay.Mode);
         SelectByTag(AirPlayBarCombo, AirPlayBarVisibility.Normalize(_airPlay.BarVisibility));
         AirPlayCustomMsBox.Text = _airPlay.CustomQueueMs.ToString();
@@ -227,6 +228,20 @@ public partial class SettingsWindow
         string mode = AirPlayModes.Normalize(SelectedTag(AirPlayModeCombo), AirPlayModes.Normal);
         AirPlayCustomMsBox.IsEnabled = mode == AirPlayModes.Custom;
         RaiseAirPlay(_airPlay with { Mode = mode });
+    }
+
+    /// <summary>The master switch for the whole feature. Everything else on this page describes
+    /// HOW AirPlay behaves; this is whether it is on at all, and it is what the three "AirPlay bar
+    /// in the OSD" choices are relative to - AirPlayBarState hides the bar outright while this is
+    /// off, so without a control here the bar had no reachable way of ever being shown.
+    ///
+    /// Turning it off deliberately does NOT tear down a live session: Disconnect does that, and
+    /// silently stopping the audio somebody is listening to from a switch labelled like a
+    /// preference is not what the label promises.</summary>
+    private void OnAirPlayEnabledChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        RaiseAirPlay(_airPlay with { Enabled = AirPlayEnabledBox.IsChecked == true });
     }
 
     /// <summary>When the OSD draws its AirPlay strip. Normalised on the way out so an unknown

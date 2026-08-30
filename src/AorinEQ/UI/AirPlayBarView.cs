@@ -42,6 +42,14 @@ public sealed class AirPlayBarView : UserControl
     /// <summary>The user clicked the part of the bar that opens the device list.</summary>
     public event Action? DropdownRequested;
 
+    /// <summary>The power button was tapped while there was a chosen receiver and no session.
+    /// The receiver is the one in SETTINGS, which the strip may never have discovered - see
+    /// AirPlaySetting.Connecting.</summary>
+    public event Action? ConnectChosenRequested;
+
+    /// <summary>The power button was tapped while a session was live.</summary>
+    public event Action? DisconnectRequested;
+
     /// <summary>The user set the RECEIVER's level by dragging the bar. Not the system volume -
     /// see AirPlayOwnsVolume in App.AirPlay for why those stay separate.</summary>
     public event Action<int>? VolumeSetByUser;
@@ -55,10 +63,19 @@ public sealed class AirPlayBarView : UserControl
     private const double NativeHeight = 30;
     private const double NativeCorner = 6;
     private const double GlyphColumn = 26;   // the chevron's width at the right-hand end
+    private const double PowerColumn = 26;   // the power button, immediately left of it
 
     private static readonly Color NativeBack = Color.FromArgb(0xFF, 0x2B, 0x2B, 0x2B);
     private static readonly Color NativeFill = Color.FromArgb(0xFF, 0x4C, 0x8E, 0xFF);
     private static readonly Color NativeDim = Color.FromArgb(0xFF, 0x6E, 0x6E, 0x6E);
+
+    /// <summary>How far the power button is faded while it would CONNECT rather than disconnect.
+    /// Lit means "audio is going there", which is a thing worth being able to read at a glance
+    /// from across a room.</summary>
+    private const double PowerDimOpacity = 0.45;
+
+    /// <summary>Segoe MDL2's power glyph, and the same font the chevron beside it already uses.</summary>
+    private const string PowerGlyph = "";
 
     private readonly Grid _root = new();
 
@@ -68,6 +85,11 @@ public sealed class AirPlayBarView : UserControl
     private readonly RectangleGeometry _fillClip = new();
     private readonly TextBlock _skinName = new();
     private readonly TextBlock _skinPercent = new();
+
+    /// <summary>The power button over a SKIN's artwork. Drawn by the app rather than by the skin
+    /// for the same reason the name and the level are: it changes with the session, and a PNG
+    /// cannot. The skin says where it goes and what colour it is when lit; this draws it.</summary>
+    private readonly TextBlock _skinPower = new();
 
     // Native path.
     private readonly Border _nativeBack = new() { CornerRadius = new CornerRadius(NativeCorner) };
@@ -79,6 +101,7 @@ public sealed class AirPlayBarView : UserControl
     private readonly TextBlock _nativeName = new();
     private readonly TextBlock _nativePercent = new();
     private readonly TextBlock _nativeGlyph = new();
+    private readonly TextBlock _nativePower = new();
 
     private SkinAirPlay? _skin;
     private double _scale = 1.0;
@@ -155,6 +178,16 @@ public sealed class AirPlayBarView : UserControl
             t.IsHitTestVisible = false;
             _root.Children.Add(t);
         }
+
+        _skinPower.Text = PowerGlyph;
+        _skinPower.FontFamily = new FontFamily("Segoe MDL2 Assets, Segoe Fluent Icons");
+        _skinPower.HorizontalAlignment = HAlign.Left;
+        _skinPower.VerticalAlignment = VAlign.Top;
+        _skinPower.TextAlignment = TextAlignment.Center;
+        // Not hit-testable: the strip owns its own mouse handling and decides by REGION, so a
+        // glyph that swallowed clicks would make the button work only where the ink is.
+        _skinPower.IsHitTestVisible = false;
+        _root.Children.Add(_skinPower);
     }
 
     private void BuildNative()
@@ -176,7 +209,7 @@ public sealed class AirPlayBarView : UserControl
         _nativePercent.Foreground = new SolidColorBrush(Colors.White);
         _nativePercent.VerticalAlignment = VAlign.Center;
         _nativePercent.HorizontalAlignment = HAlign.Right;
-        _nativePercent.Margin = new Thickness(0, 0, GlyphColumn + 4, 0);
+        _nativePercent.Margin = new Thickness(0, 0, GlyphColumn + PowerColumn + 4, 0);
         _nativePercent.IsHitTestVisible = false;
 
         _nativeGlyph.Text = "";                       // Segoe MDL2 chevron-down
@@ -188,9 +221,19 @@ public sealed class AirPlayBarView : UserControl
         _nativeGlyph.Margin = new Thickness(0, 0, 10, 0);
         _nativeGlyph.IsHitTestVisible = false;
 
+        _nativePower.Text = PowerGlyph;
+        _nativePower.FontFamily = new FontFamily("Segoe MDL2 Assets, Segoe Fluent Icons");
+        _nativePower.FontSize = 12;
+        _nativePower.Foreground = Brushes.White;
+        _nativePower.VerticalAlignment = VAlign.Center;
+        _nativePower.HorizontalAlignment = HAlign.Right;
+        _nativePower.Margin = new Thickness(0, 0, GlyphColumn + 4, 0);
+        _nativePower.IsHitTestVisible = false;
+
         _root.Children.Add(_nativeName);
         _root.Children.Add(_nativePercent);
         _root.Children.Add(_nativeGlyph);
+        _root.Children.Add(_nativePower);
     }
 
     private void ApplyMode()
@@ -203,12 +246,14 @@ public sealed class AirPlayBarView : UserControl
         _fullImage.Visibility = skinVis;
         _skinName.Visibility = skinVis;
         _skinPercent.Visibility = skinVis;
+        _skinPower.Visibility = skinVis;
 
         _nativeBack.Visibility = nativeVis;
         _nativeFill.Visibility = nativeVis;
         _nativeName.Visibility = nativeVis;
         _nativePercent.Visibility = nativeVis;
         _nativeGlyph.Visibility = nativeVis;
+        _nativePower.Visibility = nativeVis;
     }
 
     private void Render()
@@ -227,6 +272,41 @@ public sealed class AirPlayBarView : UserControl
 
         ApplySkinText(_skinName, skin.Name, DisplayName, w);
         ApplySkinText(_skinPercent, skin.Percent, _state.VolumePercent.ToString(), w);
+        ApplySkinPower(skin);
+    }
+
+    /// <summary>Places and colours the power button over a skin's artwork.
+    ///
+    /// Hidden entirely when the skin declares no connectHit - a skin written before this existed
+    /// must not sprout a control it never drew room for - and when there is no receiver to act on,
+    /// because a lit-looking button that does nothing is worse than no button.</summary>
+    private void ApplySkinPower(SkinAirPlay skin)
+    {
+        if (skin.ConnectHit is not { } hit || _state.Power == AirPlayPower.Unavailable)
+        {
+            _skinPower.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        _skinPower.Visibility = Visibility.Visible;
+
+        // Sized to the region the skin reserved, so a big button on a big skin is a big glyph.
+        // Two thirds of the shorter side leaves the ring clear of the edges it is centred in.
+        double side = Math.Min(hit.Width, hit.Height) * _scale;
+        _skinPower.FontSize = Math.Max(8, side * 0.62);
+        _skinPower.Width = hit.Width * _scale;
+        _skinPower.Height = hit.Height * _scale;
+
+        bool live = _state.Power == AirPlayPower.Disconnect;
+        _skinPower.Foreground = live
+            ? ParseBrush(skin.ConnectColor ?? skin.Name?.Color)
+            : ParseBrush(skin.Name?.Color);
+        _skinPower.Opacity = live ? 1.0 : PowerDimOpacity;
+
+        // Centred vertically inside its own box: the glyph's line box is taller than its ink, so
+        // top-anchoring it would sit it high in the region the user is aiming at.
+        double top = hit.Y * _scale + (hit.Height * _scale - _skinPower.FontSize * 1.35) / 2;
+        _skinPower.Margin = new Thickness(hit.X * _scale, Math.Max(0, top), 0, 0);
     }
 
     private void ApplySkinText(TextBlock block, SkinText? spec, string value, double width)
@@ -267,6 +347,14 @@ public sealed class AirPlayBarView : UserControl
         double usable = Math.Max(0, ActualWidth);
         _nativeFill.Width = usable * Math.Clamp(_state.VolumePercent, 0, 100) / 100.0;
         _nativeFill.Height = NativeHeight;
+
+        // Same rule as the skinned button: shown only when there is something for it to do.
+        bool live = _state.Power == AirPlayPower.Disconnect;
+        _nativePower.Visibility = _state.Power == AirPlayPower.Unavailable
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        _nativePower.Foreground = new SolidColorBrush(live ? NativeFill : Colors.White);
+        _nativePower.Opacity = live ? 1.0 : PowerDimOpacity;
     }
 
     /// <summary>What the bar calls the receiver. A chosen device shows its name; nothing chosen
@@ -295,11 +383,38 @@ public sealed class AirPlayBarView : UserControl
         return p.X >= ActualWidth - GlyphColumn;
     }
 
+    /// <summary>Whether a point is the power button.
+    ///
+    /// Tested BEFORE the dropdown, because a skin that declares no dropdownHit gets the whole bar
+    /// as one, and the connect region has to be able to live inside that. Only where the button is
+    /// actually drawn: a region declared by the skin but showing nothing - no receiver chosen -
+    /// falls through to the dropdown, which is where a first receiver gets picked.</summary>
+    private bool IsPowerPoint(Point p)
+    {
+        if (_state.Power == AirPlayPower.Unavailable) return false;
+
+        if (_skin is { } skin)
+            return skin.ConnectHit is { } hit && hit.Contains(p.X / _scale, p.Y / _scale);
+
+        double right = ActualWidth - GlyphColumn;
+        return p.X >= right - PowerColumn && p.X < right;
+    }
+
     private void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (!_state.Visible) return;
 
-        if (IsDropdownPoint(e.GetPosition(this)))
+        var at = e.GetPosition(this);
+
+        if (IsPowerPoint(at))
+        {
+            if (_state.Power == AirPlayPower.Disconnect) DisconnectRequested?.Invoke();
+            else ConnectChosenRequested?.Invoke();
+            e.Handled = true;
+            return;
+        }
+
+        if (IsDropdownPoint(at))
         {
             DropdownRequested?.Invoke();
             e.Handled = true;
@@ -349,8 +464,12 @@ public sealed class AirPlayBarView : UserControl
         VolumeSetByUser?.Invoke(percent);
     }
 
-    private static Brush ParseBrush(string color)
+    private static Brush ParseBrush(string? color)
     {
+        // Null is not a malformed colour, it is an absent one: the power button falls back through
+        // connectColor to the name's colour to white, and any of those may simply not be set.
+        if (string.IsNullOrWhiteSpace(color)) return Brushes.White;
+
         try
         {
             return new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));

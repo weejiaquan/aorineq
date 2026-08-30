@@ -728,6 +728,17 @@
                     <ui:TextBlock Style="{StaticResource RowSubtitle}" Margin="0,0,0,24"
                                   Text="{loc:T settings.section-air-play.subtitle}" />
 
+                    <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-enabled">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.air-play-enabled.title}" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="{loc:T settings.air-play-enabled.subtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AirPlayEnabledBox" Click="OnAirPlayEnabledChanged" />
+                    </ui:CardControl>
+
                     <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-status">
                         <ui:CardControl.Header>
                             <StackPanel>

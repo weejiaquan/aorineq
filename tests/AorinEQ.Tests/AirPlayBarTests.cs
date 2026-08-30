@@ -153,4 +153,43 @@ public class AirPlayBarTests
         _out.WriteLine($"stored {stored} -> {state.VolumePercent}");
         Assert.Equal(expected, state.VolumePercent);
     }
+
+    /// <summary>THE REGRESSION THIS FILE EXISTS TO PIN, and the one that shipped: Enabled gates
+    /// the bar in every visibility mode, and for a long while nothing in the app could set it
+    /// except a control the gate itself kept off screen.
+    ///
+    /// The gate is right - turning AirPlay off must not leave its bar on the OSD with nothing
+    /// behind it. What was wrong was that only ONE of the three connect paths armed it, so this
+    /// asserts the gate here and
+    /// <see cref="AirPlaySettingsTests"/> asserts that connecting is what opens it.</summary>
+    [Theory]
+    [InlineData(AirPlayBarVisibility.Never)]
+    [InlineData(AirPlayBarVisibility.Connected)]
+    [InlineData(AirPlayBarVisibility.Enabled)]
+    public void AirPlay_switched_off_hides_the_bar_in_every_visibility_mode(string visibility)
+    {
+        // connected AND streaming: the most favourable case a visibility mode could ask for.
+        var state = AirPlayBarState.From(
+            Setting(enabled: false, visibility: visibility), connected: true, streaming: true);
+
+        _out.WriteLine($"visibility={visibility} enabled=false connected=true -> visible={state.Visible}");
+        Assert.False(state.Visible);
+        Assert.Equal(AirPlayBarState.Hidden, state);
+    }
+
+    /// <summary>The same settings with the switch on: proof the mode above was hidden BY the
+    /// switch and not by something else in the fixture.</summary>
+    [Theory]
+    [InlineData(AirPlayBarVisibility.Connected, true)]
+    [InlineData(AirPlayBarVisibility.Enabled, true)]
+    [InlineData(AirPlayBarVisibility.Never, false)]
+    public void The_same_settings_with_the_switch_on_show_what_the_mode_asks_for(
+        string visibility, bool expected)
+    {
+        var state = AirPlayBarState.From(
+            Setting(enabled: true, visibility: visibility), connected: true, streaming: true);
+
+        _out.WriteLine($"visibility={visibility} enabled=true connected=true -> visible={state.Visible}");
+        Assert.Equal(expected, state.Visible);
+    }
 }

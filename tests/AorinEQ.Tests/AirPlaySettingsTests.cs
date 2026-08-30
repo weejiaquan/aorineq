@@ -279,4 +279,61 @@ public class AirPlaySettingsTests
             if (File.Exists(path)) File.Delete(path);
         }
     }
+
+    /// <summary>CONNECTING IS SWITCHING AIRPLAY ON.
+    ///
+    /// The rule lives on the setting because three entry points apply it - the OSD strip's menu,
+    /// the tray's menu and the settings page's Connect button - and when it was written out at
+    /// only one of them the feature became unreachable: the bar is hidden while Enabled is false,
+    /// so the sole control that armed it was one that setting kept off screen.</summary>
+    [Fact]
+    public void Connecting_switches_airplay_on_and_records_the_receiver()
+    {
+        var before = AirPlaySetting.Default;
+        Assert.False(before.Enabled); // the state every fresh install starts in
+
+        var after = before.Connecting("BE4DBCD7755B@Bedroom", "Bedroom");
+
+        Assert.True(after.Enabled);
+        Assert.Equal("BE4DBCD7755B@Bedroom", after.DeviceId);
+        Assert.Equal("Bedroom", after.DeviceName);
+    }
+
+    /// <summary>Everything the user configured survives connecting. A connect that quietly reset
+    /// the queue depth, the source or the bar mode would be a worse bug than the one this fixes.</summary>
+    [Fact]
+    public void Connecting_changes_nothing_else()
+    {
+        var before = AirPlaySetting.Default with
+        {
+            Mode = AirPlayModes.Custom,
+            CustomQueueMs = 1750,
+            SourceEndpointId = "{0.0.0.00000000}.{abc}",
+            VolumePercent = 42,
+            BarVisibility = AirPlayBarVisibility.Never,
+            MuteLocalWhileStreaming = true,
+            StandbyEnabled = false,
+            IdleDisconnectSeconds = 120,
+        };
+
+        var after = before.Connecting("id", "name");
+
+        Assert.Equal(before with { Enabled = true, DeviceId = "id", DeviceName = "name" }, after);
+    }
+
+    /// <summary>Applied on a FAILED attempt too, which is why it is a pure transformation rather
+    /// than something the connect result gates: the user is more likely to retry the receiver
+    /// that refused them than to want the choice cleared, and re-picking it from a bar that has
+    /// meanwhile vanished is not a retry they can perform.</summary>
+    [Fact]
+    public void Connecting_from_a_previous_receiver_replaces_it_and_leaves_the_switch_on()
+    {
+        var after = AirPlaySetting.Default
+            .Connecting("first@Kitchen", "Kitchen")
+            .Connecting("second@Bedroom", "Bedroom");
+
+        Assert.True(after.Enabled);
+        Assert.Equal("second@Bedroom", after.DeviceId);
+        Assert.Equal("Bedroom", after.DeviceName);
+    }
 }

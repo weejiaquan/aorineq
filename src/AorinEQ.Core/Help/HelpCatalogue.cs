@@ -45,6 +45,8 @@ public static class HelpCatalogue
         new("settings.open-equalizer", SettingsSections.Equalizer,
             "settings.open-equalizer.title", "settings.open-equalizer.subtitle", "#equalizer"),
         // ---- airplay ----
+        new("settings.air-play-enabled", SettingsSections.AirPlay,
+            "settings.air-play-enabled.title", "settings.air-play-enabled.subtitle", "#airplay"),
         new("settings.air-play-status", SettingsSections.AirPlay,
             "settings.air-play-status.title", "settings.air-play-status.subtitle", "#airplay"),
         new("settings.air-play-source", SettingsSections.AirPlay,

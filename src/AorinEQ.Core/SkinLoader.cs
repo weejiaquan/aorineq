@@ -37,7 +37,8 @@ public sealed record SkinAirPlay(
     string EmptyPath, string FullPath, int Width, int Height,
     bool EmptyIsGif, bool FullIsGif, int EmptyFrames, int FullFrames,
     int FillStartX, int FillEndX,
-    SkinText? Name, SkinText? Percent, SkinHitRect DropdownHit);
+    SkinText? Name, SkinText? Percent, SkinHitRect DropdownHit,
+    SkinHitRect? ConnectHit = null, string? ConnectColor = null);
 
 /// <summary>Result of loading one skin folder. Always has Name/Folder/EmptyPath/FullPath populated;
 /// on failure Width/Height are 0 and Error describes what went wrong. Width/Height are the LOGICAL
@@ -311,11 +312,22 @@ public static class SkinLoader
             ? ClampHit(h, width, height)
             : new SkinHitRect(0, 0, width, height);
 
+        // The connect button is opt-in and has NO default region, which is the opposite of the
+        // dropdown's. The dropdown falling back to the whole bar makes a two-PNG skin usable; a
+        // connect button doing the same would put a hidden power switch under every pixel of every
+        // skin written before this existed, and connecting by accident is not a small mistake.
+        var connect = json?.ConnectHit is { } c ? ClampHit(c, width, height) : null;
+
+        // A zero-area region is an authoring slip, not a control. Dropped rather than reported,
+        // for the same reason everything else here fails soft: it costs the strip nothing.
+        if (connect is { Width: 0 } or { Height: 0 }) connect = null;
+
         return (new SkinAirPlay(empty.Path, full.Path, width, height,
             empty.IsGif, full.IsGif,
             empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
             fillStart, fillEnd,
-            ReadText(json?.NameText), ReadText(json?.PercentText), hit), null);
+            ReadText(json?.NameText), ReadText(json?.PercentText), hit,
+            connect, json?.ConnectColor), null);
     }
 
     /// <summary>Pulls a declared hit region inside the artwork it belongs to.</summary>
@@ -425,6 +437,8 @@ public static class SkinLoader
         public SkinTextJson? NameText { get; set; }
         public SkinTextJson? PercentText { get; set; }
         public SkinHitJson? DropdownHit { get; set; }
+        public SkinHitJson? ConnectHit { get; set; }
+        public string? ConnectColor { get; set; }
     }
 
     private sealed class SkinHitJson

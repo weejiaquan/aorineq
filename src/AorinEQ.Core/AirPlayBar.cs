@@ -30,6 +30,20 @@ public static class AirPlayBarVisibility
     public static string Normalize(string? value) => All.Contains(value) ? value! : Connected;
 }
 
+/// <summary>What tapping the AirPlay strip's power button would do right now.</summary>
+public enum AirPlayPower
+{
+    /// <summary>Nothing to connect to. No receiver has been chosen, so the button has no target -
+    /// the strip falls back to opening the device list, which is where a first choice is made.</summary>
+    Unavailable,
+
+    /// <summary>Start a session with the chosen receiver.</summary>
+    Connect,
+
+    /// <summary>End the session we hold.</summary>
+    Disconnect,
+}
+
 /// <summary>Everything the OSD needs to draw one AirPlay bar, and nothing about how it is drawn.
 ///
 /// The decision lives in Core rather than in either OSD window because both of them make it, and
@@ -47,6 +61,18 @@ public sealed record AirPlayBarState(
     /// that is how <see cref="AirPlayBarVisibility.Enabled"/> lets someone pick their first
     /// device - so the two questions are not the same one.</summary>
     public bool HasDevice => DeviceName.Length > 0;
+
+    /// <summary>What the strip's power button would do if tapped, and whether it should be drawn
+    /// as usable at all.
+    ///
+    /// Here rather than in the view because both OSDs draw that button and both act on it, and
+    /// because "connected" and "a receiver has been chosen" are two different facts that the one
+    /// control has to combine - the same pair that <see cref="AirPlayMenuModel"/> combines for the
+    /// menu, and they must not disagree.</summary>
+    public AirPlayPower Power =>
+        IsConnected ? AirPlayPower.Disconnect
+        : HasDevice ? AirPlayPower.Connect
+        : AirPlayPower.Unavailable;
 
     /// <summary>Nothing on screen. One instance so the windows can compare against it.</summary>
     public static readonly AirPlayBarState Hidden = new(false, "", false, false, 0);
@@ -82,5 +108,36 @@ public sealed record AirPlayBarState(
             // Clamped here rather than trusted: this number is persisted, and a hand-edited file
             // must not make the fill overrun the bar it is drawn inside or invert it.
             VolumePercent: Math.Clamp(s.VolumePercent, 0, 100));
+    }
+}
+
+/// <summary>Which items the AirPlay bar's dropdown offers.
+///
+/// In Core, and away from the menu that renders it, for the same reason
+/// <see cref="AirPlayBarState"/> is: both OSD windows open this menu, and the rule got one
+/// condition wrong in a way no screenshot could show. A menu opened before anything had been
+/// discovered offered Rescan and nothing else - Connect required the chosen receiver to be in the
+/// discovered list, and nothing discovers until the user asks, which is what the menu is for.
+///
+/// The list being empty is a fact about DISCOVERY. Having chosen a receiver is a fact about
+/// SETTINGS. Connect belongs to the second, so it must not be gated on the first.</summary>
+/// <param name="NoneFound">Say so, in place of the rows. Ordinary before the first scan.</param>
+/// <param name="Disconnect">There is a session to end.</param>
+/// <param name="Connect">A receiver has been chosen and is not the one we hold, so connecting to
+/// it is a thing the user can ask for - whether or not it has been discovered yet.</param>
+public sealed record AirPlayMenuModel(bool NoneFound, bool Disconnect, bool Connect)
+{
+    /// <param name="deviceCount">How many receivers discovery has found.</param>
+    /// <param name="currentId">The receiver this app holds a session with, if any.</param>
+    /// <param name="chosenId">The receiver named in settings, which is not the same thing.</param>
+    public static AirPlayMenuModel For(int deviceCount, string? currentId, string? chosenId)
+    {
+        bool connected = !string.IsNullOrEmpty(currentId);
+        return new AirPlayMenuModel(
+            NoneFound: deviceCount == 0,
+            Disconnect: connected,
+            // Never both: ending the session you have and starting the one you chose are the same
+            // row on the menu, and offering the two together says nothing about which you are on.
+            Connect: !connected && !string.IsNullOrEmpty(chosenId));
     }
 }

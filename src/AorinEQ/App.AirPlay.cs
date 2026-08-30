@@ -58,16 +58,24 @@ public partial class App
         });
     }
 
+    /// <summary>The ONE place a receiver is connected, from every entry point there is - the OSD
+    /// strip's menu, the tray's menu and the Connect button on the settings page.
+    ///
+    /// It arms <see cref="AirPlaySetting.Enabled"/> because connecting IS switching AirPlay on.
+    /// That was previously done only on the OSD strip's path, which made the feature unreachable:
+    /// the strip is hidden while Enabled is false, so the only control that could set it was one
+    /// the setting itself kept off screen.</summary>
     private bool ConnectAirPlay(AirPlayDevice device)
     {
         var setting = _settings.AirPlay ?? AirPlaySetting.Default;
         bool started = AirPlay.Start(device, setting);
 
-        // Remember what was chosen even when the attempt failed: the user is more likely to
-        // retry the same receiver than to want the selection reset.
+        // What connecting does to settings is AirPlaySetting.Connecting's rule, not this method's:
+        // three entry points reach here, and writing it out at each is how one of them ended up
+        // being the only one that armed Enabled.
         _settings = _settings with
         {
-            AirPlay = setting with { DeviceId = device.Id, DeviceName = device.DisplayName },
+            AirPlay = setting.Connecting(device.Id, device.DisplayName),
         };
         SaveSettings();
         return started;
@@ -172,18 +180,20 @@ public partial class App
     /// different windows that happen to offer the same vocabulary.</summary>
     private void WireAirPlayOsd(OsdWindow osd)
     {
-        osd.AirPlayDeviceChosen += ConnectFromOsd;
+        osd.AirPlayDeviceChosen += device => ConnectAirPlay(device);
+        osd.AirPlayConnectChosenRequested += () => _ = ConnectChosenAirPlayAsync();
         osd.AirPlayDisconnectRequested += DisconnectAirPlay;
-        osd.AirPlayRescanRequested += () => _ = RefreshAirPlayForTrayAsync();
+        osd.AirPlayRescanRequested += () => _ = RescanAirPlayAsync();
         osd.AirPlayVolumeSetByUser += SetAirPlayVolumeFromOsd;
         osd.AirPlayVolumeScrolled += OnAirPlayWheel;
     }
 
     private void WireAirPlayOsd(SkinOsdWindow osd)
     {
-        osd.AirPlayDeviceChosen += ConnectFromOsd;
+        osd.AirPlayDeviceChosen += device => ConnectAirPlay(device);
+        osd.AirPlayConnectChosenRequested += () => _ = ConnectChosenAirPlayAsync();
         osd.AirPlayDisconnectRequested += DisconnectAirPlay;
-        osd.AirPlayRescanRequested += () => _ = RefreshAirPlayForTrayAsync();
+        osd.AirPlayRescanRequested += () => _ = RescanAirPlayAsync();
         osd.AirPlayVolumeSetByUser += SetAirPlayVolumeFromOsd;
         osd.AirPlayVolumeScrolled += OnAirPlayWheel;
     }
@@ -205,24 +215,6 @@ public partial class App
     /// <summary>Its own accumulator, not the volume bar's. They are two different volumes and a
     /// partial notch carried from one must never land on the other.</summary>
     private readonly ScrollStep _airPlayScroll = new();
-
-    /// <summary>Connecting from the OSD also PERSISTS the choice, exactly as picking from the
-    /// tray does - otherwise the strip would connect to a receiver the settings file still says
-    /// is a different one, and the next start would disagree with what is playing.</summary>
-    private void ConnectFromOsd(AirPlayDevice device)
-    {
-        _settings = _settings with
-        {
-            AirPlay = (_settings.AirPlay ?? AirPlaySetting.Default) with
-            {
-                Enabled = true,
-                DeviceName = device.DisplayName,
-                DeviceId = device.Id,
-            },
-        };
-        SaveSettings();
-        ConnectAirPlay(device);
-    }
 
     /// <summary>The RECEIVER's level, set by dragging or scrolling the strip. Deliberately not
     /// routed through TryApplyAirPlayVolume: that one exists for the volume KEYS and declines in
@@ -254,16 +246,91 @@ public partial class App
             if (device is not null) ConnectAirPlay(device);
         };
         _tray.AirPlayDisconnectRequested += DisconnectAirPlay;
-        _tray.AirPlayRefreshRequested += () => _ = RefreshAirPlayForTrayAsync();
+        _tray.AirPlayRefreshRequested += () => _ = RescanAirPlayAsync();
     }
 
-    private async Task RefreshAirPlayForTrayAsync()
+    /// <summary>A discovery pass on behalf of the tray AND the OSD strip - both offer Rescan, and
+    /// it is one act.
+    ///
+    /// It feeds the OSD as well as the tray. It used to update only the tray, so pressing Rescan
+    /// on the strip's own menu left that menu's list exactly as empty as it had been: the OSD
+    /// windows keep their own copy, refreshed on show, so the result did not arrive until the user
+    /// happened to press a volume key.</summary>
+    private async Task RescanAirPlayAsync()
     {
-        var devices = await MdnsBrowser.DiscoverAsync(TimeSpan.FromSeconds(3));
+        if (_airPlayScanning) return;
+        _airPlayScanning = true;
+        try
+        {
+            var devices = await MdnsBrowser.DiscoverAsync(TimeSpan.FromSeconds(3));
+
+            // Both the tray's NotifyIcon and the OSD windows are affine to the UI thread, and the
+            // continuation's context depends on the caller - see RefreshAirPlayDevicesAsync.
+            Dispatcher.Invoke(() =>
+            {
+                _airPlayDevices = devices;
+                _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id);
+                RefreshAirPlayOsd();
+            });
+        }
+        finally
+        {
+            _airPlayScanning = false;
+        }
+    }
+
+    /// <summary>Guards against stacking discovery passes. The strip can be shown, and Rescan
+    /// pressed, several times inside one three-second scan.</summary>
+    private bool _airPlayScanning;
+
+    /// <summary>Discovery on behalf of the OSD, once, when the strip appears with nothing found.
+    ///
+    /// Without it the first thing the strip's menu ever says is "No receivers found", because
+    /// nothing looks for a receiver until the user asks - and the menu is where they would ask.
+    /// Only when the list is EMPTY: a strip shown twenty times in a minute must not mean twenty
+    /// mDNS sweeps.</summary>
+    private void EnsureAirPlayDevicesDiscovered()
+    {
+        if (_airPlayDevices.Count > 0 || _airPlayScanning) return;
+        if (!(_settings.AirPlay ?? AirPlaySetting.Default).Enabled) return;
+        _ = RescanAirPlayAsync();
+    }
+
+    /// <summary>Connect to the receiver the settings already name, finding it first if discovery
+    /// has not run yet.
+    ///
+    /// This is what makes Connect offerable on a menu opened before anything has been discovered.
+    /// The id is an mDNS instance name, not an address, so a session still needs the receiver
+    /// resolved - but the USER has already chosen it, and "the thing you picked is not on this
+    /// menu until you press Rescan and open it again" is not a choice worth making them repeat.</summary>
+    private async Task ConnectChosenAirPlayAsync()
+    {
+        if (ChosenAirPlayId() is not { } chosenId) return;
+
+        var device = _airPlayDevices.FirstOrDefault(d => d.Id == chosenId);
+        if (device is null)
+        {
+            var devices = await MdnsBrowser.DiscoverAsync(TimeSpan.FromSeconds(3));
+            Dispatcher.Invoke(() =>
+            {
+                _airPlayDevices = devices;
+                _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id);
+            });
+            device = devices.FirstOrDefault(d => d.Id == chosenId);
+        }
+
         Dispatcher.Invoke(() =>
         {
-            _airPlayDevices = devices;
-            _tray?.SetAirPlayDevices(devices, AirPlay.Current?.Id);
+            if (device is null)
+            {
+                // Said out loud rather than silently doing nothing: the receiver being off, asleep
+                // or on another network is the ordinary reason, and the user can act on it.
+                var name = (_settings.AirPlay ?? AirPlaySetting.Default).DeviceName;
+                _tray?.ShowWarning(Loc.T("app.airplay-not-found", name));
+                return;
+            }
+            ConnectAirPlay(device);
+            RefreshAirPlayOsd();
         });
     }
 

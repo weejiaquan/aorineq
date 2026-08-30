@@ -382,4 +382,111 @@ public class SkinAirPlayTests : IDisposable
         Assert.False(png, "the stale PNG survived, so the loader would keep showing it");
         Assert.True(gif);
     }
+
+    // ---- the optional power button ----------------------------------------------------
+
+    /// <summary>connectHit is OPT-IN and has no default, which is the opposite of dropdownHit.
+    ///
+    /// dropdownHit falling back to the whole bar is what makes a two-PNG skin usable. A connect
+    /// button doing the same would put an invisible power switch under every pixel of every skin
+    /// written before this existed, and connecting to a speaker by accident is not a small
+    /// mistake to make on somebody's behalf.</summary>
+    [Fact]
+    public void A_skin_that_declares_no_connect_region_gets_no_power_button()
+    {
+        var folder = MakeSkin("no-connect", airPlayArt: true, airPlayJson: """
+        { "airplay": { "dropdownHit": { "x": 260, "y": 4, "w": 30, "h": 24 } } }
+        """);
+
+        var bar = SkinLoader.Load(folder).AirPlay!;
+        _out.WriteLine($"connectHit = {bar.ConnectHit?.ToString() ?? "(none)"}");
+        _out.WriteLine($"dropdownHit = {bar.DropdownHit}");
+
+        Assert.Null(bar.ConnectHit);
+        Assert.Equal(260, bar.DropdownHit.X); // and the dropdown is unaffected
+    }
+
+    /// <summary>A skin with NO airplay block at all - every skin shipped before this - is still
+    /// valid, still gets the whole bar as its dropdown, and still has no power button.</summary>
+    [Fact]
+    public void A_skin_with_no_airplay_block_has_no_power_button_either()
+    {
+        var bar = SkinLoader.Load(MakeSkin("bare", airPlayArt: true)).AirPlay!;
+
+        _out.WriteLine($"connectHit = {bar.ConnectHit?.ToString() ?? "(none)"}, dropdown = {bar.DropdownHit}");
+
+        Assert.Null(bar.ConnectHit);
+        Assert.Equal(new SkinHitRect(0, 0, bar.Width, bar.Height), bar.DropdownHit);
+    }
+
+    [Fact]
+    public void A_declared_connect_region_is_read_with_its_colour()
+    {
+        var folder = MakeSkin("with-connect", airPlayArt: true, airPlayJson: """
+        {
+          "airplay": {
+            "connectHit": { "x": 230, "y": 6, "w": 28, "h": 22 },
+            "connectColor": "#FF2CC12C",
+            "dropdownHit": { "x": 264, "y": 4, "w": 30, "h": 24 }
+          }
+        }
+        """);
+
+        var bar = SkinLoader.Load(folder).AirPlay!;
+        _out.WriteLine($"connectHit = {bar.ConnectHit}, colour = {bar.ConnectColor}");
+
+        Assert.Equal(new SkinHitRect(230, 6, 28, 22), bar.ConnectHit);
+        Assert.Equal("#FF2CC12C", bar.ConnectColor);
+    }
+
+    /// <summary>Clamped into the artwork like every other declared region, so a region running off
+    /// the strip cannot put a live control where there are no pixels.</summary>
+    [Fact]
+    public void A_connect_region_outside_the_artwork_is_pulled_back_inside()
+    {
+        var folder = MakeSkin("overflow", airPlayArt: true, airPlayWidth: 300, airPlayHeight: 40,
+            airPlayJson: """
+        { "airplay": { "connectHit": { "x": 290, "y": 30, "w": 400, "h": 400 } } }
+        """);
+
+        var hit = SkinLoader.Load(folder).AirPlay!.ConnectHit!;
+        _out.WriteLine($"clamped to {hit} inside 300x40");
+
+        Assert.True(hit.Right <= 300, $"right edge {hit.Right} escapes the artwork");
+        Assert.True(hit.Bottom <= 40, $"bottom edge {hit.Bottom} escapes the artwork");
+    }
+
+    /// <summary>A zero-area region is an authoring slip, not a control. Dropped rather than kept as
+    /// a button nobody can hit and nothing can draw.</summary>
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(20, 0)]
+    [InlineData(0, 0)]
+    public void A_zero_area_connect_region_is_dropped(int w, int h)
+    {
+        var folder = MakeSkin($"zero-{w}-{h}", airPlayArt: true, airPlayJson: $$"""
+        { "airplay": { "connectHit": { "x": 200, "y": 4, "w": {{w}}, "h": {{h}} } } }
+        """);
+
+        var bar = SkinLoader.Load(folder).AirPlay!;
+        _out.WriteLine($"{w}x{h} -> {bar.ConnectHit?.ToString() ?? "(dropped)"}");
+
+        Assert.Null(bar.ConnectHit);
+    }
+
+    /// <summary>A colour without a region is not a button. It must not resurrect one, and it must
+    /// not fail the skin either.</summary>
+    [Fact]
+    public void A_connect_colour_with_no_region_is_not_a_button()
+    {
+        var folder = MakeSkin("colour-only", airPlayArt: true, airPlayJson: """
+        { "airplay": { "connectColor": "#FF00FF00" } }
+        """);
+
+        var skin = SkinLoader.Load(folder);
+        _out.WriteLine($"valid={skin.IsValid} connectHit={skin.AirPlay!.ConnectHit?.ToString() ?? "(none)"}");
+
+        Assert.True(skin.IsValid);
+        Assert.Null(skin.AirPlay.ConnectHit);
+    }
 }

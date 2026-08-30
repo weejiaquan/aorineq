@@ -2,7 +2,7 @@ using System.Drawing.Imaging;
 
 namespace AorinEQ.Core;
 
-/// <summary>Puts the three shipped skins into the user's skins folder, rendering them from
+/// <summary>Puts the shipped skins into the user's skins folder, rendering them from
 /// <see cref="SkinArt"/> the first time they are missing.
 ///
 /// GENERATED AT RUN TIME rather than installed. The exe is a single file and the skins folder is
@@ -16,8 +16,6 @@ namespace AorinEQ.Core;
 /// makes this safe to call on every launch, which is how it stays true after an update adds one.</summary>
 public static class DefaultSkins
 {
-    private static readonly string[] Layers = ["empty", "full", "airplay-empty", "airplay-full"];
-
     /// <summary>Writes any missing shipped skin under <paramref name="skinsRoot"/> and returns the
     /// names it created. An empty result is the normal case after the first run.</summary>
     public static IReadOnlyList<string> EnsureInstalled(string skinsRoot)
@@ -37,7 +35,7 @@ public static class DefaultSkins
             {
                 Directory.CreateDirectory(staging);
 
-                foreach (var layer in Layers)
+                foreach (var layer in SkinArt.Layers)
                 {
                     using var bitmap = SkinArt.Draw(style, layer);
                     bitmap.Save(Path.Combine(staging, layer + ".png"), ImageFormat.Png);

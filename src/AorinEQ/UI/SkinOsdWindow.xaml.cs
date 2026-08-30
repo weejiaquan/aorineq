@@ -39,6 +39,11 @@ public partial class SkinOsdWindow : Window
     private string? _airPlayChosenId;
 
     public event Action<AorinEQ.Core.Raop.AirPlayDevice>? AirPlayDeviceChosen;
+    /// <summary>Connect to the receiver already named in settings. Distinct from
+    /// <see cref="AirPlayDeviceChosen"/>, which carries a device the menu had in hand: this one
+    /// is raised when it does not, which is every menu opened before anything has been
+    /// discovered.</summary>
+    public event Action? AirPlayConnectChosenRequested;
     public event Action? AirPlayDisconnectRequested;
     public event Action? AirPlayRescanRequested;
     public event Action<int>? AirPlayVolumeSetByUser;
@@ -81,6 +86,11 @@ public partial class SkinOsdWindow : Window
         Height = _view.LogicalHeight;
 
         _airPlayBar.DropdownRequested += OpenAirPlayMenu;
+        // The strip's own power button. It raises the SAME two events the dropdown's
+        // Connect and Disconnect rows do, so the button and the menu can never mean
+        // different things.
+        _airPlayBar.ConnectChosenRequested += () => AirPlayConnectChosenRequested?.Invoke();
+        _airPlayBar.DisconnectRequested += () => AirPlayDisconnectRequested?.Invoke();
         _airPlayBar.VolumeSetByUser += percent => AirPlayVolumeSetByUser?.Invoke(percent);
         _airPlayBar.VolumeScrolled += notch => AirPlayVolumeScrolled?.Invoke(notch);
 
@@ -199,6 +209,7 @@ public partial class SkinOsdWindow : Window
         Activate();
         AirPlayMenu.Show(_airPlayBar, _airPlayDevices, _airPlayCurrentId, _airPlayChosenId,
             device => AirPlayDeviceChosen?.Invoke(device),
+            () => AirPlayConnectChosenRequested?.Invoke(),
             () => AirPlayDisconnectRequested?.Invoke(),
             () => AirPlayRescanRequested?.Invoke(),
             closed: () =>

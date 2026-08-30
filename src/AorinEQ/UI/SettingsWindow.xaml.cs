@@ -608,7 +608,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 };
                 SkinCombo.Items.Add(item);
             }
-            SelectByTag(SkinCombo, currentSkinName);
+            // Resolve rather than leave it blank: an empty name IS the default skin now,
+            // and a combo showing nothing while the OSD shows a skin is a disagreement.
+            SelectByTag(SkinCombo, SkinArt.Resolve(currentSkinName));
         }
         finally
         {

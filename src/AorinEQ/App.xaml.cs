@@ -2709,9 +2709,9 @@ public partial class App : System.Windows.Application
     /// the SAME loader the OSD uses rather than cached, so a skin edited in place reaches both.</summary>
     private SkinInfo? CurrentSkinInfo()
     {
-        if (_settings.OsdStyle != OsdStyles.Skin || string.IsNullOrEmpty(_settings.SkinName))
-            return null;
-        var info = SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), _settings.SkinName));
+        if (_settings.OsdStyle != OsdStyles.Skin) return null;
+        var folder = Path.Combine(ApoPaths.GetSkinsRoot(), SkinArt.Resolve(_settings.SkinName));
+        var info = SkinLoader.Load(folder);
         return info.IsValid ? info : null;
     }
 
@@ -2784,6 +2784,10 @@ public partial class App : System.Windows.Application
         // Set BEFORE ShowVolume: both windows measure the strip into their own height, and
         // ShowVolume is what positions them against that height.
         var bar = CurrentAirPlayBarState();
+
+        // The strip is about to offer a device list, so make sure there is one to offer. Guarded
+        // to a single pass while nothing has been found - see EnsureAirPlayDevicesDiscovered.
+        if (bar.Visible) EnsureAirPlayDevicesDiscovered();
 
         if (_useSkinOsd && _skinOsd is not null)
         {
@@ -2872,7 +2876,7 @@ public partial class App : System.Windows.Application
     {
         _osd!.ApplyConfig(s);
 
-        if (s.OsdStyle != OsdStyles.Skin || string.IsNullOrEmpty(s.SkinName))
+        if (s.OsdStyle != OsdStyles.Skin)
         {
             _useSkinOsd = false;
             _loadedSkinFolder = null;
@@ -2882,7 +2886,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        var info = SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), s.SkinName));
+        var info = SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), SkinArt.Resolve(s.SkinName)));
         if (!info.IsValid)
         {
             _tray?.ShowWarning(info.Error ?? "Skin not found.");
