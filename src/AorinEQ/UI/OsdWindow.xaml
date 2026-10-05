@@ -96,6 +96,26 @@
             </Grid>
         </Border>
     </Grid>
+    <!-- device notice: the dark-pill plate with a name on it instead of a slider. It takes the
+         place of StyleHost while it is up (see ShowNotice) and is drawn the same whatever the OSD
+         style is - including "skin", so no skin has to ship artwork for it. The name is already
+         cut to length by DeviceNotice; the trimming here is for the names that are short in
+         characters and still wide in pixels, which is most of them in CJK. -->
+    <Border x:Name="NoticeRoot" Visibility="Collapsed" CornerRadius="12" Background="#F2202020" Padding="16,10">
+        <Border.Effect>
+            <DropShadowEffect Opacity="0.4" BlurRadius="16" ShadowDepth="0" />
+        </Border.Effect>
+        <Grid VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="32" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="NoticeGlyphText" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18"
+                       Foreground="White" VerticalAlignment="Center" />
+            <TextBlock x:Name="NoticeText" Grid.Column="1" Foreground="White" FontSize="14"
+                       FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </Grid>
+    </Border>
     <loc:AirPlayBarView x:Name="AirPlayBar" Visibility="Collapsed" Margin="0,6,0,0" />
     </StackPanel>
 </Window>

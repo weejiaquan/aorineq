@@ -12,4 +12,5 @@ namespace AorinEQ.UI;
 /// </summary>
 public sealed record OsdSettings(
     string Style, string SkinName, string Anchor, int OffsetX, int OffsetY,
-    double HideDelaySeconds, bool AnimationEnabled, int AnimationMs, int StepPercent);
+    double HideDelaySeconds, bool AnimationEnabled, int AnimationMs, int StepPercent,
+    bool DeviceNoticeEnabled);

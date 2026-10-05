@@ -54,7 +54,10 @@ public sealed record Settings(
     // upgrade, and where Settings lands when no page was asked for. False for everyone upgrading
     // into this release, which is exactly who needs telling that Discover is there.
     bool HasSeenDiscover = false,
-    AirPlaySetting? AirPlay = null)
+    AirPlaySetting? AirPlay = null,
+    // On for everyone, including a settings file written before this existed: a property the
+    // json lacks takes this default, and a notice nobody was told about is how it gets found.
+    bool DeviceNoticeEnabled = true)
 {
     public static Settings Default { get; } = new(50, false);
 
