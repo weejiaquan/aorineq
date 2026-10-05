@@ -186,4 +186,22 @@ public class DeviceNoticeTests
         Assert.Equal(new string('a', DeviceNotice.MaxNameLength - 2) + "…", cut);
         Assert.DoesNotContain(cut, char.IsSurrogate);
     }
+
+    [Theory]
+    [InlineData(0.5)]
+    [InlineData(1.5)] // the default hide delay: right for a bar you asked for, too brief to catch unprompted
+    [InlineData(4.0)]
+    public void A_notice_outlasts_a_short_hide_delay(double hideDelaySeconds)
+    {
+        var hold = DeviceNotice.HoldFor(TimeSpan.FromSeconds(hideDelaySeconds));
+
+        _out.WriteLine($"hide delay {hideDelaySeconds}s -> notice held {hold.TotalSeconds}s");
+        Assert.Equal(TimeSpan.FromSeconds(4), hold);
+    }
+
+    [Fact]
+    public void A_notice_is_not_cut_shorter_than_a_long_hide_delay()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(7.5), DeviceNotice.HoldFor(TimeSpan.FromSeconds(7.5)));
+    }
 }

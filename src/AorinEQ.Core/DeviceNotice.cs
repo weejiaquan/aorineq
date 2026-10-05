@@ -21,6 +21,10 @@ public sealed class DeviceNotice
     /// ("Headphones (WH-1000XM4 Hands-Free AG Audio)" is 43), and a notice has one line.</summary>
     public const int MaxNameLength = 48;
 
+    /// <summary>The least time a notice stays up. The volume OSD's hide delay is tuned for a bar
+    /// you are already looking at because you pressed a key; nobody is looking when a DAC drops.</summary>
+    public static readonly TimeSpan MinHold = TimeSpan.FromSeconds(4);
+
     private string? _deviceId;
 
     /// <param name="initialDeviceId">The device the app starts on, or null when there is none.
@@ -45,6 +49,10 @@ public sealed class DeviceNotice
         if (deviceId is null) return noDeviceText;
         return string.IsNullOrWhiteSpace(deviceName) ? unnamedDeviceText : Truncate(deviceName.Trim());
     }
+
+    /// <summary>How long a notice stays up: the OSD's own hide delay, but never less than
+    /// <see cref="MinHold"/>.</summary>
+    public static TimeSpan HoldFor(TimeSpan hideDelay) => hideDelay > MinHold ? hideDelay : MinHold;
 
     /// <summary>Cuts a name to <see cref="MaxNameLength"/> characters, the last of them an
     /// ellipsis. Never splits a surrogate pair: half of one renders as a replacement box.</summary>

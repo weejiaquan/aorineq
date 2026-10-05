@@ -26,6 +26,7 @@ public partial class OsdWindow : Window
     private const double DefaultMargin = 12; // matches OsdPosition.Compute's own default
 
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+    private TimeSpan _hideDelay = TimeSpan.FromMilliseconds(1500);
     /// <summary>Which fade-out is still allowed to hide this window. Cancelling a fade does not
     /// cancel its Completed event — see <see cref="OsdFade"/>. Identical to SkinOsdWindow's,
     /// because both windows fade out the same way and hit the same bug.</summary>
@@ -141,7 +142,8 @@ public partial class OsdWindow : Window
         _offsetY = s.OsdOffsetY;
         _animationEnabled = s.AnimationEnabled;
         _fadeDuration = TimeSpan.FromMilliseconds(s.AnimationMs);
-        _hideTimer.Interval = TimeSpan.FromSeconds(s.HideDelaySeconds);
+        _hideDelay = TimeSpan.FromSeconds(s.HideDelaySeconds);
+        _hideTimer.Interval = _hideDelay;
 
         ApplyStyle();
     }
@@ -193,13 +195,13 @@ public partial class OsdWindow : Window
         // minimal-bar sits flush against the edge(s) its anchor names (margin 0); the two
         // center-vertical anchors (left-center/right-center) aren't against a top/bottom edge,
         // so they keep the standard margin. dark-pill always uses the standard margin.
-        Present(wa, isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin);
+        Present(wa, isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin, _hideDelay);
     }
 
     /// <summary>Shows a line of text in place of the volume bar - the default playback device
     /// changing. It is the same window, so it lands on the same anchor, never takes focus, holds
-    /// while hovered and fades on the same timer; the next <see cref="ShowVolume"/> puts the bar
-    /// back.
+    /// while hovered and fades on the same timer - held for <see cref="DeviceNotice.HoldFor"/>,
+    /// longer than the bar; the next <see cref="ShowVolume"/> puts the bar back.
     ///
     /// The plate grows with the name up to <see cref="NoticeMaxWidth"/> and trims beyond it, so a
     /// long name costs width before it costs letters and never leaves the plate.</summary>
@@ -215,12 +217,12 @@ public partial class OsdWindow : Window
         Width = Math.Max(DarkPillWidth, NoticeRoot.DesiredSize.Width);
         Height = DarkPillHeight;
 
-        Present(SystemParameters.WorkArea, DefaultMargin);
+        Present(SystemParameters.WorkArea, DefaultMargin, DeviceNotice.HoldFor(_hideDelay));
     }
 
-    /// <summary>Places the window, already sized, on its anchor and shows it with the hide delay
-    /// restarted. Shared by everything this window can show.</summary>
-    private void Present(Rect wa, double margin)
+    /// <summary>Places the window, already sized, on its anchor and shows it, to hide again after
+    /// <paramref name="hold"/>. Shared by everything this window can show.</summary>
+    private void Present(Rect wa, double margin, TimeSpan hold)
     {
         double left, top;
         try
@@ -242,6 +244,7 @@ public partial class OsdWindow : Window
         CancelFade();
         Show();
         _hideTimer.Stop();
+        _hideTimer.Interval = hold;
         _hideTimer.Start(); // both paths auto-hide; IsMouseOver blocks the tick while hovered
     }
 

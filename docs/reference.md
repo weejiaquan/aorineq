@@ -141,7 +141,7 @@ All four support:
 - **Volume step** — 1, 2 or 5 % per key press.
 - **Announce device changes** — on by default. Whenever the Windows default playback device
   changes, whether Windows moved it or you did, the new device's name appears where the OSD does,
-  for the same hide delay. A name longer than 48 characters is cut with an ellipsis; "No output
+  for four seconds, or the hide delay if that is longer. A name longer than 48 characters is cut with an ellipsis; "No output
   device" is shown when nothing is left to play through. It is always drawn as a plain dark plate
   — in every style, including a custom skin, so skins need no artwork for it — and it is
   AorinEQ's own window rather than a Windows notification, so Do Not Disturb does not suppress it.
