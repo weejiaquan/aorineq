@@ -57,8 +57,8 @@ is already in force, so nothing jumps and nothing is unmuted behind your back.
 
 AorinEQ remembers a volume (and mute) per playback device and follows the Windows default device.
 Plug in headphones, get the level you last used on them; unplug, get the speakers' level back.
-Device switches update the tray silently — no OSD, matching Windows' own behaviour. Settings shows
-how many devices are remembered.
+Device switches do not show the volume OSD, matching Windows' own behaviour — they show the
+[device notice](#the-osd) instead. Settings shows how many devices are remembered.
 
 ### The tray icon
 
@@ -139,6 +139,13 @@ All four support:
 - **Hide delay** — 0.5 to 5 seconds. Hovering the OSD holds it open.
 - **Animation** — fade on/off, 50–500 ms.
 - **Volume step** — 1, 2 or 5 % per key press.
+- **Announce device changes** — on by default. Whenever the Windows default playback device
+  changes, whether Windows moved it or you did, the new device's name appears where the OSD does,
+  for the same hide delay. A name longer than 48 characters is cut with an ellipsis; "No output
+  device" is shown when nothing is left to play through. It is always drawn as a plain dark plate
+  — in every style, including a custom skin, so skins need no artwork for it — and it is
+  AorinEQ's own window rather than a Windows notification, so Do Not Disturb does not suppress it.
+  Starting AorinEQ announces nothing, and one switch is one notice.
 
 The OSD never takes focus, and drag/click/scroll on it set the volume.
 

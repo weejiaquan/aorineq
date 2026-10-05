@@ -58,6 +58,7 @@ public partial class App : System.Windows.Application
     private OnboardingWindow? _onboarding;
     private OnboardingWindow? _startupWizard; // blocking first-run wizard, while it's up
     private DeviceVolumeStates _deviceStates = new(Settings.Default);
+    private DeviceNotice _deviceNotice = new(null);
     private string _settingsPath = "";
     // Single source of truth for everything persisted to settings.json. Every field (volume
     // percent/mute, RunAsAdmin, all OSD fields) is updated here via `with { }` before SaveSettings
@@ -410,6 +411,8 @@ public partial class App : System.Windows.Application
         {
             _deviceStates = new DeviceVolumeStates(settings);
             _deviceStates.SwitchTo(AudioEndpoint.GetDefaultRenderEndpointId());
+            // Seeded with the device the app starts on, so starting up is not announced as a switch.
+            _deviceNotice = new DeviceNotice(_deviceStates.ActiveId);
 
             // Both modes need the endpoint backend now: system mode for the volume itself,
             // eapo mode for default-device tracking (per-device state switching) and the
@@ -2373,13 +2376,17 @@ public partial class App : System.Windows.Application
 
     /// <summary>The Windows default render device changed: swap the active per-device state
     /// (both modes), re-render the config so a first-seen device gets its block, and refresh
-    /// the tray SILENTLY — no OSD, matching the native behavior on device switches. In system
-    /// mode the endpoint backend's follow-up Changed event then adopts the new device's
+    /// the tray. No VOLUME OSD, matching the native behavior on device switches — the device
+    /// notice is what says a switch happened, when <see cref="DeviceNotice"/> decides it was one.
+    /// In system mode the endpoint backend's follow-up Changed event then adopts the new device's
     /// actual volume into the freshly-switched state.</summary>
     private void OnDefaultDeviceChanged()
     {
         _deviceStates.SwitchTo(AudioEndpoint.GetDefaultRenderEndpointId());
         RefreshActiveDeviceName();
+        if (_deviceNotice.Next(_settings.DeviceNoticeEnabled, _deviceStates.ActiveId, _activeDeviceName,
+                Loc.T("osd.device.none"), Loc.T("osd.device.changed")) is { } notice)
+            ShowDeviceNotice(notice);
         RenderEqConfig();
         _tray?.Update(ActiveState.Percent, ActiveState.Muted);
         SaveSettings();
@@ -2791,6 +2798,7 @@ public partial class App : System.Windows.Application
 
         if (_useSkinOsd && _skinOsd is not null)
         {
+            _osd!.Hide(); // a device notice may still be up on it — see ShowDeviceNotice
             _skinOsd.SetAirPlay(bar);
             _skinOsd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id, ChosenAirPlayId());
             _skinOsd.ShowVolume(percent, muted, interactive);
@@ -2801,6 +2809,19 @@ public partial class App : System.Windows.Application
             _osd.SetAirPlayDevices(_airPlayDevices, AirPlay.Current?.Id, ChosenAirPlayId());
             _osd.ShowVolume(percent, muted, interactive);
         }
+    }
+
+    /// <summary>Shows the device notice. Always on the standard <see cref="OsdWindow"/>, which
+    /// draws it itself: a skin is somebody's artwork for a volume bar and has nowhere to put a
+    /// sentence. Only one OSD window is ever visible at a time, so a skin OSD that is up gives way.
+    ///
+    /// The window can be missing: the endpoint backend is listening before the OSD is built, and a
+    /// setup dialog in between pumps the dispatcher.</summary>
+    private void ShowDeviceNotice(string text)
+    {
+        if (_osd is null) return;
+        _skinOsd?.Hide();
+        _osd.ShowNotice(text);
     }
 
     /// <summary>Shared handler for both OsdWindow's and SkinOsdWindow's PercentChangedByUser —
@@ -2832,6 +2853,7 @@ public partial class App : System.Windows.Application
             AnimationEnabled = o.AnimationEnabled,
             AnimationMs = o.AnimationMs,
             StepPercent = o.StepPercent,
+            DeviceNoticeEnabled = o.DeviceNoticeEnabled,
         };
         _deviceStates.StepPercent = _settings.StepPercent;
         ApplyOsdConfig(_settings);

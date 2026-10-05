@@ -569,6 +569,18 @@
                         <Slider x:Name="AnimationDurationSlider" Width="200" Minimum="50" Maximum="500"
                                 ValueChanged="OnAnimationDurationChanged" />
                     </ui:CardControl>
+
+                    <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.device-notice">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.device-notice.title}" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="{loc:T settings.device-notice.subtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="DeviceNoticeBox"
+                                         Checked="OnDeviceNoticeChanged" Unchecked="OnDeviceNoticeChanged" />
+                    </ui:CardControl>
                 </StackPanel>
             </ScrollViewer>
 

@@ -372,4 +372,35 @@ public class SettingsTests : IDisposable
         Assert.Equal(Languages.Auto, loaded.Language);
         Assert.False(loaded.HasSeenDiscover);
     }
+
+    /// <summary>The device notice is ON for an install that has never heard of it. Proved against
+    /// what Save really writes with the one property taken back out, rather than a hand-typed
+    /// file, so the test cannot pass by naming a property the serialiser does not use.</summary>
+    [Fact]
+    public void The_device_notice_is_on_for_a_settings_file_written_before_it_existed()
+    {
+        new Settings(73, true, OsdStyle: "fluent").Save(_path);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_path))!.AsObject();
+        Assert.True(json.Remove(nameof(Settings.DeviceNoticeEnabled)),
+            "Save did not write DeviceNoticeEnabled, so removing it proves nothing.");
+        File.WriteAllText(_path, json.ToJsonString());
+        _out.WriteLine("older settings file: " + File.ReadAllText(_path));
+
+        var loaded = Settings.Load(_path);
+
+        Assert.Equal(73, loaded.Percent); // the file was read, not replaced by Default
+        Assert.Equal("fluent", loaded.OsdStyle);
+        Assert.True(loaded.DeviceNoticeEnabled);
+    }
+
+    [Fact]
+    public void Turning_the_device_notice_off_survives_a_restart()
+    {
+        Assert.True(Settings.Default.DeviceNoticeEnabled);
+
+        (Settings.Default with { DeviceNoticeEnabled = false }).Save(_path);
+        _out.WriteLine("saved json: " + File.ReadAllText(_path));
+
+        Assert.False(Settings.Load(_path).DeviceNoticeEnabled);
+    }
 }

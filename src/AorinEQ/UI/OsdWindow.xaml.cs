@@ -18,6 +18,8 @@ public partial class OsdWindow : Window
     // the XAML FontFamily lists both so whichever is installed renders them.
     private const string GlyphVolume = "\uE767"; // 'Volume'
     private const string GlyphMute = "\uE74F";   // 'Mute'
+    private const string GlyphDevice = "\uE7F5"; // 'Speakers'
+    private const double NoticeMaxWidth = 480;
     private const double DarkPillWidth = 300;
     private const double DarkPillHeight = 64;
     private const double MinimalBarWidthFraction = 0.4; // 40% of the work-area width
@@ -85,6 +87,7 @@ public partial class OsdWindow : Window
     public OsdWindow()
     {
         InitializeComponent();
+        NoticeGlyphText.Text = GlyphDevice;
         _hideTimer.Tick += (_, _) =>
         {
             // IsMouseOver: user is interacting; IsMouseCaptureWithin: the volume Slider's Thumb
@@ -145,6 +148,9 @@ public partial class OsdWindow : Window
 
     public void ShowVolume(int percent, bool muted, bool interactive)
     {
+        NoticeRoot.Visibility = Visibility.Collapsed;
+        StyleHost.Visibility = Visibility.Visible;
+
         _updatingFromCode = true;
         VolumeSlider.Value = percent;
         MinimalSlider.Value = percent;
@@ -187,8 +193,35 @@ public partial class OsdWindow : Window
         // minimal-bar sits flush against the edge(s) its anchor names (margin 0); the two
         // center-vertical anchors (left-center/right-center) aren't against a top/bottom edge,
         // so they keep the standard margin. dark-pill always uses the standard margin.
-        double margin = isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin;
+        Present(wa, isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin);
+    }
 
+    /// <summary>Shows a line of text in place of the volume bar - the default playback device
+    /// changing. It is the same window, so it lands on the same anchor, never takes focus, holds
+    /// while hovered and fades on the same timer; the next <see cref="ShowVolume"/> puts the bar
+    /// back.
+    ///
+    /// The plate grows with the name up to <see cref="NoticeMaxWidth"/> and trims beyond it, so a
+    /// long name costs width before it costs letters and never leaves the plate.</summary>
+    public void ShowNotice(string text)
+    {
+        NoticeText.Text = text;
+        StyleHost.Visibility = Visibility.Collapsed;
+        // The strip belongs to the volume bar. ShowVolume's caller sets it again before every show.
+        AirPlayBar.Visibility = Visibility.Collapsed;
+        NoticeRoot.Visibility = Visibility.Visible;
+
+        NoticeRoot.Measure(new System.Windows.Size(NoticeMaxWidth, double.PositiveInfinity));
+        Width = Math.Max(DarkPillWidth, NoticeRoot.DesiredSize.Width);
+        Height = DarkPillHeight;
+
+        Present(SystemParameters.WorkArea, DefaultMargin);
+    }
+
+    /// <summary>Places the window, already sized, on its anchor and shows it with the hide delay
+    /// restarted. Shared by everything this window can show.</summary>
+    private void Present(Rect wa, double margin)
+    {
         double left, top;
         try
         {
