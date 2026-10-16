@@ -40,6 +40,23 @@ public sealed record SkinAirPlay(
     SkinText? Name, SkinText? Percent, SkinHitRect DropdownHit,
     SkinHitRect? ConnectHit = null, string? ConnectColor = null);
 
+/// <summary>Where the device-changed glyph sits on a notice and how it is drawn. A null Color
+/// means "draw it in the text colour".</summary>
+public sealed record SkinNoticeGlyph(bool Show, int X, int Y, double Size, string? Color);
+
+/// <summary>The optional look of the device-changed notice: a plate (colours, corner, padding)
+/// that a skin may replace wholesale with notice art. When ArtPath is set, Width/Height are the
+/// art's logical frame size and X/Y on Text and Glyph are positions inside it; TextWidth bounds
+/// the line so a long device name cannot run off the art.</summary>
+public sealed record SkinNotice(
+    string Background, string? Border, double CornerRadius, double PadX, double PadY,
+    SkinText Text, SkinNoticeGlyph Glyph,
+    string? ArtPath = null, bool ArtIsGif = false, int ArtFrames = 1,
+    int Width = 0, int Height = 0, int TextWidth = 0)
+{
+    public bool HasArt => ArtPath is not null;
+}
+
 /// <summary>Result of loading one skin folder. Always has Name/Folder/EmptyPath/FullPath populated;
 /// on failure Width/Height are 0 and Error describes what went wrong. Width/Height are the LOGICAL
 /// frame size: for a sprite-sheet PNG that is height/frames; for a GIF the logical screen size.
@@ -54,7 +71,8 @@ public sealed record SkinInfo(string Name, string Folder, string EmptyPath, stri
     double Fps, int EmptyFrames, int FullFrames, bool EmptyIsGif, bool FullIsGif,
     int FillStartX, int FillEndX,
     string? MutedPath, bool MutedIsGif, int MutedFrames, double MutedDim,
-    SkinMeta Meta, string? Error, SkinAirPlay? AirPlay = null, string? AirPlayError = null)
+    SkinMeta Meta, string? Error, SkinAirPlay? AirPlay = null, string? AirPlayError = null,
+    SkinNotice? Notice = null, string? NoticeError = null)
 {
     public bool IsValid => Error is null;
 
@@ -62,6 +80,10 @@ public sealed record SkinInfo(string Name, string Folder, string EmptyPath, stri
     /// the bar existed, and false for one whose AirPlay artwork did not load - both of which get
     /// the app's native AirPlay bar instead, so neither is a broken experience.</summary>
     public bool HasAirPlay => AirPlay is not null;
+
+    /// <summary>Whether the skin describes its own device-changed notice. False for every skin
+    /// written before the notice was themeable; those get the default dark pill.</summary>
+    public bool HasNotice => Notice is not null;
 
     /// <summary>Whether the skin ships dedicated muted-state artwork.</summary>
     public bool HasMuted => MutedPath is not null;
@@ -134,6 +156,7 @@ public static class SkinLoader
             // skin.json is parsed before the images: declared sheet frame counts are needed to
             // validate sheet geometry below.
             JsonElement? airPlayJson = null;
+            JsonElement? noticeJson = null;
             string jsonPath = Path.Combine(folder, "skin.json");
             if (File.Exists(jsonPath))
             {
@@ -163,6 +186,7 @@ public static class SkinLoader
                 fillStartJson = parsed?.FillStartX;
                 fillEndJson = parsed?.FillEndX;
                 airPlayJson = parsed?.AirPlay;
+                noticeJson = parsed?.Notice;
                 if (parsed is not null)
                     meta = SkinMeta.Create(
                         JsonString(parsed.Title), JsonString(parsed.Author),
@@ -205,6 +229,7 @@ public static class SkinLoader
             // mismatched AirPlay layer must not cost somebody the volume OSD they actually use -
             // it loses its own bar, says why, and the app draws its native AirPlay bar instead.
             var (airPlay, airPlayError) = LoadAirPlay(folder, airPlayJson);
+            var (notice, noticeError) = LoadNotice(folder, noticeJson);
 
             // Fill range: where the bar actually lives inside the (possibly wider, decorative)
             // image. Defaults to the full width; values clamp into the image, but an inverted or
@@ -219,7 +244,7 @@ public static class SkinLoader
                 fps, empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
                 empty.IsGif, full.IsGif, fillStart, fillEnd,
                 mutedPath, mutedIsGif, mutedPath is null || mutedIsGif ? 1 : mutedFrames, mutedDim,
-                meta, null, airPlay, airPlayError);
+                meta, null, airPlay, airPlayError, notice, noticeError);
         }
         catch (Exception ex)
         {
@@ -330,6 +355,75 @@ public static class SkinLoader
             connect, json?.ConnectColor), null);
     }
 
+    private const double MaxCornerRadius = 64;
+    private const double MaxPadding = 64;
+
+    /// <summary>The dark-pill plate: what a notice looks like when nothing says otherwise.</summary>
+    public static readonly SkinNotice DefaultNotice = new(
+        "#F2202020", null, 12, 16, 10,
+        new SkinText(true, 0, 0, "#FFFFFFFF", "Segoe UI", 14, Bold: true),
+        new SkinNoticeGlyph(true, 16, 0, 18, null));
+
+    private static SkinNoticeJson? ParseNotice(JsonElement? element)
+    {
+        if (element is not { ValueKind: JsonValueKind.Object } obj) return null;
+        try { return obj.Deserialize<SkinNoticeJson>(JsonOptions); }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>Loads the optional notice look. Soft like the AirPlay bar: nothing here can
+    /// invalidate the volume skin, and every failure falls back to the default plate.</summary>
+    private static (SkinNotice? Notice, string? Error) LoadNotice(string folder, JsonElement? raw)
+    {
+        var json = ParseNotice(raw);
+        bool hasArt = File.Exists(Path.Combine(folder, "notice.png"))
+                   || File.Exists(Path.Combine(folder, "notice.gif"));
+        if (json is null && !hasArt) return (null, null);
+
+        var d = DefaultNotice;
+        double fontSize = Math.Clamp(json?.Text?.FontSize ?? d.Text.FontSize, MinFontSize, MaxFontSize);
+        var text = new SkinText(true, json?.Text?.X ?? 0, json?.Text?.Y ?? 0,
+            Color: EmptyToDefault(json?.Text?.Color, d.Text.Color),
+            FontFamily: EmptyToDefault(json?.Text?.FontFamily, d.Text.FontFamily),
+            FontSize: fontSize,
+            Bold: json?.Text?.Bold ?? d.Text.Bold,
+            Align: NormalizeAlign(json?.Text?.Align));
+        double glyphSize = Math.Clamp(json?.Glyph?.Size ?? d.Glyph.Size, MinFontSize, MaxFontSize);
+        var plate = d with
+        {
+            Background = EmptyToDefault(json?.Background, d.Background),
+            Border = NullIfBlank(json?.Border),
+            CornerRadius = Math.Clamp(json?.CornerRadius ?? d.CornerRadius, 0, MaxCornerRadius),
+            PadX = Math.Clamp(json?.Padding?.X ?? d.PadX, 0, MaxPadding),
+            PadY = Math.Clamp(json?.Padding?.Y ?? d.PadY, 0, MaxPadding),
+            Text = text,
+            Glyph = new SkinNoticeGlyph(json?.Glyph?.Show ?? true, json?.Glyph?.X ?? d.Glyph.X, 0,
+                glyphSize, NullIfBlank(json?.Glyph?.Color)),
+        };
+        if (!hasArt) return (plate, null);
+
+        int frames = Math.Max(1, json?.Frames ?? 1);
+        var art = ResolveLayer(folder, "notice", frames);
+        if (art.Error is not null) return (null, art.Error);
+        int w = art.LogicalWidth, h = art.LogicalHeight;
+
+        // Defaults centre the glyph and the text line vertically; 1.33 is the line-box-to-em ratio
+        // the AirPlay power glyph is centred with as well.
+        int textX = Math.Clamp(json?.Text?.X ?? 48, 0, w);
+        int textY = Math.Clamp(json?.Text?.Y ?? (h - (int)Math.Round(fontSize * 1.33)) / 2, 0, h);
+        int glyphX = Math.Clamp(json?.Glyph?.X ?? 16, 0, w);
+        int glyphY = Math.Clamp(json?.Glyph?.Y ?? (int)((h - glyphSize) / 2), 0, h);
+        int textWidth = Math.Clamp(json?.TextWidth ?? w - textX - 12, 0, w - textX);
+
+        return (plate with
+        {
+            Text = text with { X = textX, Y = textY },
+            Glyph = plate.Glyph with { X = glyphX, Y = glyphY },
+            ArtPath = art.Path, ArtIsGif = art.IsGif, ArtFrames = art.IsGif ? 1 : frames,
+            Width = w, Height = h, TextWidth = textWidth,
+        }, null);
+    }
+
     /// <summary>Pulls a declared hit region inside the artwork it belongs to.</summary>
     private static SkinHitRect ClampHit(SkinHitJson h, int width, int height)
     {
@@ -415,6 +509,9 @@ public static class SkinLoader
         // wrong TYPE here ("airplay": 42) must not throw and take the whole skin down with it.
         public JsonElement? AirPlay { get; set; }
 
+        // Raw for the same reason: "notice": 42 must not throw and cost the skin.
+        public JsonElement? Notice { get; set; }
+
         // The metadata fields deserialize as raw JsonElements, unlike everything above, because
         // a wrong TYPE here must not throw: System.Text.Json would reject "title": 42 for a
         // string property and the whole skin would fail to load over a credit line. Kind checks
@@ -464,5 +561,29 @@ public static class SkinLoader
         public double? ShadowBlur { get; set; }
         public double? ShadowDepth { get; set; }
         public string? Align { get; set; }
+    }
+
+    private sealed class SkinNoticeJson
+    {
+        public string? Background { get; set; }
+        public string? Border { get; set; }
+        public double? CornerRadius { get; set; }
+        public SkinPadJson? Padding { get; set; }
+        public SkinNoticeTextJson? Text { get; set; }
+        public int? TextWidth { get; set; }
+        public SkinNoticeGlyphJson? Glyph { get; set; }
+        public int? Frames { get; set; }
+    }
+    private sealed class SkinPadJson { public double? X { get; set; } public double? Y { get; set; } }
+    private sealed class SkinNoticeTextJson
+    {
+        public int? X { get; set; } public int? Y { get; set; }
+        public string? Color { get; set; } public string? FontFamily { get; set; }
+        public double? FontSize { get; set; } public bool? Bold { get; set; } public string? Align { get; set; }
+    }
+    private sealed class SkinNoticeGlyphJson
+    {
+        public bool? Show { get; set; } public int? X { get; set; } public int? Y { get; set; }
+        public double? Size { get; set; } public string? Color { get; set; }
     }
 }
