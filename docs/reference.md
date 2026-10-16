@@ -324,27 +324,29 @@ The line that names the new playback device when Windows' default moves (see
 
 - **A plate** — no `notice.png`. AorinEQ draws a rounded rectangle, the device name and a small
   device glyph, using the block's colours, corner, padding and font. Text and glyph are laid out by
-  the padding, so `text.x`/`text.y`, `glyph.y` and `textWidth` have no effect here.
+  the padding, so `text.x`/`text.y`, `text.align`, `glyph.y` and `textWidth` have no effect here.
+  The skin's `scale` does not resize a plate.
 - **Art** — a `notice.png` (or `.gif`) is drawn instead of the plate, and the block places the
-  text and glyph on it. The art's own size is the notice's size. A GIF shows
+  text and glyph on it. The art is drawn at its own size
+  times the skin's `scale`, and the text and glyph sizes and positions scale with it. A GIF shows
   its **first frame** only; the notice does not animate. A PNG sprite sheet needs `frames`.
 
 Every field is optional; field names are case-insensitive.
 
 | Field | Default | |
 | --- | --- | --- |
-| `background` | `#F2202020` | plate colour, `#AARRGGBB` or `#RRGGBB`. Plate only |
-| `border` | none | plate outline colour. Plate only |
+| `background` | `#F2202020` | plate colour, `#AARRGGBB` or `#RRGGBB`; unparseable falls back to the default. Plate only |
+| `border` | none | plate outline colour, 1 px; unparseable falls back to the default. Plate only |
 | `cornerRadius` | 12 | clamped 0–64. Plate only |
 | `padding.x`, `padding.y` | 16, 10 | clamped 0–64. Plate only |
-| `text.color` | white | |
+| `text.color` | white | unparseable falls back to white |
 | `text.fontFamily` | Segoe UI | left at the default, it inherits AorinEQ's own font chain, so CJK device names still draw |
 | `text.fontSize` | 14 | clamped 4–200 |
 | `text.bold` | false | the default text is SemiBold; `true` makes it Bold |
-| `text.align` | `left` | `left`, `center` or `right`: what `text.x` anchors |
+| `text.align` | `left` | art only; `left`, `center` or `right`: aligns the name inside the `textWidth` box that starts at `text.x` |
 | `text.x`, `text.y` | 48, centred | art only; image pixels, clamped into the art |
 | `textWidth` | to the art's right edge less 12 | art only; bounds the line so a long name cannot run off the art, clamped to what is left right of `text.x` |
-| `glyph.show` | true | |
+| `glyph.show` | true | on a plate, `false` keeps the icon column: the text does not shift left |
 | `glyph.size` | 18 | clamped 4–200 |
 | `glyph.color` | the text colour | |
 | `glyph.x`, `glyph.y` | 16, centred | art only; image pixels, clamped into the art |
@@ -354,9 +356,10 @@ The notice text has **no outline and no shadow** — those belong to `percentTex
 labels, and are not read here. Put contrast in the artwork.
 
 A skin with neither a `notice` block nor `notice.*` art gets the dark pill. A `notice` block with
-art that is missing, mismatched with `frames`, or not a valid image fails **soft**: the volume skin
-is unaffected, the notice falls back to the dark pill, and the reason is kept with the skin.
-A `notice` that is not an object is ignored the same way.
+no art is simply a plate. Art that exists but is not a valid image, or whose height does not match
+`frames`, fails **soft**: the volume skin is unaffected, the notice falls back to the dark pill, and
+the reason is kept with the skin. A `notice` value that is not an object is treated as if the block
+were absent, so `notice.png`/`.gif`, if present, is still used with the defaults above.
 
 The four shipped skins each draw their own. A copy of one made before notices existed is topped up
 **additively** the next time AorinEQ starts: only when the folder has no `notice.*` file and
@@ -384,8 +387,8 @@ Skins travel as plain zip files. **Export…** in the designer writes one (regen
 `preview.png` from the installed pixels — a bundled preview in someone else's zip is never
 trusted, let alone extracted). **Import skin…** in Settings, or **Import…** in the designer,
 installs one. Only the known file names are ever extracted, from the archive root or one folder
-deep (including `notice.png`/`.gif`, so a shared notice arrives with its artwork), so a zip cannot write outside the skin folder; the old folder is moved aside and restored if
-anything fails. Zips are capped at 20 MB.
+deep (including `notice.png`/`.gif`, so a shared notice arrives with its artwork), so a zip
+cannot write outside the skin folder; the old folder is moved aside and restored if anything fails. Zips are capped at 20 MB.
 
 **Share…** in the designer exports the zip *and* copies a ready-to-fill
 [`aorineq://install-skin`](#install-a-skin) link template to your clipboard.
