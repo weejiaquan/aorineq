@@ -1,4 +1,6 @@
 using System.Drawing.Imaging;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace AorinEQ.Core;
 
@@ -13,11 +15,16 @@ namespace AorinEQ.Core;
 /// NEVER OVERWRITES. A folder that already exists is left exactly as it is, even if it looks
 /// nothing like what this would draw - somebody may have edited the shipped skin, and silently
 /// restoring it on the next start is the kind of behaviour that loses an evening's work. That also
-/// makes this safe to call on every launch, which is how it stays true after an update adds one.</summary>
+/// makes this safe to call on every launch, which is how it stays true after an update adds one.
+///
+/// The one addition to an existing shipped folder is a device notice (notice.png plus a "notice"
+/// block in skin.json) when it has neither - skins installed before notices existed. That only ever
+/// ADDS what is missing, and never to a folder whose name is not a shipped style, so it does not
+/// weaken the above.</summary>
 public static class DefaultSkins
 {
-    /// <summary>Writes any missing shipped skin under <paramref name="skinsRoot"/> and returns the
-    /// names it created. An empty result is the normal case after the first run.</summary>
+    /// <summary>Writes any missing shipped skin under <paramref name="skinsRoot"/>, adds a
+    /// missing notice to an existing one, and returns the names it created or topped up. An empty result is the normal case after the first run.</summary>
     public static IReadOnlyList<string> EnsureInstalled(string skinsRoot)
     {
         var created = new List<string>();
@@ -25,7 +32,11 @@ public static class DefaultSkins
         foreach (var style in SkinArt.All)
         {
             var folder = Path.Combine(skinsRoot, style);
-            if (Directory.Exists(folder)) continue;
+            if (Directory.Exists(folder))
+            {
+                if (TopUpNotice(folder, style)) created.Add(style);
+                continue;
+            }
 
             // Built beside the destination and moved into place, so a failure part-way through
             // cannot leave a half-written skin for SkinLoader to report as broken. A skin folder
@@ -58,6 +69,35 @@ public static class DefaultSkins
         }
 
         return created;
+    }
+
+    /// <summary>Adds the notice art and its skin.json block to a shipped skin that predates them.
+    /// Does nothing if the folder has any notice.* file or the JSON already has a "notice" key, and
+    /// leaves every other property of the JSON as it was. A folder it cannot read or write is
+    /// skipped: a missing notice only means the app's own plate is used.</summary>
+    private static bool TopUpNotice(string folder, string style)
+    {
+        try
+        {
+            if (Directory.GetFiles(folder, "notice.*").Length > 0) return false;
+
+            var jsonPath = Path.Combine(folder, "skin.json");
+            var root = File.Exists(jsonPath)
+                ? JsonNode.Parse(File.ReadAllText(jsonPath)) as JsonObject
+                : new JsonObject();
+            if (root is null || root.ContainsKey("notice")) return false;
+
+            using (var bitmap = SkinArt.Draw(style, "notice"))
+                bitmap.Save(Path.Combine(folder, "notice.png"), ImageFormat.Png);
+
+            root["notice"] = JsonNode.Parse(SkinArt.SkinJson(style))!["notice"]!.DeepClone();
+            File.WriteAllText(jsonPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return false;
+        }
     }
 
     private static void TryDelete(string folder)

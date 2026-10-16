@@ -60,7 +60,7 @@ public static class SkinArt
     /// <summary>Every layer <see cref="Draw"/> understands, in the order DefaultSkins writes them.
     /// muted is optional to the loader but not to these: all four ship one.</summary>
     public static readonly IReadOnlyList<string> Layers =
-        ["empty", "full", "muted", "airplay-empty", "airplay-full"];
+        ["empty", "full", "muted", "airplay-empty", "airplay-full", "notice"];
 
     /// <summary>A rectangle, in skin coordinates. Its own type so a layout's four boxes cannot be
     /// swapped for each other by argument order.</summary>
@@ -89,6 +89,11 @@ public static class SkinArt
     /// one tap connects or disconnects without going through the list. The GLYPH inside it is drawn
     /// by the app, not by the artwork, because it changes with the session and a PNG cannot; the
     /// skin reserves the space and says what colour it is when lit.</param>
+    /// <param name="NoticeHeight">Height of the device notice art. It shares <paramref name="Width"/>.</param>
+    /// <param name="NoticeText">The notice line's anchor and bound: X, Y and the width the text may
+    /// use (declared as textWidth). The app draws the text; the art leaves the room.</param>
+    /// <param name="NoticeGlyph">Where the app draws the notice's device glyph; clear of the text.</param>
+    /// <param name="NoticeSize">Font size of the notice line.</param>
     /// <param name="DropdownHit">The chevron's box - what the skin declares as dropdownHit so a
     /// click there opens the device list instead of setting the receiver's volume.</param>
     public sealed record Layout(
@@ -97,7 +102,8 @@ public static class SkinArt
         int PercentX, int PercentY, string PercentAlign, int PercentSize,
         Box AirTrack,
         int NameX, int NameY, int LevelX, int LevelY, int LabelSize,
-        Box ConnectHit, Box DropdownHit);
+        Box ConnectHit, Box DropdownHit,
+        int NoticeHeight, Box NoticeText, Box NoticeGlyph, int NoticeSize);
 
     /// <summary>The one place a style's colours and metrics are written down.</summary>
     private sealed record Palette(
@@ -115,7 +121,9 @@ public static class SkinArt
             AirTrack: new Box(52, 22, 174, 3),
             NameX: 52, NameY: 4, LevelX: 226, LevelY: 4, LabelSize: 11,
             ConnectHit: new Box(232, 3, 28, 24),
-            DropdownHit: new Box(264, 3, 30, 24)),
+            DropdownHit: new Box(264, 3, 30, 24),
+            NoticeHeight: 48, NoticeText: new Box(52, 15, 232, 20),
+            NoticeGlyph: new Box(16, 12, 24, 24), NoticeSize: 13),
 
         // Windows 10's flyout: square, opaque, and it leads with an icon block and a big number
         // rather than tucking the number away on the right.
@@ -127,7 +135,9 @@ public static class SkinArt
             AirTrack: new Box(116, 26, 112, 4),
             NameX: 64, NameY: 6, LevelX: 228, LevelY: 6, LabelSize: 12,
             ConnectHit: new Box(234, 5, 28, 24),
-            DropdownHit: new Box(266, 5, 28, 24)),
+            DropdownHit: new Box(266, 5, 28, 24),
+            NoticeHeight: 56, NoticeText: new Box(64, 18, 220, 20),
+            NoticeGlyph: new Box(14, 16, 24, 24), NoticeSize: 14),
 
         // XP shipped no volume OSD, so the reference is its tray volume popup: a Luna panel with a
         // title, a trackbar in a sunken groove, and a Mute checkbox. Tall enough to hold all three.
@@ -139,7 +149,9 @@ public static class SkinArt
             AirTrack: new Box(48, 24, 176, 10),
             NameX: 12, NameY: 6, LevelX: 224, LevelY: 6, LabelSize: 11,
             ConnectHit: new Box(228, 6, 30, 26),
-            DropdownHit: new Box(262, 6, 30, 26)),
+            DropdownHit: new Box(262, 6, 30, 26),
+            NoticeHeight: 52, NoticeText: new Box(46, 17, 240, 20),
+            NoticeGlyph: new Box(14, 15, 22, 22), NoticeSize: 12),
 
         // The house style. Not a tribute to anything - it is what AorinEQ looks like, and it is
         // what "custom skin" resolves to before anybody picks one.
@@ -151,7 +163,9 @@ public static class SkinArt
             AirTrack: new Box(52, 23, 170, 5),
             NameX: 52, NameY: 5, LevelX: 222, LevelY: 5, LabelSize: 12,
             ConnectHit: new Box(228, 4, 30, 24),
-            DropdownHit: new Box(262, 4, 32, 24)),
+            DropdownHit: new Box(262, 4, 32, 24),
+            NoticeHeight: 56, NoticeText: new Box(52, 18, 232, 20),
+            NoticeGlyph: new Box(16, 16, 24, 24), NoticeSize: 14),
     };
 
     private static Palette PaletteFor(string style) => style switch
@@ -202,7 +216,8 @@ public static class SkinArt
         var palette = PaletteFor(style);
 
         bool airplay = layer.StartsWith("airplay", StringComparison.Ordinal);
-        int height = airplay ? layout.AirPlayHeight : layout.VolumeHeight;
+        int height = airplay ? layout.AirPlayHeight
+            : layer == "notice" ? layout.NoticeHeight : layout.VolumeHeight;
 
         var bmp = new Bitmap(layout.Width, height);
         using var g = Graphics.FromImage(bmp);
@@ -217,6 +232,7 @@ public static class SkinArt
             case "muted": DrawVolume(g, style, layout, palette, lit: false, muted: true); break;
             case "airplay-empty": DrawAirPlay(g, style, layout, palette, lit: false); break;
             case "airplay-full": DrawAirPlay(g, style, layout, palette, lit: true); break;
+            case "notice": DrawNotice(g, style, layout, palette); break;
             default: throw new ArgumentException($"unknown layer '{layer}'", nameof(layer));
         }
 
@@ -250,10 +266,7 @@ public static class SkinArt
             // Windows 10 led with a square icon block the full height of the flyout. It is what
             // makes the thing recognisable from across the room, and it is why the number sits
             // beside it rather than out on the right.
-            using var block = new SolidBrush(Color.FromArgb(0xFF, 0x3B, 0x3B, 0x3B));
-            g.FillRectangle(block, 0, 0, 52, l.VolumeHeight);
-            using var seam = new Pen(p.Edge);
-            g.DrawLine(seam, 52, 0, 52, l.VolumeHeight);
+            DrawIconBlock(g, p, l.VolumeHeight);
         }
 
         DrawSpeaker(g, l.Glyph, p.Ink, muted);
@@ -261,6 +274,15 @@ public static class SkinArt
         int radius = l.Track.H / 2;
         DrawTrack(g, l.Track, p.Track, radius);
         if (lit) DrawTrackFill(g, l.Track, p.Accent, radius);
+    }
+
+    /// <summary>Windows 10's icon block: a lighter square down the left edge, with a seam.</summary>
+    private static void DrawIconBlock(Graphics g, Palette p, int height)
+    {
+        using var block = new SolidBrush(Color.FromArgb(0xFF, 0x3B, 0x3B, 0x3B));
+        g.FillRectangle(block, 0, 0, 52, height);
+        using var seam = new Pen(p.Edge);
+        g.DrawLine(seam, 52, 0, 52, height);
     }
 
     /// <summary>The rounded (or square) body every non-XP style sits in.</summary>
@@ -361,6 +383,17 @@ public static class SkinArt
         g.FillPath(brush, path);
     }
 
+    // ---- the device notice ----------------------------------------------------------------
+
+    /// <summary>The plate behind the "device changed" notice: the same body as the style's other
+    /// layers, plus Windows 10's icon block and seam. No glyph or text - the app draws both, because
+    /// they change with the device.</summary>
+    private static void DrawNotice(Graphics g, string style, Layout l, Palette p)
+    {
+        DrawPanel(g, p, new Rectangle(0, 0, l.Width - 1, l.NoticeHeight - 1));
+        if (style == "windows-10") DrawIconBlock(g, p, l.NoticeHeight);
+    }
+
     // ---- the AirPlay strip ----------------------------------------------------------------
 
     /// <summary>One AirPlay layer: the same body as the volume bar in the same style, a slim
@@ -382,10 +415,7 @@ public static class SkinArt
             DrawPanel(g, p, body);
             if (style == "windows-10")
             {
-                using var block = new SolidBrush(Color.FromArgb(0xFF, 0x3B, 0x3B, 0x3B));
-                g.FillRectangle(block, 0, 0, 52, l.AirPlayHeight);
-                using var seam = new Pen(p.Edge);
-                g.DrawLine(seam, 52, 0, 52, l.AirPlayHeight);
+                DrawIconBlock(g, p, l.AirPlayHeight);
             }
 
             int radius = l.AirTrack.H / 2;
@@ -503,6 +533,8 @@ public static class SkinArt
         string ink = $"#FF{p.Ink.R:X2}{p.Ink.G:X2}{p.Ink.B:X2}";
         var hit = l.DropdownHit;
         var power = l.ConnectHit;
+        var nt = l.NoticeText;
+        var ng = l.NoticeGlyph;
 
         return $$"""
         {
@@ -532,6 +564,11 @@ public static class SkinArt
             "connectHit": { "x": {{power.X}}, "y": {{power.Y}}, "w": {{power.W}}, "h": {{power.H}} },
             "connectColor": "{{Lit(style)}}",
             "dropdownHit": { "x": {{hit.X}}, "y": {{hit.Y}}, "w": {{hit.W}}, "h": {{hit.H}} }
+          },
+          "notice": {
+            "text": { "x": {{nt.X}}, "y": {{nt.Y}}, "color": "{{ink}}", "fontFamily": "{{p.Font}}", "fontSize": {{l.NoticeSize}}, "bold": true },
+            "textWidth": {{nt.W}},
+            "glyph": { "x": {{ng.X}}, "y": {{ng.Y}}, "size": {{ng.H}}, "color": "{{ink}}" }
           }
         }
         """;
