@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
@@ -30,6 +31,8 @@ public sealed record BuildInfo(bool IsDev, string Version, string? Commit, strin
 
     public static BuildInfo Current { get; } = ReadCurrent();
 
+    [UnconditionalSuppressMessage("SingleFile", "IL3000",
+        Justification = "Only non-single-file dev builds read the location; single-file reports an empty one, which yields a null BuiltAt.")]
     private static BuildInfo ReadCurrent()
     {
         var assembly = Assembly.GetEntryAssembly() ?? typeof(BuildInfo).Assembly;
