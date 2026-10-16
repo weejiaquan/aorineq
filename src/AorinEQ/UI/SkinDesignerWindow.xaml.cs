@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -61,9 +61,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private SkinNotice _noticeBase = SkinLoader.DefaultNotice;
     private string? _noticeArtSource; // SOURCE image; null = a plate
     private string _noticeBackground = SkinLoader.DefaultNotice.Background;
-    private string? _noticeBorder;
+    private string _noticeBorder = "#FF000000"; // used only while NoticeBorderCheck is on
     private string _noticeTextColor = SkinLoader.DefaultNotice.Text.Color;
-    private string? _noticeGlyphColor;
+    private string _noticeGlyphColor = SkinLoader.DefaultNotice.Text.Color; // unless NoticeGlyphSameCheck
     // What the notice preview last drew, so a drag that re-composes the volume preview on every
     // mouse move does not re-decode the notice art each time.
     private (SkinNotice Look, double Scale)? _shownNotice;
@@ -184,7 +184,11 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         LoadNotice(info.Notice);
         _initializing = false;
         ReloadPreviewData();
-        StatusText.Text = Loc.T("designer.status.editing-change-the-name", info.Name);
+        // A notice that failed to load comes up off; say why, or saving would look like it
+        // dropped the notice for no reason.
+        StatusText.Text = info.NoticeError is null
+            ? Loc.T("designer.status.editing-change-the-name", info.Name)
+            : Loc.T("designer.status.notice-not-loaded", info.Name, info.NoticeError);
     }
 
     private void ClearEditor()
@@ -507,7 +511,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         int.TryParse(box.Text, out var n) && n >= 1 ? n : 1;
 
     private double ParseFps() =>
-        double.TryParse(FpsBox.Text, out var f) ? Math.Clamp(f, 1.0, 60.0) : 10.0;
+        Math.Clamp(ParseFinite(FpsBox) ?? 10.0, 1.0, 60.0);
 
     private int ParseFillStart() =>
         int.TryParse(FillStartBox.Text, out var v) ? Math.Clamp(v, 0, Math.Max(0, _imgWidth)) : 0;
@@ -743,13 +747,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             // Editable combo: use the typed/selected text so an uninstalled authored font is
             // preserved, not silently replaced with the fallback.
             FontFamily: string.IsNullOrWhiteSpace(FontCombo.Text) ? "Segoe UI" : FontCombo.Text.Trim(),
-            FontSize: double.TryParse(FontSizeBox.Text, out var fs) ? Math.Clamp(fs, 4, 200) : 14,
+            FontSize: Math.Clamp(ParseFinite(FontSizeBox) ?? 14, 4, 200),
             Bold: BoldCheck.IsChecked == true,
             OutlineColor: OutlineCheck.IsChecked == true ? _outlineColor : null,
-            OutlineWidth: double.TryParse(OutlineWidthBox.Text, out var ow) ? Math.Clamp(ow, 0, 20) : 0,
+            OutlineWidth: Math.Clamp(ParseFinite(OutlineWidthBox) ?? 0, 0, 20),
             ShadowColor: ShadowCheck.IsChecked == true ? _shadowColor : null,
-            ShadowBlur: double.TryParse(ShadowBlurBox.Text, out var sb) ? Math.Clamp(sb, 0, 50) : 4,
-            ShadowDepth: double.TryParse(ShadowDepthBox.Text, out var sd) ? Math.Clamp(sd, 0, 50) : 2,
+            ShadowBlur: Math.Clamp(ParseFinite(ShadowBlurBox) ?? 4, 0, 50),
+            ShadowDepth: Math.Clamp(ParseFinite(ShadowDepthBox) ?? 2, 0, 50),
             Align: SelectedAlign());
     }
 
@@ -809,9 +813,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         OutlineColorSwatch.Background = SwatchBrush(_outlineColor);
         ShadowColorSwatch.Background = SwatchBrush(_shadowColor);
         NoticeBackgroundSwatch.Background = SwatchBrush(_noticeBackground);
-        NoticeBorderSwatch.Background = SwatchBrush(_noticeBorder ?? "#00000000");
+        NoticeBorderSwatch.Background = SwatchBrush(_noticeBorder);
         NoticeTextColorSwatch.Background = SwatchBrush(_noticeTextColor);
-        NoticeGlyphColorSwatch.Background = SwatchBrush(_noticeGlyphColor ?? _noticeTextColor);
+        NoticeGlyphColorSwatch.Background = SwatchBrush(_noticeGlyphColor);
     }
 
     private static System.Windows.Media.Brush SwatchBrush(string hex)
@@ -834,20 +838,16 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private void OnPickNoticeBackground(object sender, RoutedEventArgs e) => PickColor(ref _noticeBackground);
     private void OnPickNoticeTextColor(object sender, RoutedEventArgs e) => PickColor(ref _noticeTextColor);
 
-    // Border and glyph colour start unset (no border; the text colour), so the picker opens on
-    // what the preview currently shows for them.
+    // Border and icon colour are optional: a checkbox says whether the skin has one, as for the
+    // outline and shadow, and choosing a colour switches it on.
     private void OnPickNoticeBorder(object sender, RoutedEventArgs e)
     {
-        if (AskColor(_noticeBorder ?? _noticeBackground) is not { } picked) return;
-        _noticeBorder = picked;
-        OnColorPicked();
+        if (PickColor(ref _noticeBorder)) NoticeBorderCheck.IsChecked = true;
     }
 
     private void OnPickNoticeGlyphColor(object sender, RoutedEventArgs e)
     {
-        if (AskColor(_noticeGlyphColor ?? _noticeTextColor) is not { } picked) return;
-        _noticeGlyphColor = picked;
-        OnColorPicked();
+        if (PickColor(ref _noticeGlyphColor)) NoticeGlyphSameCheck.IsChecked = false;
     }
 
     /// <summary>Opens the colour picker on <paramref name="target"/>; on OK stores the choice back
@@ -903,9 +903,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         _noticeBase = look;
         NoticeEnableCheck.IsChecked = notice is not null;
         _noticeBackground = look.Background;
-        _noticeBorder = look.Border;
+        // With no border, the picker starts from the plate colour made opaque: the plate's own
+        // alpha (#F2 on the default) would give a new border a faint, see-through edge.
+        _noticeBorder = look.Border ?? Opaque(look.Background);
+        NoticeBorderCheck.IsChecked = look.Border is not null;
         _noticeTextColor = look.Text.Color;
-        _noticeGlyphColor = look.Glyph.Color;
+        _noticeGlyphColor = look.Glyph.Color ?? look.Text.Color;
+        NoticeGlyphSameCheck.IsChecked = look.Glyph.Color is null;
         NoticeRadiusBox.Text = look.CornerRadius.ToString("0.##");
         SelectFont(NoticeFontCombo, look.Text.FontFamily);
         NoticeFontSizeBox.Text = look.Text.FontSize.ToString("0.##");
@@ -949,7 +953,11 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
 
     private void OnBrowseNoticeArt(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = ImageFilter };
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = ImageFilter,
+            Title = Loc.T("designer.choose-the-notice-artwork"),
+        };
         if (dialog.ShowDialog(this) == true) SetNoticeArt(dialog.FileName);
     }
 
@@ -996,22 +1004,22 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         var plate = SkinLoader.ClampNotice(b with
         {
             Background = _noticeBackground,
-            Border = _noticeBorder,
-            CornerRadius = double.TryParse(NoticeRadiusBox.Text, out var r) ? r : b.CornerRadius,
+            Border = NoticeBorderCheck.IsChecked == true ? _noticeBorder : null,
+            CornerRadius = ParseFinite(NoticeRadiusBox) ?? b.CornerRadius,
             Text = b.Text with
             {
                 Color = _noticeTextColor,
                 // Editable combo, as for the percent text: an uninstalled authored font is kept.
                 FontFamily = string.IsNullOrWhiteSpace(NoticeFontCombo.Text)
                     ? SkinLoader.DefaultNotice.Text.FontFamily : NoticeFontCombo.Text.Trim(),
-                FontSize = double.TryParse(NoticeFontSizeBox.Text, out var fs) ? fs : b.Text.FontSize,
+                FontSize = ParseFinite(NoticeFontSizeBox) ?? b.Text.FontSize,
                 Bold = NoticeBoldCheck.IsChecked == true,
             },
             Glyph = b.Glyph with
             {
                 Show = NoticeShowGlyphCheck.IsChecked == true,
-                Size = double.TryParse(NoticeGlyphSizeBox.Text, out var gs) ? gs : b.Glyph.Size,
-                Color = _noticeGlyphColor,
+                Size = ParseFinite(NoticeGlyphSizeBox) ?? b.Glyph.Size,
+                Color = NoticeGlyphSameCheck.IsChecked == true ? null : _noticeGlyphColor,
             },
             ArtPath = null, ArtIsGif = false, ArtFrames = 1, Width = 0, Height = 0, TextWidth = 0,
         });
@@ -1026,15 +1034,27 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             ParseOptionalInt(NoticeTextWidthBox));
     }
 
+    /// <summary>"#AARRGGBB" with the alpha forced to FF; any other form is returned as it is.</summary>
+    private static string Opaque(string color) =>
+        color.Length == 9 && color[0] == '#' ? "#FF" + color[3..] : color;
+
     private static int? ParseOptionalInt(System.Windows.Controls.TextBox box) =>
         int.TryParse(box.Text, out var v) ? v : null;
 
+    /// <summary>A number box's value, or null when it does not hold a finite number. "NaN" and
+    /// "Infinity" parse as doubles, and Math.Clamp passes NaN straight through - into a font size
+    /// WPF throws on - so they count as invalid input, the same as text that does not parse.</summary>
+    private static double? ParseFinite(System.Windows.Controls.TextBox box) =>
+        double.TryParse(box.Text, out var v) && double.IsFinite(v) ? v : null;
+
     /// <summary>Draws the sample notice in the section's look - or, while the section is off, the
-    /// default plate the app would draw - at the skin's scale.</summary>
+    /// default plate the app would draw - at the size the OSD draws it: art at the skin's scale,
+    /// a plate at 1 (OsdWindow.ShowNotice does the same).</summary>
     private void RefreshNoticePreview()
     {
         NoticePanel.IsEnabled = NoticeEnableCheck.IsChecked == true;
-        var shown = (CurrentNotice() ?? SkinLoader.DefaultNotice, ScaleSlider.Value);
+        var look = CurrentNotice() ?? SkinLoader.DefaultNotice;
+        var shown = (look, look.HasArt ? ScaleSlider.Value : 1.0);
         if (shown != _shownNotice)
         {
             _shownNotice = shown;

@@ -239,4 +239,165 @@ public class SkinDesignerNoticeTests : IDisposable
         // Scale 1.0, so the preview's corner is the skin's own.
         Assert.Equal(3, radius);
     }
+
+    /// <summary>The OSD draws a plate at 1 whatever the skin's scale (OsdWindow.ShowNotice), and
+    /// only art at the skin's scale. The preview has to agree, or a skin at 2x previews a plate
+    /// twice the size it will ever appear.</summary>
+    [Fact]
+    public void The_preview_draws_a_plate_at_1_and_art_at_the_skin_scale()
+    {
+        var plate = LoadLogged(MakeSkin("plate2x",
+            """{"scale":2.0,"notice":{"background":"#FF102030","cornerRadius":3,"padding":{"x":10,"y":6},"text":{"fontSize":13},"glyph":{"size":16}}}"""));
+        var art = LoadLogged(MakeSkin("art2x",
+            """{"scale":2.0,"notice":{"text":{"x":60,"y":12,"fontSize":15},"textWidth":180,"glyph":{"x":20,"y":10,"size":20}}}""",
+            noticeArt: (300, 48)));
+
+        var p = WithDesigner(d =>
+        {
+            d.LoadSkin(plate);
+            var v = d.NoticePreview;
+            return (Slider: d.ScaleSlider.Value, Corner: v.PlateBorder.CornerRadius.TopLeft,
+                PadX: v.PlateBorder.Padding.Left, Text: v.NoticeText.FontSize, Glyph: v.NoticeGlyph.FontSize);
+        });
+        var a = WithDesigner(d =>
+        {
+            d.LoadSkin(art);
+            var v = d.NoticePreview;
+            return (Slider: d.ScaleSlider.Value, Size: v.MeasureNotice(1000),
+                Text: v.NoticeText.FontSize, Glyph: v.NoticeGlyph.FontSize);
+        });
+
+        _out.WriteLine($"plate @ slider {p.Slider}: corner={p.Corner} padX={p.PadX} text={p.Text} glyph={p.Glyph}");
+        _out.WriteLine($"art   @ slider {a.Slider}: size={a.Size} text={a.Text} glyph={a.Glyph}");
+        Assert.Equal(2.0, p.Slider);
+        Assert.Equal((3.0, 10.0, 13.0, 16.0), (p.Corner, p.PadX, p.Text, p.Glyph));
+        Assert.Equal(2.0, a.Slider);
+        Assert.Equal(new System.Windows.Size(600, 96), a.Size);
+        Assert.Equal((30.0, 40.0), (a.Text, a.Glyph));
+    }
+
+    /// <summary>A border can be taken away again, and one switched on without picking a colour
+    /// starts from the plate colour made OPAQUE - the default plate is #F2, and a border carrying
+    /// that alpha is a faint, see-through edge.</summary>
+    [Fact]
+    public void A_border_can_be_turned_off_and_a_new_one_starts_opaque()
+    {
+        var bordered = LoadLogged(MakeSkin("bordered", """{"notice":{"border":"#FFFFFFFF"}}"""));
+        var plain = LoadLogged(MakeSkin("plain", """{"notice":{"cornerRadius":5}}"""));
+
+        var (loadedOn, cleared) = WithDesigner(d =>
+        {
+            d.LoadSkin(bordered);
+            var on = d.NoticeBorderCheck.IsChecked;
+            d.NoticeBorderCheck.IsChecked = false;
+            return (on, d.CurrentNotice());
+        });
+        var (loadedOff, before, after) = WithDesigner(d =>
+        {
+            d.LoadSkin(plain);
+            var off = d.NoticeBorderCheck.IsChecked;
+            var none = d.CurrentNotice();
+            d.NoticeBorderCheck.IsChecked = true;
+            return (off, none, d.CurrentNotice());
+        });
+
+        _out.WriteLine($"bordered: check={loadedOn} after unticking border={cleared?.Border ?? "(none)"}");
+        _out.WriteLine($"plain: check={loadedOff} border before={before?.Border ?? "(none)"} " +
+                       $"after ticking={after?.Border ?? "(none)"} (plate {after?.Background})");
+        Assert.True(loadedOn);
+        Assert.Null(cleared!.Border);
+        Assert.False(loadedOff);
+        Assert.Null(before!.Border);
+        Assert.Equal(SkinLoader.DefaultNotice.Background, after!.Background);
+        Assert.Equal("#FF202020", after.Border);
+    }
+
+    /// <summary>The icon colour can go back to following the text colour (no colour of its own
+    /// saved), and a skin that has none loads with "same as text" ticked.</summary>
+    [Fact]
+    public void The_icon_colour_can_go_back_to_the_text_colour()
+    {
+        var coloured = LoadLogged(MakeSkin("coloured", """{"notice":{"glyph":{"color":"#FFFF0000"}}}"""));
+        var plain = LoadLogged(MakeSkin("plain", """{"notice":{"text":{"color":"#FF00FF00"}}}"""));
+
+        var (sameAfterLoad, glyphBefore, glyphAfter) = WithDesigner(d =>
+        {
+            d.LoadSkin(coloured);
+            var same = d.NoticeGlyphSameCheck.IsChecked;
+            var withColour = d.CurrentNotice()!.Glyph.Color;
+            d.NoticeGlyphSameCheck.IsChecked = true;
+            return (same, withColour, d.CurrentNotice()!.Glyph.Color);
+        });
+        var (plainSame, plainGlyph, untickedGlyph) = WithDesigner(d =>
+        {
+            d.LoadSkin(plain);
+            var same = d.NoticeGlyphSameCheck.IsChecked;
+            var g = d.CurrentNotice()!.Glyph.Color;
+            d.NoticeGlyphSameCheck.IsChecked = false;
+            return (same, g, d.CurrentNotice()!.Glyph.Color);
+        });
+
+        _out.WriteLine($"coloured: same={sameAfterLoad} glyph {glyphBefore} -> {glyphAfter ?? "(text colour)"}");
+        _out.WriteLine($"plain: same={plainSame} glyph={plainGlyph ?? "(text colour)"} unticked={untickedGlyph}");
+        Assert.False(sameAfterLoad);
+        Assert.Equal("#FFFF0000", glyphBefore);
+        Assert.Null(glyphAfter);
+        Assert.True(plainSame);
+        Assert.Null(plainGlyph);
+        // Unticking without picking starts the icon on the colour it was showing: the text's.
+        Assert.Equal("#FF00FF00", untickedGlyph);
+    }
+
+    /// <summary>"NaN" and "Infinity" parse as doubles, and Math.Clamp lets NaN through - into a
+    /// font size, which WPF throws on. They are invalid input like any other text that is not a
+    /// number: the value being edited is kept, and nothing throws.</summary>
+    [Fact]
+    public void Non_finite_numbers_are_treated_as_invalid_input()
+    {
+        var info = LoadLogged(MakeSkin("nan",
+            """{"percentText":{"show":true,"x":10,"y":5,"fontSize":18},"notice":{"cornerRadius":5,"text":{"fontSize":13},"glyph":{"size":16}}}"""));
+
+        var (error, notice, previewText, previewGlyph) = WithDesigner(d =>
+        {
+            d.LoadSkin(info);
+            Exception? ex = null;
+            foreach (var (box, text) in new[]
+                     {
+                         (d.FontSizeBox, "NaN"), (d.NoticeRadiusBox, "Infinity"),
+                         (d.NoticeFontSizeBox, "NaN"), (d.NoticeGlyphSizeBox, "-Infinity"),
+                     })
+            {
+                box.Text = text;
+                ex ??= Record.Exception(() =>
+                    box.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.UIElement.LostFocusEvent)));
+            }
+            return (ex, d.CurrentNotice(), d.NoticePreview.NoticeText.FontSize, d.NoticePreview.NoticeGlyph.FontSize);
+        });
+
+        _out.WriteLine($"exception: {error?.ToString() ?? "(none)"}");
+        _out.WriteLine($"notice: radius={notice?.CornerRadius} font={notice?.Text.FontSize} glyph={notice?.Glyph.Size}; " +
+                       $"preview text={previewText} glyph={previewGlyph}");
+        Assert.Null(error);
+        Assert.Equal((5.0, 13.0, 16.0), (notice!.CornerRadius, notice.Text.FontSize, notice.Glyph.Size));
+        Assert.Equal((13.0, 16.0), (previewText, previewGlyph));
+    }
+
+    /// <summary>A skin whose notice failed to load comes up with the section off; the status line
+    /// says why, so the user is not left guessing.</summary>
+    [Fact]
+    public void A_notice_that_failed_to_load_is_reported_in_the_status_line()
+    {
+        var info = LoadLogged(MakeSkin("broken", """{"notice":{"frames":3}}""", noticeArt: (300, 50)));
+        Assert.NotNull(info.NoticeError);
+
+        var (status, enabled) = WithDesigner(d =>
+        {
+            d.LoadSkin(info);
+            return (d.StatusText.Text, d.NoticeEnableCheck.IsChecked);
+        });
+
+        _out.WriteLine($"status: {status}; notice section on={enabled}");
+        Assert.False(enabled);
+        Assert.Equal(Loc.T("designer.status.notice-not-loaded", info.Name, info.NoticeError!), status);
+    }
 }
