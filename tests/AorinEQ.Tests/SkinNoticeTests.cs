@@ -159,4 +159,107 @@ public class SkinNoticeTests : IDisposable
         Assert.Null(info.Notice);
         Assert.Contains("not divisible", info.NoticeError);
     }
+
+    private string SaveSkin(string name, SkinNotice? notice)
+    {
+        var src = Path.Combine(_root, "src-" + name);
+        Directory.CreateDirectory(src);
+        TestPngs.Write(Path.Combine(src, "empty.png"), 200, 40);
+        TestPngs.Write(Path.Combine(src, "full.png"), 200, 40);
+        var skins = Path.Combine(_root, "skins");
+        Directory.CreateDirectory(skins);
+        var folder = SkinWriter.Save(skins, name, Path.Combine(src, "empty.png"), Path.Combine(src, "full.png"),
+            new SkinConfig(null, 1.0, Notice: notice));
+        var jsonPath = Path.Combine(folder, "skin.json");
+        _out.WriteLine(File.Exists(jsonPath) ? File.ReadAllText(jsonPath) : "(no skin.json)");
+        return folder;
+    }
+
+    private string LooseNoticeArt(string fileName, int w, int h)
+    {
+        var path = Path.Combine(_root, fileName);
+        TestPngs.Write(path, w, h);
+        return path;
+    }
+
+    [Fact]
+    public void A_plate_notice_round_trips_through_save_and_load()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var want = d with
+        {
+            Background = "#FF112233", CornerRadius = 3, Border = "#FF445566", PadX = 9, PadY = 5,
+            Text = d.Text with { Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Bold = false, Align = "center" },
+            Glyph = d.Glyph with { Show = false, Size = 20, Color = "#FFFF0000" },
+        };
+
+        var got = LoadLogged(SaveSkin("plate", want)).Notice;
+
+        Assert.NotNull(got);
+        Assert.Equal(want, got);
+    }
+
+    [Fact]
+    public void An_art_notice_copies_its_image_and_round_trips_positions()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var want = d with
+        {
+            ArtPath = LooseNoticeArt("loose-notice.png", 300, 60), Width = 300, Height = 60, TextWidth = 200,
+            Text = d.Text with { X = 50, Y = 20 },
+            Glyph = d.Glyph with { X = 12, Y = 14 },
+        };
+
+        var folder = SaveSkin("art", want);
+        var got = LoadLogged(folder).Notice;
+
+        Assert.True(File.Exists(Path.Combine(folder, "notice.png")));
+        Assert.NotNull(got);
+        Assert.True(got.HasArt);
+        Assert.Equal(50, got.Text.X);
+        Assert.Equal(20, got.Text.Y);
+        Assert.Equal(200, got.TextWidth);
+        Assert.Equal(12, got.Glyph.X);
+        Assert.Equal(14, got.Glyph.Y);
+    }
+
+    [Fact]
+    public void Saving_without_a_notice_removes_a_stale_one()
+    {
+        var folder = SaveSkin("stale", SkinLoader.DefaultNotice with { ArtPath = LooseNoticeArt("stale.png", 300, 60), Width = 300, Height = 60 });
+        Assert.True(File.Exists(Path.Combine(folder, "notice.png")));
+
+        var src = Path.Combine(_root, "src-stale");
+        SkinWriter.Save(Path.GetDirectoryName(folder)!, "stale", Path.Combine(src, "empty.png"), Path.Combine(src, "full.png"),
+            new SkinConfig(null, 1.0, Notice: null));
+
+        Assert.Empty(Directory.GetFiles(folder, "notice.*"));
+        Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
+    }
+
+    [Fact]
+    public void Default_values_are_not_written()
+    {
+        var folder = SaveSkin("defaults", SkinLoader.DefaultNotice with { Background = "#FF112233" });
+
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "skin.json")));
+        var names = doc.RootElement.GetProperty("notice").EnumerateObject().Select(p => p.Name).ToArray();
+        _out.WriteLine("notice properties: " + string.Join(",", names));
+        Assert.Equal(new[] { "background" }, names);
+    }
+
+    [Fact]
+    public void Export_then_import_carries_the_notice()
+    {
+        var folder = SaveSkin("share", SkinLoader.DefaultNotice with { ArtPath = LooseNoticeArt("share.png", 300, 60), Width = 300, Height = 60 });
+        var zip = Path.Combine(_root, "share.zip");
+
+        SkinArchive.Export(folder, zip);
+        var imported = LoadLogged(SkinArchive.Import(zip, Path.Combine(_root, "imported"), "share"));
+
+        Assert.True(imported.IsValid, imported.Error);
+        Assert.Null(imported.NoticeError);
+        Assert.NotNull(imported.Notice);
+        Assert.True(imported.Notice.HasArt);
+    }
 }
