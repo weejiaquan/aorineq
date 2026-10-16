@@ -23,4 +23,25 @@
     <Version>3.8.0</Version>
   </PropertyGroup>
 
+  <!-- WHETHER THIS BUILD IS A RELEASE, stamped into every assembly as AssemblyMetadata and read back
+       by AorinEQ.Core.BuildInfo.
+
+       "release" only when publish.ps1 says so (-p:AorinEQBuildKind=release); every other build -
+       dotnet build, the IDE, CI's gate - is a dev build and says so in About, on the tray icon and
+       in its tooltip.
+
+       The branch is read from .git/HEAD. Nothing is stamped when that file is absent (a git
+       worktree keeps .git as a file) or HEAD is detached (CI checks out a bare SHA); BuildInfo and
+       BuildInfoTests apply the same rule. -->
+  <PropertyGroup>
+    <AorinEQBuildKind Condition="'$(AorinEQBuildKind)' == ''">dev</AorinEQBuildKind>
+    <_AorinEQGitHead>$(MSBuildThisFileDirectory).git\HEAD</_AorinEQGitHead>
+    <_AorinEQGitHeadText Condition="Exists('$(_AorinEQGitHead)')">$([System.IO.File]::ReadAllText('$(_AorinEQGitHead)').Trim())</_AorinEQGitHeadText>
+    <AorinEQBuildBranch Condition="'$(AorinEQBuildBranch)' == '' and $(_AorinEQGitHeadText.StartsWith('ref: refs/heads/'))">$(_AorinEQGitHeadText.Substring(16))</AorinEQBuildBranch>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="BuildKind" Value="$(AorinEQBuildKind)" />
+    <AssemblyMetadata Include="BuildBranch" Value="$(AorinEQBuildBranch)" />
+  </ItemGroup>
+
 </Project>
