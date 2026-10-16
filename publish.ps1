@@ -27,7 +27,9 @@ $exe = Join-Path $out $exeName
 $setup = Join-Path $out $setupName
 $issScript = Join-Path 'installer' 'AorinEQ.iss'
 
-dotnet publish src/AorinEQ -c Release -r win-x64 --self-contained `
+# AorinEQBuildKind=release is what makes this build a release; any other build is stamped dev
+# (see Directory.Build.props).
+dotnet publish src/AorinEQ -c Release -r win-x64 --self-contained -p:AorinEQBuildKind=release `
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o $out
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 if (-not (Test-Path $exe)) { throw "publish produced no $exe" }
