@@ -103,6 +103,8 @@ public partial class App : System.Windows.Application
     /// <summary>Equalizer APO health: one tracker, fed from four triggers (default-device change,
     /// session unlock, resume from sleep, and a slow timer). See <see cref="SetupEapoHealthMonitor"/>.</summary>
     private readonly EapoHealthTracker _eapoHealth = new();
+    /// <summary>An elevated repair or undo helper is in flight — see <see cref="RunEapoRepairHelperAsync"/>.</summary>
+    private bool _eapoRepairRunning;
     private System.Windows.Threading.DispatcherTimer? _healthTimer;
     private bool _healthEventsSubscribed;
     /// <summary>Whether <see cref="EapoDependency"/> said yes at the last check — the edge is what
@@ -1565,7 +1567,15 @@ public partial class App : System.Windows.Application
         var update = _eapoHealth.Update(snapshot);
         _settingsWindow?.SetEapoHealth(update.Snapshot, _settings.VolumeMode, applies: true);
 
-        if (EapoHealthCopy.Balloon(update, _settings.VolumeMode) is { } text)
+        // WhyNotAvailable is the unprivileged preview of the helper's own refusals: a device the
+        // repair would refuse (another effect on it) gets the balloon, not a UAC prompt for nothing.
+        if (!_eapoRepairRunning && EapoAutoRepair.ShouldStart(update, _settings.EapoAutoRepairDeclined)
+            && EapoRepair.WhyNotAvailable(update.Snapshot.EndpointGuid) is null)
+        {
+            _tray?.ShowInfo(EapoHealthCopy.AutoRepairBalloon);
+            _ = AutoRepairEapoAsync(update.Snapshot.EndpointGuid!);
+        }
+        else if (EapoHealthCopy.Balloon(update, _settings.VolumeMode) is { } text)
         {
             if (update.Event == EapoHealthEvent.Recovered)
                 _tray?.ShowInfo(text);
@@ -1750,11 +1760,30 @@ public partial class App : System.Windows.Application
         await RunEapoRepairHelperAsync("--undo-eapo-repair", "Undoing…");
     }
 
+    /// <summary>The repair <see cref="EapoAutoRepair"/> started, with no confirmation dialog of its
+    /// own: the balloon says why and the UAC prompt is the consent. A device that does not come
+    /// out of it repaired — the prompt declined, the repair refused or reverted — is remembered,
+    /// so it is never prompted for unasked again; the Settings button still repairs it.</summary>
+    private async Task AutoRepairEapoAsync(string endpointGuid)
+    {
+        if (await RunEapoRepairHelperAsync("--repair-eapo", "Repairing…")) return;
+        _settings = _settings with
+        {
+            EapoAutoRepairDeclined = [.. _settings.EapoAutoRepairDeclined ?? [], endpointGuid],
+        };
+        SaveSettings();
+    }
+
     /// <summary>Launches the elevated helper, waits for it off the UI thread, and turns its
     /// verdict into what the user sees. Never throws: every failure — declined elevation, a helper
-    /// that could not start, a helper that crashed — ends in a sentence rather than an exception.</summary>
-    private async Task RunEapoRepairHelperAsync(string flag, string busyText)
+    /// that could not start, a helper that crashed — ends in a sentence rather than an exception.
+    /// Returns whether the helper reported success. One at a time: a second request while one is
+    /// running (the button clicked during an automatic repair) would be a second UAC prompt for
+    /// the same job, so it is dropped.</summary>
+    private async Task<bool> RunEapoRepairHelperAsync(string flag, string busyText)
     {
+        if (_eapoRepairRunning) return false;
+        _eapoRepairRunning = true;
         _settingsWindow?.SetEapoRepairStatus(busyText, busy: true);
         var token = EapoRepair.NewToken();
         try
@@ -1774,12 +1803,12 @@ public partial class App : System.Windows.Application
                 _settingsWindow?.SetEapoRepairStatus(
                     Loc.T("app.administrator-permission-is-needed-to-change"),
                     busy: false);
-                return;
+                return false;
             }
             if (proc is null)
             {
                 _settingsWindow?.SetEapoRepairStatus(Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
-                return;
+                return false;
             }
             await proc.WaitForExitAsync();
 
@@ -1803,13 +1832,17 @@ public partial class App : System.Windows.Application
                     System.Windows.MessageBox.Show(message, "AorinEQ",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+            return result?.IsSuccess == true;
         }
         finally
         {
             // The endpoint's state has almost certainly changed, in either direction, and the
             // reading behind the banner and the health row has to come from the machine rather
             // than from what the helper claimed.
+            // Still marked running while it does, so a reading that is still unhealthy cannot
+            // start another automatic repair from inside this one.
             CheckEapoHealth(force: true);
+            _eapoRepairRunning = false;
             _settingsWindow?.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
         }
     }

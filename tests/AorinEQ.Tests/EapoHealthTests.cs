@@ -422,6 +422,89 @@ public class EapoHealthTests
         Assert.True(tracker.Update(Snap(active: false, at: T0.AddMinutes(61))).Notify);
     }
 
+    // ---------------------------------------------------------------- the automatic repair
+
+    private const string Guid1 = "{11111111-2222-3333-4444-555555555555}";
+
+    [Fact]
+    public void A_detached_device_is_repaired_automatically_on_the_first_reading_and_on_a_loss()
+    {
+        // Startup after the update that broke it (first reading), and a running app watching it
+        // break (healthy -> detached): both are the fault this exists for.
+        var startup = new EapoHealthTracker().Update(Snap(active: false));
+        _out.WriteLine($"startup: {startup}");
+        Assert.True(EapoAutoRepair.ShouldStart(startup, declined: null));
+
+        var tracker = new EapoHealthTracker();
+        tracker.Update(Snap());
+        var lost = tracker.Update(Snap(active: false, at: T0.AddMinutes(5)));
+        _out.WriteLine($"lost: {lost}");
+        Assert.Equal(EapoHealthEvent.Lost, lost.Event);
+        Assert.True(EapoAutoRepair.ShouldStart(lost, declined: []));
+    }
+
+    [Fact]
+    public void A_fault_that_persists_does_not_raise_a_second_prompt()
+    {
+        // The poll timer reads the same broken device every five minutes. The prompt rides the
+        // same edge as the balloon, so a user who ignored it once is not asked again per poll.
+        var tracker = new EapoHealthTracker();
+        Assert.True(EapoAutoRepair.ShouldStart(tracker.Update(Snap(active: false)), null));
+        for (int i = 1; i <= 3; i++)
+        {
+            var again = tracker.Update(Snap(active: false, at: T0.AddMinutes(5 * i)));
+            _out.WriteLine($"poll {i}: {again}");
+            Assert.False(EapoAutoRepair.ShouldStart(again, null));
+        }
+    }
+
+    [Fact]
+    public void A_device_the_user_declined_is_never_prompted_for_again_but_its_successor_is()
+    {
+        var update = new EapoHealthTracker().Update(Snap(active: false));
+
+        // Stored however the GUID was cased when it was recorded.
+        Assert.False(EapoAutoRepair.ShouldStart(update, [Guid1.ToUpperInvariant()]));
+
+        // A driver update re-creates the endpoint under a new GUID: the declined list names the
+        // old device, so the new one is still repaired.
+        var successor = new EapoHealthTracker().Update(
+            Snap(active: false) with { EndpointGuid = "{99999999-2222-3333-4444-555555555555}" });
+        Assert.True(EapoAutoRepair.ShouldStart(successor, [Guid1]));
+    }
+
+    [Fact]
+    public void Only_the_fault_the_repair_can_fix_starts_it()
+    {
+        // Not installed: there is nothing to switch on. Include line missing on an active device:
+        // AorinEQ re-adds that itself without elevation. No device GUID: nothing to target.
+        // Healthy and recovered readings: nothing to fix.
+        var cases = new (string Name, EapoHealthUpdate Update)[]
+        {
+            ("not installed", new(Snap(installed: false, active: false, include: null), EapoHealthEvent.Unhealthy, true)),
+            ("include missing", new(Snap(include: false), EapoHealthEvent.Unhealthy, true)),
+            ("no endpoint", new(Snap(active: false) with { EndpointGuid = null }, EapoHealthEvent.Unhealthy, true)),
+            ("recovered", new(Snap(), EapoHealthEvent.Recovered, true)),
+            ("not notified (cooldown)", new(Snap(active: false), EapoHealthEvent.Lost, false)),
+        };
+        foreach (var (name, update) in cases)
+        {
+            var start = EapoAutoRepair.ShouldStart(update, null);
+            _out.WriteLine($"{name}: start={start}");
+            Assert.False(start, name);
+        }
+    }
+
+    [Fact]
+    public void The_automatic_repair_says_why_a_prompt_appeared()
+    {
+        _out.WriteLine(EapoHealthCopy.AutoRepairBalloon);
+        Assert.Contains("Equalizer APO", EapoHealthCopy.AutoRepairBalloon);
+        Assert.Contains("prompt", EapoHealthCopy.AutoRepairBalloon);
+        // Windows truncates balloon text around 255 characters.
+        Assert.True(EapoHealthCopy.AutoRepairBalloon.Length < 255);
+    }
+
     // ---------------------------------------------------------------- the words
 
     [Fact]

@@ -54,7 +54,11 @@ public sealed record Settings(
     // upgrade, and where Settings lands when no page was asked for. False for everyone upgrading
     // into this release, which is exactly who needs telling that Discover is there.
     bool HasSeenDiscover = false,
-    AirPlaySetting? AirPlay = null)
+    AirPlaySetting? AirPlay = null,
+    // Endpoint GUIDs whose automatic Equalizer APO repair the user declined or that the repair
+    // refused — never offered unprompted again (see EapoAutoRepair). A driver update gives the
+    // device a NEW GUID, so this cannot suppress the post-update repair it exists for.
+    IReadOnlyList<string>? EapoAutoRepairDeclined = null)
 {
     public static Settings Default { get; } = new(50, false);
 

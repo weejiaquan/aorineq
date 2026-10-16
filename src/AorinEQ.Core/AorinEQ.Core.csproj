@@ -8,6 +8,11 @@
          3.3.0. See the comment there before adding one back. -->
   </PropertyGroup>
   <ItemGroup>
+    <!-- The registry capture/write primitives are tested against real HKCU keys rather than
+         through copies of them that could drift. -->
+    <InternalsVisibleTo Include="AorinEQ.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- The string tables ship INSIDE the assembly.
 
          Not satellite assemblies, which is the .NET default answer and the wrong one here:
