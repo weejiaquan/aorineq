@@ -19,8 +19,9 @@ public partial class OsdWindow : Window
     private const string GlyphVolume = "\uE767"; // 'Volume'
     private const string GlyphMute = "\uE74F";   // 'Mute'
     private const double NoticeMaxWidth = 480;
-    private const double DarkPillWidth = 300;
-    private const double DarkPillHeight = 64;
+    // Internal: the device notice's plate is never smaller than the volume bar (NoticeView).
+    internal const double DarkPillWidth = 300;
+    internal const double DarkPillHeight = 64;
     private const double MinimalBarWidthFraction = 0.4; // 40% of the work-area width
     private const double DefaultMargin = 12; // matches OsdPosition.Compute's own default
 

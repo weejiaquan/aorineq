@@ -60,8 +60,9 @@ internal sealed class SkinFrames
 
     private static SkinFrames LoadGif(string path)
     {
-        // OnLoad + IgnoreImageCache for the same reasons as LoadBitmap: release the file handle
-        // immediately and never serve stale cached bytes after an in-place edit.
+        // OnLoad releases the file handle once decoding succeeds; IgnoreImageCache keeps WPF's
+        // URI-keyed bitmap cache from serving stale bytes after an in-place edit. (LoadBitmap
+        // decodes from a stream instead, which needs neither.)
         var decoder = new GifBitmapDecoder(new Uri(path, UriKind.Absolute),
             BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreImageCache,
             BitmapCacheOption.OnLoad);

@@ -361,7 +361,7 @@ public static class SkinLoader
     /// <summary>The dark-pill plate: what a notice looks like when nothing says otherwise.</summary>
     public static readonly SkinNotice DefaultNotice = new(
         "#F2202020", null, 12, 16, 10,
-        new SkinText(true, 0, 0, "#FFFFFFFF", "Segoe UI", 14, Bold: true),
+        new SkinText(true, 0, 0, "#FFFFFFFF", "Segoe UI", 14, Bold: false),
         new SkinNoticeGlyph(true, 16, 0, 18, null));
 
     private static SkinNoticeJson? ParseNotice(JsonElement? element)

@@ -53,7 +53,7 @@ public class SkinNoticeTests : IDisposable
     public void A_colour_only_block_is_a_plate_with_its_values()
     {
         var info = LoadLogged(MakeSkin("plate",
-            """{"notice":{"background":"#FF102030","border":"#FFFFFFFF","cornerRadius":4,"padding":{"x":10,"y":6},"text":{"color":"#FF00FF00","fontFamily":"Tahoma","fontSize":13,"bold":false},"glyph":{"size":16,"color":"#FFFF0000"}}}"""));
+            """{"notice":{"background":"#FF102030","border":"#FFFFFFFF","cornerRadius":4,"padding":{"x":10,"y":6},"text":{"color":"#FF00FF00","fontFamily":"Tahoma","fontSize":13,"bold":true},"glyph":{"size":16,"color":"#FFFF0000"}}}"""));
 
         var n = info.Notice;
         Assert.NotNull(n);
@@ -68,7 +68,7 @@ public class SkinNoticeTests : IDisposable
         Assert.Equal("#FF00FF00", n.Text.Color);
         Assert.Equal("Tahoma", n.Text.FontFamily);
         Assert.Equal(13, n.Text.FontSize);
-        Assert.False(n.Text.Bold);
+        Assert.True(n.Text.Bold); // the default is not bold, so this is the block's value
         Assert.Equal(16, n.Glyph.Size);
         Assert.Equal("#FFFF0000", n.Glyph.Color);
     }
@@ -189,7 +189,7 @@ public class SkinNoticeTests : IDisposable
         var want = d with
         {
             Background = "#FF112233", CornerRadius = 3, Border = "#FF445566", PadX = 9, PadY = 5,
-            Text = d.Text with { Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Bold = false, Align = "center" },
+            Text = d.Text with { Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Bold = true, Align = "center" },
             Glyph = d.Glyph with { Show = false, Size = 20, Color = "#FFFF0000" },
         };
 
