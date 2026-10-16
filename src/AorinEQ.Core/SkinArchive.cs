@@ -16,6 +16,8 @@ public static class SkinArchive
         // airplay block in skin.json and none of the artwork it names, which the loader then
         // reports as a broken AirPlay bar on somebody else's machine.
         "airplay-empty.png", "airplay-empty.gif", "airplay-full.png", "airplay-full.gif",
+        // Same reasoning for the notice: its block without its artwork arrives as a plain plate.
+        "notice.png", "notice.gif",
         "skin.json",
     };
 

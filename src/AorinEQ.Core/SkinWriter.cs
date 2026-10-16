@@ -5,12 +5,13 @@ namespace AorinEQ.Core;
 /// <summary>Everything a skin save carries besides the images. Defaults mirror
 /// <see cref="SkinLoader"/>'s: text hidden, scale 1, fps 10, single-frame layers, a null
 /// fill range meaning "the bar spans the full image width", the 0.6 mute dim, and no
-/// authorship metadata at all.</summary>
+/// authorship metadata at all, and no notice look. <c>Notice.ArtPath</c> is the SOURCE image
+/// (any folder) or null for a plate.</summary>
 public sealed record SkinConfig(SkinText? Text, double Scale,
     double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1,
     int? FillStartX = null, int? FillEndX = null,
     int MutedFrames = 1, double MutedDim = 0.6,
-    SkinMeta? Meta = null);
+    SkinMeta? Meta = null, SkinNotice? Notice = null);
 
 /// <summary>Writes a skin folder (empty.png + full.png + optional skin.json) for the skin
 /// designer. Image content validation stays with the caller (PngHeader before save,
@@ -50,6 +51,10 @@ public static class SkinWriter
                 CopyLayer(mutedSourcePath, folder, "muted");
             else
                 DeleteLayer(folder, "muted");
+            if (config.Notice?.ArtPath is { } noticeArt)
+                CopyLayer(noticeArt, folder, "notice");
+            else
+                DeleteLayer(folder, "notice");
 
             var jsonPath = Path.Combine(folder, "skin.json");
             bool showText = config.Text is { Show: true };
@@ -83,7 +88,7 @@ public static class SkinWriter
             // cannot draw and the loader reports it as broken.
             if (sourceFolder is not null) CopyAirPlayLayers(sourceFolder, folder);
 
-            if (preservedAirPlay is not null || showText || config.Scale != 1.0 || config.Fps != 10.0
+            if (preservedAirPlay is not null || config.Notice is not null || showText || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
                 || config.MutedFrames != 1 || config.MutedDim != 0.6
                 || config.FillStartX is not null || config.FillEndX is not null
@@ -115,6 +120,7 @@ public static class SkinWriter
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,
                     airplay = preservedAirPlay,
+                    notice = config.Notice is null ? null : BuildNotice(config.Notice),
                 }, JsonWriteOptions);
                 File.WriteAllText(jsonPath, json);
             }
@@ -172,6 +178,48 @@ public static class SkinWriter
         shadowDepth = t.ShadowColor is null || t.ShadowDepth == 2 ? (double?)null : t.ShadowDepth,
         align = t.Align == "left" ? null : t.Align,
     };
+
+    /// <summary>Serializes the notice with only the fields that differ from
+    /// <see cref="SkinLoader.DefaultNotice"/>; positions are written only for art notices, where
+    /// they mean something. Empty text/glyph objects are dropped.</summary>
+    private static object BuildNotice(SkinNotice n)
+    {
+        var d = SkinLoader.DefaultNotice;
+        return new
+        {
+            background = n.Background == d.Background ? null : n.Background,
+            border = n.Border,
+            cornerRadius = n.CornerRadius == d.CornerRadius ? (double?)null : n.CornerRadius,
+            padding = n.PadX == d.PadX && n.PadY == d.PadY ? null : new { x = n.PadX, y = n.PadY },
+            text = NonNullMembers(new Dictionary<string, object?>
+            {
+                ["x"] = n.HasArt ? n.Text.X : null,
+                ["y"] = n.HasArt ? n.Text.Y : null,
+                ["color"] = n.Text.Color == d.Text.Color ? null : n.Text.Color,
+                ["fontFamily"] = n.Text.FontFamily == d.Text.FontFamily ? null : n.Text.FontFamily,
+                ["fontSize"] = n.Text.FontSize == d.Text.FontSize ? null : n.Text.FontSize,
+                ["bold"] = n.Text.Bold == d.Text.Bold ? null : n.Text.Bold,
+                ["align"] = n.Text.Align == "left" ? null : n.Text.Align,
+            }),
+            textWidth = n.HasArt ? n.TextWidth : (int?)null,
+            glyph = NonNullMembers(new Dictionary<string, object?>
+            {
+                ["show"] = n.Glyph.Show ? null : false,
+                ["x"] = n.HasArt ? n.Glyph.X : null,
+                ["y"] = n.HasArt ? n.Glyph.Y : null,
+                ["size"] = n.Glyph.Size == d.Glyph.Size ? null : n.Glyph.Size,
+                ["color"] = n.Glyph.Color,
+            }),
+            frames = n.HasArt && n.ArtFrames != 1 ? n.ArtFrames : (int?)null,
+        };
+    }
+
+    /// <summary>The members that are set, or null when none are (so the whole object is omitted).</summary>
+    private static Dictionary<string, object?>? NonNullMembers(Dictionary<string, object?> members)
+    {
+        var set = members.Where(m => m.Value is not null).ToDictionary(m => m.Key, m => m.Value);
+        return set.Count == 0 ? null : set;
+    }
 
     /// <summary>Copies whichever AirPlay layers the source skin has into the destination.
     ///
