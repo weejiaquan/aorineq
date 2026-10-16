@@ -48,6 +48,8 @@
   does not hide it.
 * **A fully skinnable OSD** — PNG, GIF or sprite-sheet artwork, an optional muted layer, per-pixel
   click-through, and click / drag / scroll on the artwork to set the level.
+* **A themeable device notice** — a skin can draw the "output changed" notice with its own art or
+  plate, and the Dark pill, Minimal bar and Windows 11 styles each have their own.
 * **Percent text you actually style** — font, size, colour, bold, outline, shadow, and left /
   centre / right alignment, anywhere on the image.
 * **Per-skin fill range** — point 0 % and 100 % at the bar inside a wide decorative image, so the
@@ -80,6 +82,8 @@
 * **A tray icon you can actually use** — scroll the wheel over it to change the volume the way you
   can over the Windows one (Ctrl for 1 % steps, Shift for 10 %), middle-click to mute, and pick
   what a left click does.
+* **Dev builds say so** — anything not made by `publish.ps1` is badged in About, dotted amber on
+  the tray icon and tagged "(dev)" in its tooltip.
 * **Windows 11 Fluent UI** — Mica, rounded corners, follows your light/dark theme, and a tray
   icon drawn at runtime that tracks your volume.
 
