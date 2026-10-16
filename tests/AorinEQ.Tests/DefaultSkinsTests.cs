@@ -382,6 +382,126 @@ public class DefaultSkinsTests : IDisposable
         Assert.Equal("{ \"title\": \"mine\" }", File.ReadAllText(Path.Combine(mine, "skin.json")));
     }
 
+    /// <summary>The top-up runs at every launch, unguarded, so a shipped folder whose skin.json
+    /// the JSON node API refuses (duplicate keys throw ArgumentException, not JsonException) must
+    /// be skipped - not crash startup - and must be left exactly as it was.</summary>
+    [Fact]
+    public void A_shipped_skin_json_with_duplicate_keys_is_skipped_untouched()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var folder = Path.Combine(_root, "windows-11");
+        var jsonPath = Path.Combine(folder, "skin.json");
+        File.Delete(Path.Combine(folder, "notice.png"));
+        File.WriteAllText(jsonPath, """{ "title": "a", "title": "b", "scale": 1 }""");
+        var before = File.ReadAllBytes(jsonPath);
+
+        var ex = Record.Exception(() => DefaultSkins.EnsureInstalled(_root));
+
+        _out.WriteLine($"exception: {ex?.GetType().FullName ?? "(none)"} {ex?.Message}");
+        _out.WriteLine("files: " + string.Join(", ", Directory.GetFiles(folder).Select(Path.GetFileName)));
+        Assert.Null(ex);
+        Assert.Equal(before, File.ReadAllBytes(jsonPath));
+        Assert.Empty(Directory.GetFiles(folder, "notice.*"));
+        Assert.Empty(Directory.GetFiles(folder, ".skin.json.*"));
+    }
+
+    /// <summary>GDI+ reports a failed save as ExternalException, which is neither IOException nor
+    /// UnauthorizedAccessException. A directory squatting on notice.png makes Bitmap.Save fail
+    /// that way every time; the top-up must skip the skin, not crash startup.</summary>
+    [Fact]
+    public void A_notice_png_that_cannot_be_written_is_skipped_without_throwing()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var folder = Path.Combine(_root, "windows-10");
+        var jsonPath = Path.Combine(folder, "skin.json");
+        File.Delete(Path.Combine(folder, "notice.png"));
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(jsonPath))!.AsObject();
+        json.Remove("notice");
+        File.WriteAllText(jsonPath, json.ToJsonString());
+        var before = File.ReadAllBytes(jsonPath);
+        Directory.CreateDirectory(Path.Combine(folder, "notice.png"));
+
+        var ex = Record.Exception(() => DefaultSkins.EnsureInstalled(_root));
+
+        _out.WriteLine($"exception: {ex?.GetType().FullName ?? "(none)"} {ex?.Message}");
+        Assert.Null(ex);
+        Assert.Equal(before, File.ReadAllBytes(jsonPath));
+        Assert.True(Directory.Exists(Path.Combine(folder, "notice.png")));
+    }
+
+    /// <summary>The top-up rewrites skin.json through a temp file moved into place; the temp file
+    /// must never be left beside it.</summary>
+    [Fact]
+    public void The_top_up_leaves_no_temp_file_behind()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var folder = Path.Combine(_root, "windows-11");
+        var jsonPath = Path.Combine(folder, "skin.json");
+        File.Delete(Path.Combine(folder, "notice.png"));
+        File.WriteAllText(jsonPath, """{ "title": "mine" }""");
+
+        var topped = DefaultSkins.EnsureInstalled(_root);
+
+        var files = Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(f => f).ToArray();
+        _out.WriteLine("topped: " + string.Join(", ", topped) + "; files: " + string.Join(", ", files));
+        Assert.Equal(["windows-11"], topped);
+        Assert.DoesNotContain(files, f => f!.StartsWith('.'));
+        Assert.Equal("mine", SkinLoader.Load(folder).Meta.Title);
+    }
+
+    /// <summary>The loader reads skin.json case-insensitively, so a hand-written "Notice" block is
+    /// the skin's notice. The top-up must see it too, or it adds a second "notice" next to it.</summary>
+    [Fact]
+    public void A_notice_key_in_any_case_stops_the_top_up()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var folder = Path.Combine(_root, "windows-xp");
+        var jsonPath = Path.Combine(folder, "skin.json");
+        File.Delete(Path.Combine(folder, "notice.png"));
+        File.WriteAllText(jsonPath, """{ "Notice": { "background": "#FF102030" } }""");
+        var before = File.ReadAllBytes(jsonPath);
+
+        var second = DefaultSkins.EnsureInstalled(_root);
+        var skin = SkinLoader.Load(folder);
+
+        _out.WriteLine("second pass: " + (second.Count == 0 ? "(nothing)" : string.Join(", ", second)));
+        _out.WriteLine($"skin.json now: {File.ReadAllText(jsonPath)}; notice background={skin.Notice?.Background}");
+        Assert.Empty(second);
+        Assert.Equal(before, File.ReadAllBytes(jsonPath));
+        Assert.Empty(Directory.GetFiles(folder, "notice.*"));
+        Assert.Equal("#FF102030", skin.Notice?.Background);
+    }
+
+    /// <summary>Turning the notice off on a shipped skin in the designer has to survive the next
+    /// launch. The designer's save goes through SkinWriter with Notice = null; the top-up then
+    /// runs, and must find the "notice": false the writer left rather than restore the art.</summary>
+    [Fact]
+    public void A_shipped_skin_whose_notice_was_turned_off_stays_off()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var folder = Path.Combine(_root, SkinArt.Default);
+        var loaded = SkinLoader.Load(folder);
+        Assert.NotNull(loaded.Notice);
+
+        SkinWriter.Save(_root, SkinArt.Default, loaded.EmptyPath, loaded.FullPath,
+            new SkinConfig(loaded.Text, loaded.Scale, FillStartX: loaded.FillStartX, FillEndX: loaded.FillEndX,
+                Meta: loaded.Meta, Notice: null),
+            loaded.MutedPath);
+        var topped = DefaultSkins.EnsureInstalled(_root);
+        var jsonText = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        var reloaded = SkinLoader.Load(folder);
+
+        _out.WriteLine("topped up: " + (topped.Count == 0 ? "(nothing)" : string.Join(", ", topped)));
+        _out.WriteLine("skin.json: " + jsonText);
+        _out.WriteLine($"notice={reloaded.Notice?.ToString() ?? "(none)"} error={reloaded.NoticeError ?? "(none)"}");
+        Assert.Empty(topped);
+        Assert.Empty(Directory.GetFiles(folder, "notice.*"));
+        using var doc = System.Text.Json.JsonDocument.Parse(jsonText);
+        Assert.Equal(System.Text.Json.JsonValueKind.False, doc.RootElement.GetProperty("notice").ValueKind);
+        Assert.True(reloaded.IsValid, reloaded.Error);
+        Assert.Null(reloaded.Notice);
+    }
+
     /// <summary>Nothing is left behind mid-write. The staging folder is a dot-folder, which
     /// SkinLoader.Scan skips, but one left lying around would still be litter.</summary>
     [Fact]

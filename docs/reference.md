@@ -360,11 +360,14 @@ no art is simply a plate. Art that exists but is not a valid image, or whose hei
 `frames`, fails **soft**: the volume skin is unaffected, the notice falls back to the dark pill, and
 the reason is kept with the skin. A `notice` value that is not an object is treated as if the block
 were absent, so `notice.png`/`.gif`, if present, is still used with the defaults above.
+`"notice": false` is how the Skin Designer records a notice that was turned off.
 
 The four shipped skins each draw their own. A copy of one made before notices existed is topped up
 **additively** the next time AorinEQ starts: only when the folder has no `notice.*` file and
-`skin.json` has no `notice` key, it gains `notice.png` and the block, and nothing else in it is
-touched. Skins you have already given a notice are left alone.
+`skin.json` has no `notice` key (in any letter case, any value — `false` included), it gains
+`notice.png` and the block, and nothing else in it is touched. Skins you have already given a
+notice, or turned it off for, are left alone. A folder the top-up cannot read or write — a
+`skin.json` that is not valid JSON or repeats a key, an unwritable folder — is skipped.
 
 ### Animated skins
 
@@ -408,7 +411,9 @@ without hand-editing anything:
 - Style the device notice: tick **Style the device notice**, then either pick notice art
   (**Browse…**) and place its text box and glyph, or leave the art off and set the plate's colours,
   corner radius, font, size, bold and glyph. It previews on its own checkerboard beside the OSD;
-  with the option off the skin saves no notice and the preview shows the dark pill.
+  with the option off the skin saves no notice and the preview shows the dark pill. Turning it off
+  for a skin that had a notice, or for one of the shipped skins, writes `"notice": false`, so the
+  shipped notice is not restored on the next start.
 - Set the scale, and fill in the optional details (title, author, description, version, tags,
   source URL) that the picker and the gallery show.
 - **Test on desktop** shows the draft as a real OSD at your configured position — clicking,

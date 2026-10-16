@@ -233,8 +233,60 @@ public class SkinNoticeTests : IDisposable
         SkinWriter.Save(Path.GetDirectoryName(folder)!, "stale", Path.Combine(src, "empty.png"), Path.Combine(src, "full.png"),
             new SkinConfig(null, 1.0, Notice: null));
 
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        var info = LoadLogged(folder);
+        _out.WriteLine("after turning the notice off: " + json);
+
+        // The folder had a notice, so turning it off is recorded rather than left as an absence.
         Assert.Empty(Directory.GetFiles(folder, "notice.*"));
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        Assert.Equal(System.Text.Json.JsonValueKind.False, doc.RootElement.GetProperty("notice").ValueKind);
+        Assert.True(info.IsValid, info.Error);
+        Assert.Null(info.Notice);
+        Assert.Null(info.NoticeError);
+    }
+
+    /// <summary>The "notice": false marker only goes where a notice was. A user skin that never
+    /// had one resaves exactly as it did before notices existed - no key, same bytes.</summary>
+    [Fact]
+    public void A_skin_that_never_had_a_notice_resaves_without_a_notice_key()
+    {
+        var src = Path.Combine(_root, "src-plain");
+        Directory.CreateDirectory(src);
+        TestPngs.Write(Path.Combine(src, "empty.png"), 200, 40);
+        TestPngs.Write(Path.Combine(src, "full.png"), 200, 40);
+        var skins = Path.Combine(_root, "skins");
+        var config = new SkinConfig(null, 1.5, Notice: null);
+
+        var folder = SkinWriter.Save(skins, "plain", Path.Combine(src, "empty.png"), Path.Combine(src, "full.png"), config);
+        var first = File.ReadAllBytes(Path.Combine(folder, "skin.json"));
+        SkinWriter.Save(skins, "plain", Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"), config);
+        var second = File.ReadAllBytes(Path.Combine(folder, "skin.json"));
+        _out.WriteLine("first:  " + System.Text.Encoding.UTF8.GetString(first));
+        _out.WriteLine("second: " + System.Text.Encoding.UTF8.GetString(second));
+
+        Assert.DoesNotContain("notice", System.Text.Encoding.UTF8.GetString(second), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(first, second);
+    }
+
+    /// <summary>And a default-everything skin that never had a notice still gets no skin.json.</summary>
+    [Fact]
+    public void A_default_skin_without_a_notice_still_writes_no_skin_json()
+    {
+        var folder = SaveSkin("bare", null);
+        SaveSkin("bare", null);
+
         Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
+    }
+
+    [Fact]
+    public void A_notice_key_of_false_is_no_notice()
+    {
+        var info = LoadLogged(MakeSkin("off", """{"notice": false}"""));
+
+        Assert.True(info.IsValid, info.Error);
+        Assert.Null(info.Notice);
+        Assert.Null(info.NoticeError);
     }
 
     [Fact]
