@@ -403,4 +403,31 @@ public class SettingsTests : IDisposable
 
         Assert.False(Settings.Load(_path).DeviceNoticeEnabled);
     }
+
+    /// <summary>A declined automatic Equalizer APO repair must stay declined across a restart, or
+    /// the app would raise the same UAC prompt at every launch.</summary>
+    [Fact]
+    public void Declined_automatic_repairs_survive_a_restart()
+    {
+        string[] declined = ["{0b416562-6a35-494f-ae1d-3ecc8007dead}", "{a5b9bdab-0155-46a8-9e08-0f36be4b9879}"];
+        (Settings.Default with { EapoAutoRepairDeclined = declined }).Save(_path);
+        _out.WriteLine("saved json: " + File.ReadAllText(_path));
+
+        Assert.Equal(declined, Settings.Load(_path).EapoAutoRepairDeclined);
+    }
+
+    [Fact]
+    public void A_settings_file_from_before_automatic_repair_has_declined_nothing()
+    {
+        new Settings(73, true).Save(_path);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_path))!.AsObject();
+        Assert.True(json.Remove(nameof(Settings.EapoAutoRepairDeclined)),
+            "Save did not write EapoAutoRepairDeclined, so removing it proves nothing.");
+        File.WriteAllText(_path, json.ToJsonString());
+
+        var loaded = Settings.Load(_path);
+
+        Assert.Equal(73, loaded.Percent);
+        Assert.Null(loaded.EapoAutoRepairDeclined);
+    }
 }

@@ -57,7 +57,11 @@ public sealed record Settings(
     AirPlaySetting? AirPlay = null,
     // On for everyone, including a settings file written before this existed: a property the
     // json lacks takes this default, and a notice nobody was told about is how it gets found.
-    bool DeviceNoticeEnabled = true)
+    bool DeviceNoticeEnabled = true,
+    // Endpoint GUIDs whose automatic Equalizer APO repair the user declined or that the repair
+    // refused — never offered unprompted again (see EapoAutoRepair). A driver update gives the
+    // device a NEW GUID, so this cannot suppress the post-update repair it exists for.
+    IReadOnlyList<string>? EapoAutoRepairDeclined = null)
 {
     public static Settings Default { get; } = new(50, false);
 

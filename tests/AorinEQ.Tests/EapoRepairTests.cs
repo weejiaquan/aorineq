@@ -168,10 +168,10 @@ public class EapoRepairTests
     [Fact]
     public void A_value_this_build_cannot_write_back_stops_the_repair()
     {
-        // If it cannot be restored it must not be displaced. A DWORD in the property store is not
-        // something this code writes, so a backup containing one is not a backup.
+        // If it cannot be restored it must not be displaced. A REG_BINARY in the property store is
+        // not something this code writes, so a backup containing one is not a backup.
         var reason = EapoEndpoint.WhyNotRepairable(
-            [new RegValue("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},99", "Unsupported:DWord", null)], Clsids);
+            [new RegValue("{d04e05a6-594b-4fb6-a80d-01af5eed7d1d},99", "Unsupported:Binary", null)], Clsids);
         _out.WriteLine(reason);
         Assert.NotNull(reason);
         Assert.Contains("put back", reason);
@@ -616,6 +616,67 @@ public class EapoRepairTests
 
         Assert.False((usable with { ChildApoValues = [new RegValue("Version", "Unsupported:DWord", null)] })
             .IsRestorable);
+    }
+
+    /// <summary>The shape that refused a real USB DAC (HiBy FC5, 2026-10-16): its FxProperties
+    /// held PKEY_AudioEndpoint_Disable_SysFx as a REG_DWORD 0, which the capture could not record,
+    /// so the repair refused the device. Captured and written back through the PRODUCT's own
+    /// primitives against a real key, including a value with the top bit set.</summary>
+    [Fact]
+    public void A_dword_is_captured_and_written_back_exactly()
+    {
+        var path = @"Software\AorinEQ.Tests\" + Guid.NewGuid().ToString("N");
+        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(path)!;
+        try
+        {
+            const string sysFx = "{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},5";
+            key.SetValue(sysFx, 0, Microsoft.Win32.RegistryValueKind.DWord);
+            key.SetValue("high", unchecked((int)0xFFFFFFFEu), Microsoft.Win32.RegistryValueKind.DWord);
+
+            var zero = EapoEndpoint.Capture(key, sysFx);
+            var high = EapoEndpoint.Capture(key, "high");
+            _out.WriteLine($"captured: {zero.Name}={zero.Kind}:{zero.Data![0]}  high={high.Kind}:{high.Data![0]}");
+            Assert.Equal(RegValue.KindDWord, zero.Kind);
+            Assert.Equal(["0"], zero.Data);
+            Assert.Equal(["4294967294"], high.Data);
+            Assert.True(zero.IsRestorable);
+            Assert.Null(EapoEndpoint.WhyNotRestorable([zero, high]));
+
+            // The repair's FxProperties preflight now passes the DAC's real shape.
+            Assert.Null(EapoEndpoint.WhyNotRepairable([
+                RegValue.Str(EapoEndpoint.FxAssociation, "{00000000-0000-0000-0000-000000000000}"),
+                zero,
+            ], Clsids));
+
+            key.SetValue(sysFx, 1, Microsoft.Win32.RegistryValueKind.DWord);
+            key.DeleteValue("high");
+            EapoEndpoint.WriteValues(key, [zero, high]);
+
+            Assert.Equal(Microsoft.Win32.RegistryValueKind.DWord, key.GetValueKind(sysFx));
+            Assert.Equal(0, key.GetValue(sysFx));
+            Assert.Equal(Microsoft.Win32.RegistryValueKind.DWord, key.GetValueKind("high"));
+            Assert.Equal(unchecked((int)0xFFFFFFFEu), key.GetValue("high"));
+        }
+        finally
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("-1")]
+    [InlineData("4294967296")]
+    [InlineData("0x10")]
+    public void A_dword_that_could_not_be_written_back_is_not_restorable(string? data)
+    {
+        // A hand-edited or corrupted backup. Writing it back would throw mid-revert, so it must be
+        // refused at the preflight instead.
+        var value = new RegValue("x", RegValue.KindDWord, data is null ? null : [data]);
+        _out.WriteLine($"data={data ?? "<null>"} restorable={value.IsRestorable}");
+        Assert.False(value.IsRestorable);
+        Assert.NotNull(EapoEndpoint.WhyNotRestorable([value]));
     }
 
     [Fact]
