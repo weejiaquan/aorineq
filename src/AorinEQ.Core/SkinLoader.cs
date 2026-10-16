@@ -381,47 +381,67 @@ public static class SkinLoader
         if (json is null && !hasArt) return (null, null);
 
         var d = DefaultNotice;
-        double fontSize = Math.Clamp(json?.Text?.FontSize ?? d.Text.FontSize, MinFontSize, MaxFontSize);
-        var text = new SkinText(true, json?.Text?.X ?? 0, json?.Text?.Y ?? 0,
-            Color: EmptyToDefault(json?.Text?.Color, d.Text.Color),
-            FontFamily: EmptyToDefault(json?.Text?.FontFamily, d.Text.FontFamily),
-            FontSize: fontSize,
-            Bold: json?.Text?.Bold ?? d.Text.Bold,
-            Align: NormalizeAlign(json?.Text?.Align));
-        double glyphSize = Math.Clamp(json?.Glyph?.Size ?? d.Glyph.Size, MinFontSize, MaxFontSize);
-        var plate = d with
+        var plate = ClampNotice(d with
         {
             Background = EmptyToDefault(json?.Background, d.Background),
             Border = NullIfBlank(json?.Border),
-            CornerRadius = Math.Clamp(json?.CornerRadius ?? d.CornerRadius, 0, MaxCornerRadius),
-            PadX = Math.Clamp(json?.Padding?.X ?? d.PadX, 0, MaxPadding),
-            PadY = Math.Clamp(json?.Padding?.Y ?? d.PadY, 0, MaxPadding),
-            Text = text,
+            CornerRadius = json?.CornerRadius ?? d.CornerRadius,
+            PadX = json?.Padding?.X ?? d.PadX,
+            PadY = json?.Padding?.Y ?? d.PadY,
+            Text = new SkinText(true, json?.Text?.X ?? 0, json?.Text?.Y ?? 0,
+                Color: EmptyToDefault(json?.Text?.Color, d.Text.Color),
+                FontFamily: EmptyToDefault(json?.Text?.FontFamily, d.Text.FontFamily),
+                FontSize: json?.Text?.FontSize ?? d.Text.FontSize,
+                Bold: json?.Text?.Bold ?? d.Text.Bold,
+                Align: NormalizeAlign(json?.Text?.Align)),
             Glyph = new SkinNoticeGlyph(json?.Glyph?.Show ?? true, json?.Glyph?.X ?? d.Glyph.X, 0,
-                glyphSize, NullIfBlank(json?.Glyph?.Color)),
-        };
+                json?.Glyph?.Size ?? d.Glyph.Size, NullIfBlank(json?.Glyph?.Color)),
+        });
         if (!hasArt) return (plate, null);
 
         int frames = Math.Max(1, json?.Frames ?? 1);
         var art = ResolveLayer(folder, "notice", frames);
         if (art.Error is not null) return (null, art.Error);
-        int w = art.LogicalWidth, h = art.LogicalHeight;
 
-        // Defaults centre the glyph and the text line vertically; 1.33 is the line-box-to-em ratio
-        // the AirPlay power glyph is centred with as well.
-        int textX = Math.Clamp(json?.Text?.X ?? 48, 0, w);
-        int textY = Math.Clamp(json?.Text?.Y ?? (h - (int)Math.Round(fontSize * 1.33)) / 2, 0, h);
-        int glyphX = Math.Clamp(json?.Glyph?.X ?? 16, 0, w);
-        int glyphY = Math.Clamp(json?.Glyph?.Y ?? (int)((h - glyphSize) / 2), 0, h);
-        int textWidth = Math.Clamp(json?.TextWidth ?? w - textX - 12, 0, w - textX);
+        return (PlaceNoticeArt(plate, art.Path, art.IsGif, art.IsGif ? 1 : frames,
+            art.LogicalWidth, art.LogicalHeight,
+            json?.Text?.X, json?.Text?.Y, json?.Glyph?.X, json?.Glyph?.Y, json?.TextWidth), null);
+    }
 
-        return (plate with
+    /// <summary>A notice's plate values pulled into range: corner radius and padding 0..64, text
+    /// and glyph sizes 4..200. The loader and the Skin Designer both go through here, so what the
+    /// designer previews is what the saved skin loads as.</summary>
+    public static SkinNotice ClampNotice(SkinNotice look) => look with
+    {
+        CornerRadius = Math.Clamp(look.CornerRadius, 0, MaxCornerRadius),
+        PadX = Math.Clamp(look.PadX, 0, MaxPadding),
+        PadY = Math.Clamp(look.PadY, 0, MaxPadding),
+        Text = look.Text with { FontSize = Math.Clamp(look.Text.FontSize, MinFontSize, MaxFontSize) },
+        Glyph = look.Glyph with { Size = Math.Clamp(look.Glyph.Size, MinFontSize, MaxFontSize) },
+    };
+
+    /// <summary>Puts a (clamped) plate on notice art of <paramref name="width"/> x
+    /// <paramref name="height"/> logical pixels. Positions left null take the defaults, which centre
+    /// the glyph and the text line vertically (1.33 is the line-box-to-em ratio the AirPlay power
+    /// glyph is centred with as well); every position is clamped into the art, and the text width
+    /// into what is left of it right of the text.</summary>
+    public static SkinNotice PlaceNoticeArt(SkinNotice plate, string artPath, bool artIsGif, int artFrames,
+        int width, int height, int? textX, int? textY, int? glyphX, int? glyphY, int? textWidth)
+    {
+        int w = width, h = height;
+        int tx = Math.Clamp(textX ?? 48, 0, w);
+        int ty = Math.Clamp(textY ?? (h - (int)Math.Round(plate.Text.FontSize * 1.33)) / 2, 0, h);
+        int gx = Math.Clamp(glyphX ?? 16, 0, w);
+        int gy = Math.Clamp(glyphY ?? (int)((h - plate.Glyph.Size) / 2), 0, h);
+        int tw = Math.Clamp(textWidth ?? w - tx - 12, 0, w - tx);
+
+        return plate with
         {
-            Text = text with { X = textX, Y = textY },
-            Glyph = plate.Glyph with { X = glyphX, Y = glyphY },
-            ArtPath = art.Path, ArtIsGif = art.IsGif, ArtFrames = art.IsGif ? 1 : frames,
-            Width = w, Height = h, TextWidth = textWidth,
-        }, null);
+            Text = plate.Text with { X = tx, Y = ty },
+            Glyph = plate.Glyph with { X = gx, Y = gy },
+            ArtPath = artPath, ArtIsGif = artIsGif, ArtFrames = artFrames,
+            Width = w, Height = h, TextWidth = tw,
+        };
     }
 
     /// <summary>Pulls a declared hit region inside the artwork it belongs to.</summary>

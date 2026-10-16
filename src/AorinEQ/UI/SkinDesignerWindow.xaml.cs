@@ -54,6 +54,20 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private string _outlineColor = "#FF000000";
     private string _shadowColor = "#FF000000";
 
+    // The device notice. _noticeBase is the look being edited: it carries the fields the section
+    // has no control for (padding, text alignment, a sprite sheet's frame count) through an edit
+    // untouched. Colours are hex strings like the text style's; a null border means none, a null
+    // glyph colour means the text colour.
+    private SkinNotice _noticeBase = SkinLoader.DefaultNotice;
+    private string? _noticeArtSource; // SOURCE image; null = a plate
+    private string _noticeBackground = SkinLoader.DefaultNotice.Background;
+    private string? _noticeBorder;
+    private string _noticeTextColor = SkinLoader.DefaultNotice.Text.Color;
+    private string? _noticeGlyphColor;
+    // What the notice preview last drew, so a drag that re-composes the volume preview on every
+    // mouse move does not re-decode the notice art each time.
+    private (SkinNotice Look, double Scale)? _shownNotice;
+
     /// <summary>Raised after a successful save or zip import with the skin's name. App refreshes
     /// the Settings picker and hot-reloads the live OSD when the active skin was touched.</summary>
     public event Action<string>? SkinSaved;
@@ -66,7 +80,11 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         _initializing = true;
         foreach (var family in Fonts.SystemFontFamilies
             .Select(f => f.Source).OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+        {
             FontCombo.Items.Add(family);
+            NoticeFontCombo.Items.Add(family);
+        }
+        LoadNotice(null);
         _initializing = false;
         _emptyAnimTimer.Tick += (_, _) => AdvanceFrame(PreviewLayer.Empty);
         _fullAnimTimer.Tick += (_, _) => AdvanceFrame(PreviewLayer.Full);
@@ -85,6 +103,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             }
         };
         PopulateSkinList(selectName: null);
+        RefreshPreview();
         Validate();
     }
 
@@ -133,6 +152,12 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             StatusText.Text = info.Error;
             return;
         }
+        LoadSkin(info);
+    }
+
+    /// <summary>Fills the editor from a loaded, valid skin.</summary>
+    internal void LoadSkin(SkinInfo info)
+    {
         _editingSkinName = info.Name;
         _emptySource = info.EmptyPath;
         _fullSource = info.FullPath;
@@ -156,6 +181,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         MutedDimLabel.Text = info.MutedDim.ToString("0.00");
         FillStartBox.Text = info.FillStartX.ToString();
         FillEndBox.Text = info.FillEndX.ToString();
+        LoadNotice(info.Notice);
         _initializing = false;
         ReloadPreviewData();
         StatusText.Text = Loc.T("designer.status.editing-change-the-name", info.Name);
@@ -182,6 +208,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         FillEndBox.Text = "";
         LoadTextStyle(null); // reset styling controls to defaults
         LoadMeta(SkinMeta.None); // a new skin starts uncredited, never with the last one's author
+        LoadNotice(null);
         _initializing = false;
         ShowLayerPath(EmptyPathText, null);
         ShowLayerPath(FullPathText, null);
@@ -208,11 +235,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         ReloadPreviewData();
     }
 
+    private const string ImageFilter = "Images (*.png;*.gif)|*.png;*.gif";
+
     private void Browse(PreviewLayer layer)
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Filter = "Images (*.png;*.gif)|*.png;*.gif",
+            Filter = ImageFilter,
             Title = layer switch
             {
                 PreviewLayer.Empty => Loc.T("designer.choose-the-empty-layer-0-artwork"),
@@ -557,6 +586,14 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             FillEndBox.Text = ParseFillEnd().ToString();
             _initializing = false;
         }
+        if (_noticeArtSource is not null
+            && (ReferenceEquals(sender, NoticeTextXBox) || ReferenceEquals(sender, NoticeTextYBox)
+                || ReferenceEquals(sender, NoticeTextWidthBox) || ReferenceEquals(sender, NoticeGlyphXBox)
+                || ReferenceEquals(sender, NoticeGlyphYBox)))
+        {
+            // Same canonicalization: a position shows the value actually used, clamped into the art.
+            ShowNoticePositions(BuildNotice());
+        }
         RefreshPreview();
         Validate();
     }
@@ -571,6 +608,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     /// at (x*scale, y*scale).</summary>
     private void RefreshPreview()
     {
+        RefreshNoticePreview(); // first: the notice previews whether or not the bar has artwork yet
         if (_emptyFrames is null || _fullFrames is null)
         {
             PreviewCanvas.Visibility = Visibility.Collapsed;
@@ -724,7 +762,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         _textColor = t?.Color ?? "#FFFFFFFF";
         _outlineColor = t?.OutlineColor ?? "#FF000000";
         _shadowColor = t?.ShadowColor ?? "#FF000000";
-        SelectFont(t?.FontFamily ?? "Segoe UI");
+        SelectFont(FontCombo, t?.FontFamily ?? "Segoe UI");
         SelectAlign(t?.Align ?? "left");
         FontSizeBox.Text = (t?.FontSize ?? 14).ToString("0.##");
         BoldCheck.IsChecked = t?.Bold ?? false; // default = SemiBold baseline, so a new plain number saves as {show,x,y}
@@ -736,20 +774,20 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         UpdateSwatches();
     }
 
-    private void SelectFont(string family)
+    private static void SelectFont(System.Windows.Controls.ComboBox combo, string family)
     {
-        foreach (string item in FontCombo.Items)
+        foreach (string item in combo.Items)
         {
             if (string.Equals(item, family, StringComparison.OrdinalIgnoreCase))
             {
-                FontCombo.SelectedItem = item;
+                combo.SelectedItem = item;
                 return;
             }
         }
         // Unknown/uninstalled family: keep the authored name as editable text so Save preserves
         // it verbatim instead of rewriting it to the fallback.
-        FontCombo.SelectedIndex = -1;
-        FontCombo.Text = family;
+        combo.SelectedIndex = -1;
+        combo.Text = family;
     }
 
     private void SelectAlign(string align)
@@ -770,6 +808,10 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         TextColorSwatch.Background = SwatchBrush(_textColor);
         OutlineColorSwatch.Background = SwatchBrush(_outlineColor);
         ShadowColorSwatch.Background = SwatchBrush(_shadowColor);
+        NoticeBackgroundSwatch.Background = SwatchBrush(_noticeBackground);
+        NoticeBorderSwatch.Background = SwatchBrush(_noticeBorder ?? "#00000000");
+        NoticeTextColorSwatch.Background = SwatchBrush(_noticeTextColor);
+        NoticeGlyphColorSwatch.Background = SwatchBrush(_noticeGlyphColor ?? _noticeTextColor);
     }
 
     private static System.Windows.Media.Brush SwatchBrush(string hex)
@@ -789,32 +831,216 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         if (PickColor(ref _shadowColor)) ShadowCheck.IsChecked = true;
     }
 
-    /// <summary>Opens the native Windows color picker (WinForms, already referenced) seeded with
-    /// the current color; on OK stores it back as #AARRGGBB and refreshes preview + swatches.</summary>
+    private void OnPickNoticeBackground(object sender, RoutedEventArgs e) => PickColor(ref _noticeBackground);
+    private void OnPickNoticeTextColor(object sender, RoutedEventArgs e) => PickColor(ref _noticeTextColor);
+
+    // Border and glyph colour start unset (no border; the text colour), so the picker opens on
+    // what the preview currently shows for them.
+    private void OnPickNoticeBorder(object sender, RoutedEventArgs e)
+    {
+        if (AskColor(_noticeBorder ?? _noticeBackground) is not { } picked) return;
+        _noticeBorder = picked;
+        OnColorPicked();
+    }
+
+    private void OnPickNoticeGlyphColor(object sender, RoutedEventArgs e)
+    {
+        if (AskColor(_noticeGlyphColor ?? _noticeTextColor) is not { } picked) return;
+        _noticeGlyphColor = picked;
+        OnColorPicked();
+    }
+
+    /// <summary>Opens the colour picker on <paramref name="target"/>; on OK stores the choice back
+    /// and refreshes preview + swatches.</summary>
     private bool PickColor(ref string target)
+    {
+        if (AskColor(target) is not { } picked) return false;
+        target = picked;
+        OnColorPicked();
+        return true;
+    }
+
+    private void OnColorPicked()
+    {
+        UpdateSwatches();
+        RefreshPreview();
+        Validate();
+    }
+
+    /// <summary>Opens the native Windows color picker (WinForms, already referenced) seeded with
+    /// <paramref name="current"/>; returns the choice as #AARRGGBB, or null when cancelled.</summary>
+    private static string? AskColor(string current)
     {
         using var dialog = new System.Windows.Forms.ColorDialog { FullOpen = true, AnyColor = true };
         try
         {
-            var current = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(target);
-            dialog.Color = System.Drawing.Color.FromArgb(current.A, current.R, current.G, current.B);
+            var seed = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(current);
+            dialog.Color = System.Drawing.Color.FromArgb(seed.A, seed.R, seed.G, seed.B);
         }
         catch (FormatException) { }
         catch (NotSupportedException) { }
 
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK)
-            return false;
+            return null;
         var c = dialog.Color;
         // ColorDialog drops alpha; keep the previous alpha so a translucent color stays translucent.
         byte alpha = 0xFF;
-        try { alpha = ((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(target)).A; }
+        try { alpha = ((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(current)).A; }
         catch (FormatException) { }
         catch (NotSupportedException) { }
-        target = $"#{alpha:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+        return $"#{alpha:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+    }
+
+    // ----- the device notice -----
+
+    /// <summary>Fills the notice section from a skin's notice, or turns it off for null. Callers
+    /// that are mid bulk-update keep their <see cref="_initializing"/>.</summary>
+    private void LoadNotice(SkinNotice? notice)
+    {
+        bool wasInitializing = _initializing;
+        _initializing = true;
+        var look = notice ?? SkinLoader.DefaultNotice;
+        _noticeBase = look;
+        NoticeEnableCheck.IsChecked = notice is not null;
+        _noticeBackground = look.Background;
+        _noticeBorder = look.Border;
+        _noticeTextColor = look.Text.Color;
+        _noticeGlyphColor = look.Glyph.Color;
+        NoticeRadiusBox.Text = look.CornerRadius.ToString("0.##");
+        SelectFont(NoticeFontCombo, look.Text.FontFamily);
+        NoticeFontSizeBox.Text = look.Text.FontSize.ToString("0.##");
+        NoticeBoldCheck.IsChecked = look.Text.Bold;
+        NoticeShowGlyphCheck.IsChecked = look.Glyph.Show;
+        NoticeGlyphSizeBox.Text = look.Glyph.Size.ToString("0.##");
+        ShowNoticeArt(look.ArtPath);
+        ShowNoticePositions(look);
         UpdateSwatches();
+        _initializing = wasInitializing;
+    }
+
+    /// <summary>Adopts <paramref name="path"/> as the notice's art source (null = a plate) and
+    /// shows or hides the positions that only mean something on art.</summary>
+    private void ShowNoticeArt(string? path)
+    {
+        _noticeArtSource = path;
+        if (path is null)
+        {
+            NoticeArtPathText.Text = Loc.T("designer.notice.art.none");
+            NoticeArtPathText.ToolTip = null;
+        }
+        else
+        {
+            ShowLayerPath(NoticeArtPathText, path);
+        }
+        NoticeArtPanel.Visibility = path is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ShowNoticePositions(SkinNotice look)
+    {
+        bool wasInitializing = _initializing;
+        _initializing = true;
+        NoticeTextXBox.Text = look.Text.X.ToString();
+        NoticeTextYBox.Text = look.Text.Y.ToString();
+        NoticeTextWidthBox.Text = look.TextWidth.ToString();
+        NoticeGlyphXBox.Text = look.Glyph.X.ToString();
+        NoticeGlyphYBox.Text = look.Glyph.Y.ToString();
+        _initializing = wasInitializing;
+    }
+
+    private void OnBrowseNoticeArt(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog { Filter = ImageFilter };
+        if (dialog.ShowDialog(this) == true) SetNoticeArt(dialog.FileName);
+    }
+
+    private void OnClearNoticeArt(object sender, RoutedEventArgs e) => ClearNoticeArt();
+
+    /// <summary>Puts <paramref name="path"/> under the notice, placed where the loader would place
+    /// it by default. Art that does not read is refused with the reason, leaving the notice as it
+    /// was.</summary>
+    internal void SetNoticeArt(string path)
+    {
+        if (ReadLayerMeta(path, 1).Error is { } error)
+        {
+            StatusText.Text = error;
+            return;
+        }
+        _noticeBase = _noticeBase with { ArtFrames = 1 }; // new art is one frame, whatever came before
+        ShowNoticeArt(path);
+        _initializing = true;
+        // Blank positions take the loader's defaults; showing the result makes them editable.
+        foreach (var box in new[] { NoticeTextXBox, NoticeTextYBox, NoticeTextWidthBox, NoticeGlyphXBox, NoticeGlyphYBox })
+            box.Text = "";
+        ShowNoticePositions(BuildNotice());
+        _initializing = false;
         RefreshPreview();
-        Validate();
-        return true;
+    }
+
+    /// <summary>Takes the art away: the notice is a plate again.</summary>
+    internal void ClearNoticeArt()
+    {
+        ShowNoticeArt(null);
+        RefreshPreview();
+    }
+
+    /// <summary>The notice the section describes, or null while it is off (the skin then carries
+    /// no notice and the app draws its own).</summary>
+    internal SkinNotice? CurrentNotice() => NoticeEnableCheck.IsChecked == true ? BuildNotice() : null;
+
+    /// <summary>The section's look, clamped by the loader's own rules so the preview and the save
+    /// show exactly what the saved skin will load as. A blank or unparsable box keeps the value
+    /// being edited; a blank position on art takes the loader's default.</summary>
+    private SkinNotice BuildNotice()
+    {
+        var b = _noticeBase;
+        var plate = SkinLoader.ClampNotice(b with
+        {
+            Background = _noticeBackground,
+            Border = _noticeBorder,
+            CornerRadius = double.TryParse(NoticeRadiusBox.Text, out var r) ? r : b.CornerRadius,
+            Text = b.Text with
+            {
+                Color = _noticeTextColor,
+                // Editable combo, as for the percent text: an uninstalled authored font is kept.
+                FontFamily = string.IsNullOrWhiteSpace(NoticeFontCombo.Text)
+                    ? SkinLoader.DefaultNotice.Text.FontFamily : NoticeFontCombo.Text.Trim(),
+                FontSize = double.TryParse(NoticeFontSizeBox.Text, out var fs) ? fs : b.Text.FontSize,
+                Bold = NoticeBoldCheck.IsChecked == true,
+            },
+            Glyph = b.Glyph with
+            {
+                Show = NoticeShowGlyphCheck.IsChecked == true,
+                Size = double.TryParse(NoticeGlyphSizeBox.Text, out var gs) ? gs : b.Glyph.Size,
+                Color = _noticeGlyphColor,
+            },
+            ArtPath = null, ArtIsGif = false, ArtFrames = 1, Width = 0, Height = 0, TextWidth = 0,
+        });
+        if (_noticeArtSource is null) return plate;
+
+        bool isGif = IsGif(_noticeArtSource);
+        int frames = isGif ? 1 : b.ArtFrames;
+        if (ReadLayerMeta(_noticeArtSource, frames).Size is not { } size) return plate; // unreadable now: a plate
+        return SkinLoader.PlaceNoticeArt(plate, _noticeArtSource, isGif, frames, size.Width, size.Height,
+            ParseOptionalInt(NoticeTextXBox), ParseOptionalInt(NoticeTextYBox),
+            ParseOptionalInt(NoticeGlyphXBox), ParseOptionalInt(NoticeGlyphYBox),
+            ParseOptionalInt(NoticeTextWidthBox));
+    }
+
+    private static int? ParseOptionalInt(System.Windows.Controls.TextBox box) =>
+        int.TryParse(box.Text, out var v) ? v : null;
+
+    /// <summary>Draws the sample notice in the section's look - or, while the section is off, the
+    /// default plate the app would draw - at the skin's scale.</summary>
+    private void RefreshNoticePreview()
+    {
+        NoticePanel.IsEnabled = NoticeEnableCheck.IsChecked == true;
+        var shown = (CurrentNotice() ?? SkinLoader.DefaultNotice, ScaleSlider.Value);
+        if (shown != _shownNotice)
+        {
+            _shownNotice = shown;
+            NoticePreview.Apply(shown.Item1, shown.Item2);
+        }
+        NoticePreview.SetText(Loc.T("designer.notice.sample"));
     }
 
     private SkinConfig CurrentConfig()
@@ -833,7 +1059,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             // Rounded so slider tick accumulation (12 × 0.05) can't miss the 0.6 default check.
             MutedFrames: _mutedSource is null || IsGif(_mutedSource) ? 1 : ParseFrames(MutedFramesBox),
             MutedDim: Math.Round(MutedDimSlider.Value, 2),
-            Meta: CurrentMeta());
+            Meta: CurrentMeta(),
+            Notice: CurrentNotice());
     }
 
     // ----- preview dragging: the percent number and the two fill-range handles are all
@@ -929,8 +1156,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         try
         {
             CleanupTestOsd();
+            var config = CurrentConfig();
             var folder = SkinWriter.Save(ApoPaths.GetSkinsRoot(), name, _emptySource, _fullSource,
-                CurrentConfig(), _mutedSource);
+                config, _mutedSource);
             // Adopt the saved copies as the working sources (keeping each source's extension —
             // a GIF layer saved as empty.gif), so further edits are in-place.
             _emptySource = Path.Combine(folder, "empty" + (IsGif(_emptySource) ? ".gif" : ".png"));
@@ -942,6 +1170,12 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
                 _mutedSource = Path.Combine(folder, "muted" + (IsGif(_mutedSource) ? ".gif" : ".png"));
                 ShowLayerPath(MutedPathText, _mutedSource);
             }
+            // The notice art is adopted the same way. A notice saved without art deleted any
+            // notice.* in the folder, so a source that lived there is gone and is let go.
+            if (config.Notice is { HasArt: true })
+                ShowNoticeArt(Path.Combine(folder, "notice" + (IsGif(_noticeArtSource) ? ".gif" : ".png")));
+            else if (_noticeArtSource is not null && !File.Exists(_noticeArtSource))
+                ShowNoticeArt(null);
             _editingSkinName = name;
             PopulateSkinList(selectName: name);
             StatusText.Text = Loc.T("designer.status.saved", name);
