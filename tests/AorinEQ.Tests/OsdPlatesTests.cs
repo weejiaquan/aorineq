@@ -50,7 +50,7 @@ public class OsdPlatesTests(ITestOutputHelper output)
         Assert.Equal(10, p.PadX);
         Assert.Equal(4, p.PadY);
         Assert.Equal(12, p.Text.FontSize);
-        Assert.True(p.Text.Bold);
+        Assert.False(p.Text.Bold); // not bold: drawn SemiBold, the notice's long-standing weight
         Assert.Equal(14, p.Glyph.Size);
     }
 

@@ -35,9 +35,6 @@ public sealed class NoticeView : UserControl
     /// <summary>'Speakers' - the same codepoint in Segoe Fluent Icons and Segoe MDL2 Assets.</summary>
     public const string GlyphDevice = "";
 
-    // The volume bar's own size: a short name gets a plate the size of the bar it replaces.
-    private const double PlateMinWidth = 300;
-    private const double PlateMinHeight = 64;
     private const double GlyphColumnWidth = 32;
 
     private readonly Grid _root = new();
@@ -95,7 +92,8 @@ public sealed class NoticeView : UserControl
                 frame = SkinFrames.Load(look.ArtPath!, look.ArtFrames, 10).Frames[0];
             }
             catch (Exception ex) when (ex is NotSupportedException or FileFormatException
-                                           or IOException or ArgumentException)
+                                           or IOException or ArgumentException
+                                           or UnauthorizedAccessException)
             {
                 Apply(SkinLoader.DefaultNotice, 1.0);
                 return;
@@ -117,8 +115,9 @@ public sealed class NoticeView : UserControl
         if (_art.Visibility == Visibility.Visible) return new Size(_art.Width, _art.Height);
 
         PlateBorder.Measure(new Size(maxWidth, double.PositiveInfinity));
-        return new Size(Math.Max(PlateMinWidth, PlateBorder.DesiredSize.Width),
-            Math.Max(PlateMinHeight, PlateBorder.DesiredSize.Height));
+        // Never smaller than the volume bar it replaces, so a short name does not get a sliver.
+        return new Size(Math.Max(OsdWindow.DarkPillWidth, PlateBorder.DesiredSize.Width),
+            Math.Max(OsdWindow.DarkPillHeight, PlateBorder.DesiredSize.Height));
     }
 
     /// <summary>A brush for a colour a skin wrote, falling back to <paramref name="fallback"/>
@@ -192,20 +191,21 @@ public sealed class NoticeView : UserControl
     }
 
     /// <summary>The name and the glyph, which look the same on a plate and on art. The glyph takes
-    /// the text's colour unless the look names its own.</summary>
+    /// the text's colour unless the look names its own that parses.</summary>
     private void StyleText(SkinNotice look, double scale)
     {
         var d = SkinLoader.DefaultNotice;
         NoticeText.Foreground = Paint(look.Text.Color, d.Text.Color);
-        NoticeText.FontFamily = new FontFamily(look.Text.FontFamily);
+        // The default family is left unset so the name inherits the window's AppFontFamily, whose
+        // fallback chain carries CJK names; only a family a skin chose is set outright.
+        if (look.Text.FontFamily == d.Text.FontFamily) NoticeText.ClearValue(TextBlock.FontFamilyProperty);
+        else NoticeText.FontFamily = new FontFamily(look.Text.FontFamily);
         NoticeText.FontSize = look.Text.FontSize * scale;
         // SemiBold rather than Normal for a look that is not bold: the weight the notice name
         // has always had.
         NoticeText.FontWeight = look.Text.Bold ? FontWeights.Bold : FontWeights.SemiBold;
 
-        NoticeGlyph.Foreground = look.Glyph.Color is null
-            ? NoticeText.Foreground
-            : Paint(look.Glyph.Color, d.Text.Color);
+        NoticeGlyph.Foreground = PercentTextRenderer.Brush(look.Glyph.Color) ?? NoticeText.Foreground;
         NoticeGlyph.FontSize = look.Glyph.Size * scale;
         NoticeGlyph.Visibility = look.Glyph.Show ? Visibility.Visible : Visibility.Collapsed;
     }

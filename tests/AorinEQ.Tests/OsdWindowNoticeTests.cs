@@ -285,6 +285,81 @@ public class OsdWindowNoticeTests
     }
 
     [Fact]
+    public void The_dark_pill_notice_is_semibold_and_a_bold_skin_notice_is_bold()
+    {
+        var bold = SkinLoader.DefaultNotice with { Text = SkinLoader.DefaultNotice.Text with { Bold = true } };
+
+        var (pill, skin) = With(osd =>
+        {
+            osd.ShowNotice("Speakers");
+            var p = Notice(osd).NoticeText.FontWeight;
+
+            osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+            osd.SetSkinNotice(bold, 1.0);
+            osd.ShowNotice("Speakers");
+            return (p, Notice(osd).NoticeText.FontWeight);
+        });
+
+        _out.WriteLine($"dark-pill weight {pill}; bold skin weight {skin}");
+        Assert.Equal(FontWeights.SemiBold, pill);
+        Assert.Equal(FontWeights.Bold, skin);
+    }
+
+    [Fact]
+    public void The_default_family_inherits_the_app_font_chain_and_a_skin_family_is_its_own()
+    {
+        var tahoma = SkinLoader.DefaultNotice with { Text = SkinLoader.DefaultNotice.Text with { FontFamily = "Tahoma" } };
+
+        var (appFamily, pillFamily, skinFamily) = With(osd =>
+        {
+            var app = (System.Windows.Media.FontFamily)Application.Current.Resources["AppFontFamily"];
+            osd.ShowNotice("Speakers");
+            var p = Notice(osd).NoticeText.FontFamily;
+
+            osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+            osd.SetSkinNotice(tahoma, 1.0);
+            osd.ShowNotice("Speakers");
+            var s = Notice(osd).NoticeText.FontFamily;
+
+            // And back: a later default look must not keep the skin's family.
+            osd.SetSkinNotice(null, 1.0);
+            osd.ShowNotice("Speakers");
+            Assert.Same(app, Notice(osd).NoticeText.FontFamily);
+            return (app, p, s);
+        });
+
+        _out.WriteLine($"AppFontFamily {appFamily.Source}; dark-pill {pillFamily.Source}; skin {skinFamily.Source}");
+        // Same instance, not just the same name: the fixture's resource is "Segoe UI" too, and only
+        // inheritance hands back the resource object itself.
+        Assert.Same(appFamily, pillFamily);
+        Assert.Equal("Tahoma", skinFamily.Source);
+    }
+
+    [Fact]
+    public void An_unparseable_glyph_colour_takes_the_notices_own_text_colour()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var look = d with
+        {
+            Text = d.Text with { Color = "#FF00FF00" },
+            Glyph = d.Glyph with { Color = "not-a-colour" },
+        };
+
+        var (text, glyph) = With(osd =>
+        {
+            osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+            osd.SetSkinNotice(look, 1.0);
+            osd.ShowNotice("Speakers");
+            var view = Notice(osd);
+            return (ColorOf(view.NoticeText.Foreground), ColorOf(view.NoticeGlyph.Foreground));
+        });
+
+        _out.WriteLine($"text {text}, glyph {glyph}");
+        Assert.Equal(Parse("#FF00FF00"), text);
+        Assert.Equal(text, glyph);
+    }
+
+    [Fact]
     public void Unparseable_skin_colours_fall_back_rather_than_throw()
     {
         var d = SkinLoader.DefaultNotice;
