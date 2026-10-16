@@ -120,6 +120,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 ? Loc.T("settings.not-elevated-in-this-session-restart")
                 : Loc.T("settings.currently-running-without-elevation");
         VersionText.Text = "AorinEQ " + version;
+        ShowBuild(BuildInfo.Current);
         ProtocolLinksBox.IsChecked = settings.ProtocolLinksEnabled;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
 
@@ -144,7 +145,39 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         // Volume, which is what they came for.
         Navigate(SettingsSections.LandingSection(settings.HasSeenDiscover));
         Loaded += (_, _) => ApplyPendingSection();
+
+        // Subscribed last, after everything above that can throw: Loc.LanguageChanged is STATIC,
+        // and a constructor that threw after subscribing would leave the half-built window rooted.
+        Loc.LanguageChanged += OnAppLanguageChanged;
     }
+
+    /// <summary>The build the About card is describing, kept so a language change can re-render it.</summary>
+    private BuildInfo _build = BuildInfo.Current;
+
+    /// <summary>Marks a dev build in the About card: the badge, and the commit, branch and build
+    /// time beside it. A release shows neither. Set from code rather than bound, because the details
+    /// are a format over the build's own values — hence <see cref="OnAppLanguageChanged"/>.</summary>
+    internal void ShowBuild(BuildInfo build)
+    {
+        _build = build;
+        var shown = build.IsDev ? Visibility.Visible : Visibility.Collapsed;
+        DevBuildBadge.Visibility = shown;
+        DevBuildDetails.Visibility = shown;
+        if (!build.IsDev) return;
+
+        string unknown = Loc.T("settings.about.unknown");
+        DevBuildBadgeText.Text = Loc.T("settings.about.dev-build");
+        DevBuildDetails.Text = Loc.T("settings.about.dev-build-details",
+            build.ShortCommit ?? unknown,
+            build.Branch ?? unknown,
+            build.BuiltAt?.ToLocalTime().ToString("g") ?? unknown);
+    }
+
+    /// <summary>Loc raises LanguageChanged on whichever thread set the language, and the About
+    /// card's controls belong to this window's thread, so the repaint is queued there. Queued
+    /// rather than waited for: the thread that changed the language has no reason to block on a
+    /// window that may not even be showing.</summary>
+    private void OnAppLanguageChanged() => Dispatcher.BeginInvoke(() => ShowBuild(_build));
 
     /// <summary>Takes the six section bodies out of the collapsed holder they are declared in, so
     /// exactly one is ever parented — a UIElement can only have one parent, and the NavigationView
@@ -878,6 +911,15 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     {
         e.Cancel = true; // App owns lifetime; hide like the OSD
         Hide();
+    }
+
+    /// <summary>Closing is cancelled (the window is hidden instead), so this runs only when the
+    /// window is really torn down — at application shutdown, which closes windows regardless.
+    /// Releases the static language subscription that would otherwise root the window.</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        Loc.LanguageChanged -= OnAppLanguageChanged;
+        base.OnClosed(e);
     }
 
     // ---- HUD ----

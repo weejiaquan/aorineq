@@ -27,6 +27,10 @@ public static class TrayGlyph
     private static readonly Color DarkTaskbarGlyph = Color.FromArgb(255, 255, 255, 255);
     private static readonly Color LightTaskbarGlyph = Color.FromArgb(255, 25, 25, 25);
 
+    /// <summary>The dev-build marker. Amber, the one colour that reads on both a light and a dark
+    /// taskbar and that no shipped glyph uses.</summary>
+    public static readonly Color DevDotColor = Color.FromArgb(0xFF, 0xF5, 0x9E, 0x0B);
+
     /// <summary>Diameter and stroke width of each arc, in design units, innermost first. They grow
     /// outward from the same centre so adding an arc never moves the ones already drawn.</summary>
     private static readonly (float Diameter, float StrokeWidth)[] ArcSpecs =
@@ -65,7 +69,8 @@ public static class TrayGlyph
     /// square. The caller owns the bitmap.</summary>
     /// <param name="arcs">0..<see cref="MaxArcs"/>, from <see cref="ArcCount"/>. Ignored when
     /// <paramref name="muted"/> — muted draws the cross instead, at any volume.</param>
-    public static Bitmap Draw(int arcs, bool muted, Color color, int sizePx)
+    /// <param name="devDot">Marks a dev build with a <see cref="DevDotColor"/> dot top-right.</param>
+    public static Bitmap Draw(int arcs, bool muted, Color color, int sizePx, bool devDot = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(arcs);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(arcs, MaxArcs);
@@ -118,6 +123,17 @@ public static class TrayGlyph
                         MathF.Round((ArcCentreX * u) - half), MathF.Round((ArcCentreY * u) - half),
                         d, d, ArcStartAngle, ArcSweepAngle);
                 }
+            }
+
+            if (devDot)
+            {
+                // Top-right, the one corner the arcs never reach (the outer arc ends near x=24, y=6
+                // on the grid). Sized and placed to clear that end by about a unit, so at 16px it
+                // reads as its own dot rather than a blob on the arc, and inset from the edges so
+                // the bitmap's corner pixel stays transparent.
+                using var dot = new SolidBrush(DevDotColor);
+                float r = 2.8f * u;
+                g.FillEllipse(dot, 27.5f * u - r, 4 * u - r, 2 * r, 2 * r);
             }
 
             return bmp;

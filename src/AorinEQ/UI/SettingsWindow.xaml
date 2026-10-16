@@ -5,7 +5,7 @@
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-                 Title="{loc:T settings.window-title.aorineq-settings}" Icon="/AorinEQ.ico"
+                 Title="{loc:T settings.window-title.aorineq-settings}" Icon="/AorinEQ;component/AorinEQ.ico"
                  Width="900" Height="640"
                  MinWidth="720" MinHeight="440"
                  MaxHeight="{Binding Source={x:Static SystemParameters.WorkArea}, Path=Height}"
@@ -154,7 +154,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="{loc:T settings.title.aorineq-settings}" Icon="{ui:ImageIcon '/AorinEQ.ico'}" />
+        <ui:TitleBar Grid.Row="0" Title="{loc:T settings.title.aorineq-settings}" Icon="{ui:ImageIcon '/AorinEQ;component/AorinEQ.ico'}" />
 
         <!-- A row of its own rather than NavigationView.AutoSuggestBox: that slot exists in the
              library but renders nothing in this version, which is invisible until you notice the
@@ -1054,6 +1054,21 @@
                                 <ui:TextBlock x:Name="VersionText" Style="{StaticResource RowTitle}" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="{loc:T settings.version.subtitle}" />
+                                <!-- Dev builds only (ShowBuild). Amber with near-black text in BOTH
+                                     themes: a fixed pair reads ~9:1 on itself and stands out against
+                                     either card colour, where a theme brush would blend into one. A
+                                     DockPanel, not a horizontal StackPanel, so a long branch name
+                                     wraps instead of running off the card. -->
+                                <DockPanel>
+                                    <Border x:Name="DevBuildBadge" DockPanel.Dock="Left" Visibility="Collapsed"
+                                            Margin="0,6,0,0" CornerRadius="4" Padding="6,1" Background="#FFF59E0B"
+                                            VerticalAlignment="Center">
+                                        <TextBlock x:Name="DevBuildBadgeText" FontSize="11" FontWeight="Bold"
+                                                   Foreground="#FF1A1A1A" />
+                                    </Border>
+                                    <ui:TextBlock x:Name="DevBuildDetails" Visibility="Collapsed" Margin="8,6,0,0"
+                                                  Style="{StaticResource RowSubtitle}" VerticalAlignment="Center" />
+                                </DockPanel>
                             </StackPanel>
                         </ui:CardControl.Header>
                         <!-- Primary text, not the accent text brush. A hyperlink normally takes the

@@ -90,7 +90,7 @@ public sealed class TrayIcon : IDisposable
     /// tray that fails to appear doesn't strand an icon handle behind it.</summary>
     public TrayIcon()
     {
-        _renderer = new TrayIconRenderer();
+        _renderer = new TrayIconRenderer(BuildInfo.Current.IsDev);
         NotifyIcon? icon = null;
         ContextMenuStrip? menu = null;
         try
@@ -145,7 +145,7 @@ public sealed class TrayIcon : IDisposable
             icon = new NotifyIcon
             {
                 Icon = CurrentIcon(),
-                Text = "AorinEQ",
+                Text = Tooltip("AorinEQ", BuildInfo.Current.IsDev),
                 Visible = true,
                 ContextMenuStrip = menu,
             };
@@ -268,9 +268,25 @@ public sealed class TrayIcon : IDisposable
     {
         _percent = percent;
         _muted = muted;
-        _icon.Text = muted ? Loc.T("app.tray.tooltip.muted") : Loc.T("app.tray.tooltip.level", percent);
+        _icon.Text = Tooltip(
+            muted ? Loc.T("app.tray.tooltip.muted") : Loc.T("app.tray.tooltip.level", percent),
+            BuildInfo.Current.IsDev);
         _icon.Icon = CurrentIcon();
         _muteItem.Checked = muted;
+    }
+
+    /// <summary>NotifyIcon.Text throws past this many characters.</summary>
+    private const int MaxTooltipLength = 127;
+
+    /// <summary>The tooltip, with the dev-build suffix on a dev build. When the two together would
+    /// pass NotifyIcon's limit it is the base that is cut, never the suffix — the suffix is the part
+    /// that must not be lost.</summary>
+    internal static string Tooltip(string text, bool dev)
+    {
+        if (!dev) return text;
+        string suffix = Loc.T("app.tray.tooltip.dev-suffix");
+        int room = MaxTooltipLength - suffix.Length;
+        return (text.Length > room ? text[..room] : text) + suffix;
     }
 
     /// <summary>The glyph for the current state, at the shell's current small-icon size
