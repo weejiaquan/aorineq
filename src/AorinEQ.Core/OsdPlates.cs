@@ -2,8 +2,7 @@ namespace AorinEQ.Core;
 
 /// <summary>
 /// The built-in OSD plate looks, in one place. A skin supplies its own <see cref="SkinNotice"/>;
-/// every other style resolves here. Style names are the <c>Settings.OsdStyle</c> values
-/// (the app's <c>OsdStyles</c> constants live in the UI project, which Core cannot reference).
+/// every other style resolves here. Style names are the <see cref="OsdStyles"/> values.
 /// </summary>
 public static class OsdPlates
 {
@@ -29,9 +28,9 @@ public static class OsdPlates
 
     public static SkinNotice NoticeFor(string osdStyle, bool light, SkinNotice? skinNotice) => osdStyle switch
     {
-        "skin" => skinNotice ?? DarkPill,
-        "fluent" => light ? FluentLight : FluentDark,
-        "minimal-bar" => MinimalBar,
+        OsdStyles.Skin => skinNotice ?? DarkPill,
+        OsdStyles.Fluent => light ? FluentLight : FluentDark,
+        OsdStyles.MinimalBar => MinimalBar,
         _ => DarkPill,
     };
 }
