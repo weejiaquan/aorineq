@@ -33,7 +33,8 @@ public static class SkinWriter
     /// never resurrect an old skin. A null <paramref name="mutedSourcePath"/> clears the optional
     /// muted layer (both extensions deleted). A source that already IS the destination is left in
     /// place (editing an existing skin without replacing its images). skin.json is written only
-    /// when any config field is non-default; a stale one is deleted otherwise. Returns the folder.</summary>
+    /// when any config field is non-default (or a notice is being turned off where that must be
+    /// recorded as "notice": false); a stale one is deleted otherwise. Returns the folder.</summary>
     public static string Save(string skinsRoot, string name, string emptySourcePath, string fullSourcePath,
         SkinConfig config, string? mutedSourcePath = null)
     {
@@ -51,12 +52,24 @@ public static class SkinWriter
                 CopyLayer(mutedSourcePath, folder, "muted");
             else
                 DeleteLayer(folder, "muted");
+            var jsonPath = Path.Combine(folder, "skin.json");
+
+            // A notice turned off is written down as "notice": false where leaving it out would
+            // not stick: a shipped style folder, which DefaultSkins tops up with the shipped
+            // notice on the next launch unless a "notice" key (any value) is there, and any folder
+            // that had a notice, so turning it off is an explicit decision in the file rather
+            // than an absence. The loader reads false as no notice. A skin that never had one
+            // resaves exactly as before. Checked BEFORE the art is deleted below.
+            bool noticeOff = config.Notice is null
+                && (Directory.GetFiles(folder, "notice.*").Length > 0
+                    || ReadTopLevel(jsonPath, "notice") is not null
+                    || SkinArt.All.Contains(name.Trim(), StringComparer.OrdinalIgnoreCase));
+
             if (config.Notice?.ArtPath is { } noticeArt)
                 CopyLayer(noticeArt, folder, "notice");
             else
                 DeleteLayer(folder, "notice");
 
-            var jsonPath = Path.Combine(folder, "skin.json");
             bool showText = config.Text is { Show: true };
             var meta = config.Meta ?? SkinMeta.None;
 
@@ -80,15 +93,15 @@ public static class SkinWriter
             var sourceJson = sourceFolder is null ? null : Path.Combine(sourceFolder, "skin.json");
             var preservedAirPlay =
                 (sourceJson is not null && File.Exists(sourceJson)
-                    ? ReadPreservedAirPlay(sourceJson)
+                    ? ReadTopLevel(sourceJson, "airplay")
                     : null)
-                ?? ReadPreservedAirPlay(jsonPath);
+                ?? ReadTopLevel(jsonPath, "airplay");
 
             // The artwork the block names has to travel with it, or the copy declares a bar it
             // cannot draw and the loader reports it as broken.
             if (sourceFolder is not null) CopyAirPlayLayers(sourceFolder, folder);
 
-            if (preservedAirPlay is not null || config.Notice is not null || showText || config.Scale != 1.0 || config.Fps != 10.0
+            if (preservedAirPlay is not null || config.Notice is not null || noticeOff || showText || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
                 || config.MutedFrames != 1 || config.MutedDim != 0.6
                 || config.FillStartX is not null || config.FillEndX is not null
@@ -120,7 +133,7 @@ public static class SkinWriter
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,
                     airplay = preservedAirPlay,
-                    notice = config.Notice is null ? null : BuildNotice(config.Notice),
+                    notice = config.Notice is not null ? BuildNotice(config.Notice) : noticeOff ? false : (object?)null,
                 }, JsonWriteOptions);
                 File.WriteAllText(jsonPath, json);
             }
@@ -136,22 +149,26 @@ public static class SkinWriter
         }
     }
 
-    /// <summary>The "airplay" block of an existing skin.json, which this writer preserves rather
-    /// than authors. Absent file, unreadable file or malformed JSON all read as "nothing to keep" -
-    /// this runs on the save path, and refusing to save a skin because the file it is replacing
-    /// was already broken would be the wrong trade.</summary>
-    private static JsonElement? ReadPreservedAirPlay(string jsonPath)
+    /// <summary>A top-level property of an existing skin.json, matched case-insensitively as the
+    /// loader reads it - the "airplay" block this writer preserves rather than authors, or whether
+    /// a "notice" key is there at all. Absent file, unreadable file or malformed JSON all read as
+    /// "nothing there" - this runs on the save path, and refusing to save a skin because the file
+    /// it is replacing was already broken would be the wrong trade.</summary>
+    private static JsonElement? ReadTopLevel(string jsonPath, string name)
     {
         if (!File.Exists(jsonPath)) return null;
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(jsonPath));
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
-            return doc.RootElement.TryGetProperty("airplay", out var airplay)
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
                 // Cloned: a JsonElement is only valid while its document lives, and this one is
                 // disposed on the way out of this method.
-                ? airplay.Clone()
-                : null;
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                    return property.Value.Clone();
+            }
+            return null;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {

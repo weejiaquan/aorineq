@@ -56,10 +56,11 @@ public static class DefaultSkins
                 Directory.Move(staging, folder);
                 created.Add(style);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception)
             {
-                // A skins folder that cannot be written to is not a reason to fail startup: the
-                // app works without any skin at all, and the Fluent OSD is still there.
+                // Nothing here is a reason to fail startup - a skins folder that cannot be written
+                // to, or GDI+ refusing a Save (ExternalException): the app works without any skin
+                // at all, and the Fluent OSD is still there. Runs on every launch, unguarded.
                 TryDelete(staging);
             }
             finally
@@ -72,9 +73,12 @@ public static class DefaultSkins
     }
 
     /// <summary>Adds the notice art and its skin.json block to a shipped skin that predates them.
-    /// Does nothing if the folder has any notice.* file or the JSON already has a "notice" key, and
-    /// leaves every other property of the JSON as it was. A folder it cannot read or write is
-    /// skipped: a missing notice only means the app's own plate is used.</summary>
+    /// Does nothing if the folder has any notice.* file or the JSON already has a "notice" key (any
+    /// case, as the loader reads it - including "notice": false, which is how the Skin Designer
+    /// records a notice the user turned off), and leaves every other property of the JSON as it
+    /// was. Best effort: ANY failure (unreadable or duplicate-keyed JSON, a GDI+ save error, a
+    /// read-only folder) skips the skin - a missing notice only means the app's own plate is used,
+    /// and this runs on every launch.</summary>
     private static bool TopUpNotice(string folder, string style)
     {
         try
@@ -83,22 +87,36 @@ public static class DefaultSkins
 
             var jsonPath = Path.Combine(folder, "skin.json");
             var root = File.Exists(jsonPath)
-                ? JsonNode.Parse(File.ReadAllText(jsonPath)) as JsonObject
-                : new JsonObject();
+                ? JsonNode.Parse(File.ReadAllText(jsonPath), CaseInsensitive) as JsonObject
+                : new JsonObject(CaseInsensitive);
             if (root is null || root.ContainsKey("notice")) return false;
 
             using (var bitmap = SkinArt.Draw(style, "notice"))
                 bitmap.Save(Path.Combine(folder, "notice.png"), ImageFormat.Png);
 
             root["notice"] = JsonNode.Parse(SkinArt.SkinJson(style))!["notice"]!.DeepClone();
-            File.WriteAllText(jsonPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+            // Written beside the original and moved over it, so a failure mid-write cannot leave
+            // a truncated skin.json - which would cost the user the whole skin, not just a notice.
+            var temp = Path.Combine(folder, ".skin.json." + Guid.NewGuid().ToString("N"));
+            try
+            {
+                File.WriteAllText(temp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                File.Move(temp, jsonPath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temp)) File.Delete(temp);
+            }
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception)
         {
             return false;
         }
     }
+
+    private static readonly JsonNodeOptions CaseInsensitive = new() { PropertyNameCaseInsensitive = true };
 
     private static void TryDelete(string folder)
     {
