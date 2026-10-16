@@ -17,7 +17,11 @@
   </ItemGroup>
   <ItemGroup>
     <!-- ApplicationIcon only stamps the Win32 icon on the exe (taskbar/alt-tab/Explorer). The
-         same file is embedded as a WPF resource so every window's Icon="/AorinEQ.ico" resolves.
+         same file is embedded as a WPF resource so every window's icon resolves. Most windows
+         write Icon="/AorinEQ.ico"; SettingsWindow and SkinDesignerWindow write the pack form
+         "/AorinEQ;component/AorinEQ.ico", because the WPF tests build those two windows under the
+         test host, where a bare "/AorinEQ.ico" resolves against the host's entry assembly (which
+         has no such resource) and the window fails to construct.
          The .NET SDK does NOT auto-include .ico as a WPF Resource: without this explicit item
          the XAML still compiles and the icons silently fail to resolve at runtime. The tray does
          NOT use this file — it draws its glyph at runtime (TrayGlyph). -->

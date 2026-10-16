@@ -93,8 +93,13 @@ public sealed class NoticeView : UserControl
             }
             catch (Exception ex) when (ex is NotSupportedException or FileFormatException
                                            or IOException or ArgumentException
-                                           or UnauthorizedAccessException)
+                                           or UnauthorizedAccessException
+                                           or System.Runtime.InteropServices.COMException
+                                           or OverflowException)
             {
+                // Runs inside the device-change handler: whatever WIC throws for art it cannot
+                // decode (a raw COMException for some codec failures, OverflowException for
+                // sizes it cannot allocate) costs only the art, never the notice.
                 Apply(SkinLoader.DefaultNotice, 1.0);
                 return;
             }
