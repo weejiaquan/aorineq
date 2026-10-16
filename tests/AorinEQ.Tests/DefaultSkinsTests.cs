@@ -281,6 +281,107 @@ public class DefaultSkinsTests : IDisposable
         Assert.Equal("the user replaced this", File.ReadAllText(marker));
     }
 
+    [Theory]
+    [MemberData(nameof(Styles))]
+    public void Each_shipped_skin_has_a_notice_that_loads(string style)
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var skin = SkinLoader.Load(Path.Combine(_root, style));
+        var l = SkinArt.LayoutFor(style);
+        var n = skin.Notice;
+
+        _out.WriteLine($"{style}: notice={(n is null ? "(none)" : $"{n.Width}x{n.Height} art={n.ArtPath}")} " +
+                       $"error={skin.NoticeError ?? "(none)"} (drawn {l.Width}x{l.NoticeHeight})");
+
+        Assert.Null(skin.NoticeError);
+        Assert.NotNull(n);
+        Assert.True(n!.HasArt);
+        Assert.Equal(l.Width, n.Width);
+        Assert.Equal(l.NoticeHeight, n.Height);
+        Assert.Equal(l.NoticeText.X, n.Text.X);
+        Assert.Equal(l.NoticeText.Y, n.Text.Y);
+        Assert.Equal(l.NoticeText.W, n.TextWidth);
+        Assert.Equal(l.NoticeSize, n.Text.FontSize);
+        Assert.Equal(l.NoticeGlyph.X, n.Glyph.X);
+        Assert.Equal(l.NoticeGlyph.Y, n.Glyph.Y);
+        Assert.Equal(l.NoticeGlyph.H, n.Glyph.Size);
+    }
+
+    [Theory]
+    [MemberData(nameof(Styles))]
+    public void The_notice_text_box_sits_inside_the_art_and_clear_of_the_glyph(string style)
+    {
+        var l = SkinArt.LayoutFor(style);
+        _out.WriteLine($"{style}: glyph ..{l.NoticeGlyph.Right}, text {l.NoticeText.X}..{l.NoticeText.Right} of {l.Width}; " +
+                       $"glyph bottom {l.NoticeGlyph.Bottom}, text bottom {l.NoticeText.Bottom} of {l.NoticeHeight}");
+
+        Assert.True(l.NoticeText.X >= l.NoticeGlyph.Right, "the text starts under the glyph");
+        Assert.True(l.NoticeText.Right <= l.Width, "the text box runs off the art");
+        Assert.True(l.NoticeGlyph.Bottom <= l.NoticeHeight && l.NoticeText.Bottom <= l.NoticeHeight,
+            "glyph or text runs off the bottom of the art");
+    }
+
+    [Fact]
+    public void An_existing_shipped_skin_without_a_notice_is_topped_up()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var folder = Path.Combine(_root, "windows-11");
+        var empty = Path.Combine(folder, "empty.png");
+        var emptyBefore = File.ReadAllBytes(empty);
+
+        File.Delete(Path.Combine(folder, "notice.png"));
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "skin.json")))!.AsObject();
+        json.Remove("notice");
+        json["title"] = "mine";
+        File.WriteAllText(Path.Combine(folder, "skin.json"), json.ToJsonString());
+
+        var topped = DefaultSkins.EnsureInstalled(_root);
+        var skin = SkinLoader.Load(folder);
+
+        _out.WriteLine($"topped up: {string.Join(", ", topped)}; title={skin.Name} notice={(skin.Notice?.HasArt)} error={skin.NoticeError ?? "(none)"}");
+        Assert.Equal(["windows-11"], topped);
+        Assert.True(File.Exists(Path.Combine(folder, "notice.png")));
+        Assert.True(skin.Notice!.HasArt);
+        Assert.Null(skin.NoticeError);
+        Assert.Contains("\"title\": \"mine\"", File.ReadAllText(Path.Combine(folder, "skin.json")));
+        Assert.Equal(emptyBefore, File.ReadAllBytes(empty));
+        Assert.Empty(DefaultSkins.EnsureInstalled(_root));
+    }
+
+    [Fact]
+    public void A_shipped_skin_that_already_has_a_notice_is_left_alone()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var art = Path.Combine(_root, "windows-10", "notice.png");
+        var jsonPath = Path.Combine(_root, "windows-10", "skin.json");
+        byte[] mine = [1, 2, 3, 4];
+        File.WriteAllBytes(art, mine);
+        var jsonBefore = File.ReadAllBytes(jsonPath);
+
+        var second = DefaultSkins.EnsureInstalled(_root);
+
+        _out.WriteLine("second pass: " + (second.Count == 0 ? "(nothing)" : string.Join(", ", second)));
+        Assert.Empty(second);
+        Assert.Equal(mine, File.ReadAllBytes(art));
+        Assert.Equal(jsonBefore, File.ReadAllBytes(jsonPath));
+    }
+
+    [Fact]
+    public void A_user_skin_is_never_topped_up()
+    {
+        DefaultSkins.EnsureInstalled(_root);
+        var mine = Path.Combine(_root, "my-skin");
+        Directory.CreateDirectory(mine);
+        File.WriteAllText(Path.Combine(mine, "skin.json"), "{ \"title\": \"mine\" }");
+
+        var second = DefaultSkins.EnsureInstalled(_root);
+
+        _out.WriteLine("files: " + string.Join(", ", Directory.GetFiles(mine).Select(Path.GetFileName)));
+        Assert.Empty(second);
+        Assert.Equal(["skin.json"], Directory.GetFiles(mine).Select(Path.GetFileName).ToArray());
+        Assert.Equal("{ \"title\": \"mine\" }", File.ReadAllText(Path.Combine(mine, "skin.json")));
+    }
+
     /// <summary>Nothing is left behind mid-write. The staging folder is a dot-folder, which
     /// SkinLoader.Scan skips, but one left lying around would still be litter.</summary>
     [Fact]
