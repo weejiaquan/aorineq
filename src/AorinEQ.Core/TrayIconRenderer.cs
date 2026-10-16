@@ -46,6 +46,12 @@ public sealed class TrayIconRenderer : IDisposable
     private readonly Dictionary<GlyphKey, CachedIcon> _cache = [];
     private bool _disposed;
 
+    /// <summary>Whether every icon carries the dev-build dot. Fixed for the renderer's life (a
+    /// process is a dev build or it isn't), which is why it is not part of the cache key.</summary>
+    private readonly bool _devDot;
+
+    public TrayIconRenderer(bool devDot = false) => _devDot = devDot;
+
     /// <summary>The icon for a volume state, drawn on first request and reused after. The returned
     /// Icon belongs to this renderer and stays valid until <see cref="Dispose"/>; callers must not
     /// dispose it.</summary>
@@ -65,9 +71,9 @@ public sealed class TrayIconRenderer : IDisposable
         return cached.Icon;
     }
 
-    private static CachedIcon Create(GlyphKey key)
+    private CachedIcon Create(GlyphKey key)
     {
-        using var bmp = TrayGlyph.Draw(key.Arcs, key.Muted, TrayGlyph.GlyphColor(key.LightTaskbar), key.SizePx);
+        using var bmp = TrayGlyph.Draw(key.Arcs, key.Muted, TrayGlyph.GlyphColor(key.LightTaskbar), key.SizePx, _devDot);
         IntPtr handle = bmp.GetHicon();
         try
         {

@@ -235,6 +235,30 @@ public class TrayIconRendererTests
         Assert.False(Opaque(28f, 16f), "the outer arc is drawn on a muted icon");
     }
 
+    /// <summary>A dev renderer hands the shell dotted icons, a release renderer plain ones. Probed on
+    /// the icon's own bitmap at the dot's centre, so the flag is proved to survive the handle round
+    /// trip and not just reach the bitmap the renderer drew.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_dev_renderer_draws_dotted_icons(bool lightTaskbar)
+    {
+        using var dev = new TrayIconRenderer(devDot: true);
+        using var release = new TrayIconRenderer();
+        using var dotted = dev.Get(50, muted: false, lightTaskbar, sizePx: 32).ToBitmap();
+        using var plain = release.Get(50, muted: false, lightTaskbar, sizePx: 32).ToBitmap();
+
+        var dot = dotted.GetPixel(27, 4);
+        var none = plain.GetPixel(27, 4);
+        var want = TrayGlyph.DevDotColor;
+        _out.WriteLine($"lightTaskbar={lightTaskbar}: dev pixel {dot}, release pixel {none}, dot colour {want}");
+
+        Assert.True(dot.A > 200, $"dev icon has no dot (alpha {dot.A})");
+        Assert.True(Math.Abs(dot.R - want.R) <= 24 && Math.Abs(dot.G - want.G) <= 24 && Math.Abs(dot.B - want.B) <= 24,
+            $"dev icon's dot is {dot}, not the dot colour {want}");
+        Assert.Equal(0, none.A);
+    }
+
     /// <summary>The renderer picks the glyph colour from the taskbar theme it is handed. Asserted
     /// through the icon, so a renderer that drew the right shape in the wrong colour — invisible
     /// against the user's taskbar — is caught.</summary>

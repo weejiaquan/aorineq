@@ -277,6 +277,75 @@ public class TrayGlyphTests
         Assert.True(InkPixels(bmp) < bmp.Width * bmp.Height, "the whole bitmap is ink");
     }
 
+    // ---- dev dot ----------------------------------------------------------------------------
+
+    /// <summary>A dev build marks its tray icon with an amber dot in the top-right corner — the one
+    /// corner the arcs never reach. Probed at every size the shell asks for: the dot is there in the
+    /// dot colour, absent without the flag, and the bitmap's own corners stay transparent so the
+    /// icon still sits cleanly on the taskbar.</summary>
+    [Theory]
+    [InlineData(16)]
+    [InlineData(20)]
+    [InlineData(24)]
+    [InlineData(32)]
+    public void A_dev_dot_is_drawn_in_the_top_right_and_nowhere_else(int size)
+    {
+        float u = size / 32f;
+        int px = (int)MathF.Round(27 * u), py = (int)MathF.Round(4 * u);
+        using var dotted = TrayGlyph.Draw(3, muted: false, Color.White, size, devDot: true);
+        using var plain = TrayGlyph.Draw(3, muted: false, Color.White, size);
+
+        var dot = dotted.GetPixel(px, py);
+        var none = plain.GetPixel(px, py);
+        _out.WriteLine($"{size}px probe ({px},{py}): dotted={dot} plain={none} expected={TrayGlyph.DevDotColor}");
+        _out.WriteLine($"{size}px corners (dotted): {dotted.GetPixel(0, 0).A} {dotted.GetPixel(size - 1, 0).A} "
+            + $"{dotted.GetPixel(0, size - 1).A} {dotted.GetPixel(size - 1, size - 1).A}");
+
+        Assert.True(dot.A > 200, $"dot pixel alpha {dot.A} at {size}px");
+        Assert.InRange(dot.R, TrayGlyph.DevDotColor.R - 24, TrayGlyph.DevDotColor.R + 24);
+        Assert.InRange(dot.G, TrayGlyph.DevDotColor.G - 24, TrayGlyph.DevDotColor.G + 24);
+        Assert.InRange(dot.B, TrayGlyph.DevDotColor.B - 24, TrayGlyph.DevDotColor.B + 24);
+        Assert.Equal(0, none.A);
+
+        Assert.Equal(0, dotted.GetPixel(0, 0).A);
+        Assert.Equal(0, dotted.GetPixel(size - 1, 0).A);
+        Assert.Equal(0, dotted.GetPixel(0, size - 1).A);
+        Assert.Equal(0, dotted.GetPixel(size - 1, size - 1).A);
+    }
+
+    /// <summary>The dot is a marker, not part of the volume reading: every pixel it changes lies in
+    /// the top-right box (x ≥ 23, y ≤ 9 on the design grid), clear of the speaker, the arcs' run
+    /// down the right-hand side and the mute cross — and none of them is a pixel the glyph had
+    /// already inked, so at 16px it reads as a separate dot rather than a blob on the end of the
+    /// outer arc. Checked at full volume and muted, the two states whose ink reaches furthest
+    /// right.</summary>
+    [Theory]
+    [InlineData(16, false)]
+    [InlineData(20, false)]
+    [InlineData(24, false)]
+    [InlineData(32, false)]
+    [InlineData(16, true)]
+    [InlineData(32, true)]
+    public void The_dot_does_not_touch_the_speaker(int size, bool muted)
+    {
+        float u = size / 32f;
+        using var dotted = TrayGlyph.Draw(3, muted, Color.White, size, devDot: true);
+        using var plain = TrayGlyph.Draw(3, muted, Color.White, size);
+
+        var changed = new List<(int X, int Y)>();
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+                if (dotted.GetPixel(x, y).ToArgb() != plain.GetPixel(x, y).ToArgb()) changed.Add((x, y));
+
+        var outside = changed.Where(p => p.X + 1 <= 23 * u || p.Y > 9 * u).ToList();
+        int overInk = changed.Count(p => plain.GetPixel(p.X, p.Y).A > 0);
+        _out.WriteLine($"{size}px muted={muted}: {changed.Count} pixels changed ({overInk} over existing ink), "
+            + $"box x>={23 * u:F2} y<={9 * u:F2}; outside: {string.Join(" ", outside)}");
+        Assert.NotEmpty(changed);
+        Assert.Empty(outside);
+        Assert.True(overInk == 0, $"the dot paints over {overInk} pixel(s) of the glyph itself — it has merged with the outer arc");
+    }
+
     /// <summary>Fail fast on arguments the caller can only produce by bypassing
     /// <see cref="TrayGlyph.ArcCount"/> — a silently clamped arc count would hide the bug.</summary>
     [Theory]
