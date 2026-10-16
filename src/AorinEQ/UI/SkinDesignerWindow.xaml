@@ -373,8 +373,10 @@
                                     <Button x:Name="NoticeBackgroundSwatch" Width="34" Height="24" HorizontalAlignment="Left"
                                             Click="OnPickNoticeBackground" />
                                 </StackPanel>
+                                <!-- Border: off = none; picking a colour turns it on (the outline pattern) -->
                                 <StackPanel Grid.Column="1">
-                                    <TextBlock Text="{loc:T designer.notice.border.label}" FontSize="11" Margin="0,0,0,4" />
+                                    <CheckBox x:Name="NoticeBorderCheck" Content="{loc:T designer.notice.border.label}" FontSize="11" Margin="0,0,0,4"
+                                              Checked="OnControlChanged" Unchecked="OnControlChanged" />
                                     <Button x:Name="NoticeBorderSwatch" Width="34" Height="24" HorizontalAlignment="Left"
                                             Click="OnPickNoticeBorder" />
                                 </StackPanel>
@@ -387,6 +389,9 @@
                                     <TextBlock Text="{loc:T designer.notice.glyph-color.label}" FontSize="11" Margin="0,0,0,4" />
                                     <Button x:Name="NoticeGlyphColorSwatch" Width="34" Height="24" HorizontalAlignment="Left"
                                             Click="OnPickNoticeGlyphColor" />
+                                    <!-- On = the icon takes the text colour (no colour of its own is saved) -->
+                                    <CheckBox x:Name="NoticeGlyphSameCheck" Content="{loc:T designer.notice.glyph-same.label}" FontSize="11" Margin="0,4,0,0"
+                                              Checked="OnControlChanged" Unchecked="OnControlChanged" />
                                 </StackPanel>
                             </Grid>
                             <Grid Margin="0,0,0,10">

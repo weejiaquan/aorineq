@@ -410,8 +410,11 @@ without hand-editing anything:
   outline and shadow.
 - Style the device notice: tick **Style the device notice**, then either pick notice art
   (**Browse…**) and place its text box and glyph, or leave the art off and set the plate's colours,
-  corner radius, font, size, bold and glyph. It previews on its own checkerboard beside the OSD;
-  with the option off the skin saves no notice and the preview shows the dark pill. Turning it off
+  corner radius, font, size, bold and glyph. **Border** is a tick box like the outline: untick it
+  for no border (a new one starts from the plate colour, fully opaque). **Same as text** under the
+  icon colour makes the icon follow the text colour again. It previews on its own checkerboard
+  beside the OSD at the size the OSD draws it (art at the skin's scale, a plate at 1x); with the
+  option off the skin saves no notice and the preview shows the dark pill. Turning it off
   for a skin that had a notice, or for one of the shipped skins, writes `"notice": false`, so the
   shipped notice is not restored on the next start.
 - Set the scale, and fill in the optional details (title, author, description, version, tags,
