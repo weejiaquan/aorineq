@@ -5,7 +5,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:core="clr-namespace:AorinEQ.Core;assembly=AorinEQ.Core"
-        Title="{loc:T designer.window-title.aorineq-skin-designer}" Icon="/AorinEQ.ico" Width="880" Height="640"
+        Title="{loc:T designer.window-title.aorineq-skin-designer}" Icon="/AorinEQ;component/AorinEQ.ico" Width="880" Height="640"
         MinWidth="720" MinHeight="520"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True"
         ExtendsContentIntoTitleBar="True"
@@ -17,7 +17,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <ui:TitleBar Grid.Row="0" Title="{loc:T designer.title.aorineq-skin-designer}"
-                     Icon="{ui:ImageIcon '/AorinEQ.ico'}" />
+                     Icon="{ui:ImageIcon '/AorinEQ;component/AorinEQ.ico'}" />
         <Grid Grid.Row="1" Margin="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
@@ -60,66 +60,76 @@
 
                 <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
                     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                        <!-- Checkerboard sits behind the artwork so transparency is visible. -->
-                        <!-- UseLayoutRounding/SnapsToDevicePixels are turned OFF for the whole
-                             preview subtree, and must stay off. FluentWindow switches both ON at
-                             the window, and they inherit: with rounding on, a skin whose scaled
-                             size lands on a half pixel (seia-bar-shadow is 525 x 262.5 at scale
-                             0.35) is snapped, and the preview stops being a pixel-exact model of
-                             the OSD. SkinOsdWindow is deliberately NOT a FluentWindow, so it has
-                             no rounding — matching it here is what keeps "what you see in the
-                             designer is what the OSD draws" true, including where the v1.7.1
-                             aliased fill-boundary clip falls. -->
-                        <Grid x:Name="PreviewHost" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24"
-                              UseLayoutRounding="False" SnapsToDevicePixels="False">
-                            <Grid.Background>
-                                <DrawingBrush TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
-                                    <DrawingBrush.Drawing>
-                                        <DrawingGroup>
-                                            <GeometryDrawing Brush="#FFF0F0F0">
-                                                <GeometryDrawing.Geometry>
-                                                    <RectangleGeometry Rect="0,0,16,16" />
-                                                </GeometryDrawing.Geometry>
-                                            </GeometryDrawing>
-                                            <GeometryDrawing Brush="#FFD4D4D4">
-                                                <GeometryDrawing.Geometry>
-                                                    <GeometryGroup>
-                                                        <RectangleGeometry Rect="0,0,8,8" />
-                                                        <RectangleGeometry Rect="8,8,8,8" />
-                                                    </GeometryGroup>
-                                                </GeometryDrawing.Geometry>
-                                            </GeometryDrawing>
-                                        </DrawingGroup>
-                                    </DrawingBrush.Drawing>
-                                </DrawingBrush>
-                            </Grid.Background>
-                            <!-- Same composition as SkinOsdWindow: empty under clipped full, text on top. -->
-                            <Grid x:Name="PreviewCanvas"
-                                  MouseLeftButtonDown="OnPreviewMouseDown" MouseMove="OnPreviewMouseMove"
-                                  MouseLeftButtonUp="OnPreviewMouseUp">
-                                <!-- EdgeMode=Aliased: same seam fix as SkinOsdWindow — AA'd
-                                     complementary clips leak the backdrop through the boundary column. -->
-                                <Image x:Name="EmptyImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased" />
-                                <Image x:Name="FullImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased">
-                                    <Image.Clip>
-                                        <RectangleGeometry x:Name="FillClip" />
-                                    </Image.Clip>
-                                </Image>
-                                <!-- Optional muted artwork, shown alone in mute preview (mirrors SkinOsdWindow). -->
-                                <Image x:Name="MutedImage" Stretch="Fill" Visibility="Collapsed" />
-                                <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top"
-                                      Cursor="SizeAll" Visibility="Collapsed" />
-                                <!-- Draggable fill-range handles: where 0% and 100% sit inside the artwork. -->
-                                <Border x:Name="RangeStartHandle" Width="7" HorizontalAlignment="Left"
-                                        Background="#800078D7" BorderBrush="#FF0078D7" BorderThickness="1,0"
-                                        Cursor="SizeWE" Visibility="Collapsed"
-                                        ToolTip="{loc:T designer.range-start-handle.tooltip}" />
-                                <Border x:Name="RangeEndHandle" Width="7" HorizontalAlignment="Left"
-                                        Background="#80D77800" BorderBrush="#FFD77800" BorderThickness="1,0"
-                                        Cursor="SizeWE" Visibility="Collapsed"
-                                        ToolTip="{loc:T designer.range-end-handle.tooltip}" />
+                        <ScrollViewer.Resources>
+                            <!-- Checkerboard sits behind the artwork so transparency is visible. -->
+                            <DrawingBrush x:Key="Checkerboard" TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
+                                <DrawingBrush.Drawing>
+                                    <DrawingGroup>
+                                        <GeometryDrawing Brush="#FFF0F0F0">
+                                            <GeometryDrawing.Geometry>
+                                                <RectangleGeometry Rect="0,0,16,16" />
+                                            </GeometryDrawing.Geometry>
+                                        </GeometryDrawing>
+                                        <GeometryDrawing Brush="#FFD4D4D4">
+                                            <GeometryDrawing.Geometry>
+                                                <GeometryGroup>
+                                                    <RectangleGeometry Rect="0,0,8,8" />
+                                                    <RectangleGeometry Rect="8,8,8,8" />
+                                                </GeometryGroup>
+                                            </GeometryDrawing.Geometry>
+                                        </GeometryDrawing>
+                                    </DrawingGroup>
+                                </DrawingBrush.Drawing>
+                            </DrawingBrush>
+                        </ScrollViewer.Resources>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <!-- UseLayoutRounding/SnapsToDevicePixels are turned OFF for the whole
+                                 preview subtree, and must stay off. FluentWindow switches both ON at
+                                 the window, and they inherit: with rounding on, a skin whose scaled
+                                 size lands on a half pixel (seia-bar-shadow is 525 x 262.5 at scale
+                                 0.35) is snapped, and the preview stops being a pixel-exact model of
+                                 the OSD. SkinOsdWindow is deliberately NOT a FluentWindow, so it has
+                                 no rounding — matching it here is what keeps "what you see in the
+                                 designer is what the OSD draws" true, including where the v1.7.1
+                                 aliased fill-boundary clip falls. -->
+                            <Grid x:Name="PreviewHost" HorizontalAlignment="Center" Margin="24"
+                                  UseLayoutRounding="False" SnapsToDevicePixels="False"
+                                  Background="{StaticResource Checkerboard}">
+                                <!-- Same composition as SkinOsdWindow: empty under clipped full, text on top. -->
+                                <Grid x:Name="PreviewCanvas"
+                                      MouseLeftButtonDown="OnPreviewMouseDown" MouseMove="OnPreviewMouseMove"
+                                      MouseLeftButtonUp="OnPreviewMouseUp">
+                                    <!-- EdgeMode=Aliased: same seam fix as SkinOsdWindow — AA'd
+                                         complementary clips leak the backdrop through the boundary column. -->
+                                    <Image x:Name="EmptyImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased" />
+                                    <Image x:Name="FullImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased">
+                                        <Image.Clip>
+                                            <RectangleGeometry x:Name="FillClip" />
+                                        </Image.Clip>
+                                    </Image>
+                                    <!-- Optional muted artwork, shown alone in mute preview (mirrors SkinOsdWindow). -->
+                                    <Image x:Name="MutedImage" Stretch="Fill" Visibility="Collapsed" />
+                                    <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                          Cursor="SizeAll" Visibility="Collapsed" />
+                                    <!-- Draggable fill-range handles: where 0% and 100% sit inside the artwork. -->
+                                    <Border x:Name="RangeStartHandle" Width="7" HorizontalAlignment="Left"
+                                            Background="#800078D7" BorderBrush="#FF0078D7" BorderThickness="1,0"
+                                            Cursor="SizeWE" Visibility="Collapsed"
+                                            ToolTip="{loc:T designer.range-start-handle.tooltip}" />
+                                    <Border x:Name="RangeEndHandle" Width="7" HorizontalAlignment="Left"
+                                            Background="#80D77800" BorderBrush="#FFD77800" BorderThickness="1,0"
+                                            Cursor="SizeWE" Visibility="Collapsed"
+                                            ToolTip="{loc:T designer.range-end-handle.tooltip}" />
+                                </Grid>
                             </Grid>
-                        </Grid>
+                            <!-- The device notice on the same checkerboard: what the skin describes,
+                                 or the app's own plate while the notice is off. -->
+                            <Grid HorizontalAlignment="Center" Margin="24,0,24,24"
+                                  UseLayoutRounding="False" SnapsToDevicePixels="False"
+                                  Background="{StaticResource Checkerboard}">
+                                <loc:NoticeView x:Name="NoticePreview" HorizontalAlignment="Center" />
+                            </Grid>
+                        </StackPanel>
                     </ScrollViewer>
                 </Border>
 
@@ -331,6 +341,117 @@
                                 <TextBlock Grid.Column="3" Text="{loc:T designer.text.depth}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
                                 <TextBox x:Name="ShadowDepthBox" Grid.Column="4" MinWidth="48" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
                             </Grid>
+                        </StackPanel>
+
+                        <!-- The device-changed notice. Off = the skin carries no notice and the
+                             app draws its own; on = a plate in these colours, or the artwork with
+                             the name placed on it. -->
+                        <TextBlock Text="{loc:T designer.text.notice}" FontWeight="SemiBold" Margin="0,18,0,6" />
+                        <CheckBox x:Name="NoticeEnableCheck" Content="{loc:T designer.notice.enable.label}"
+                                  Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,10" />
+                        <TextBlock Text="{loc:T designer.notice.hint}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
+                        <!-- Enabled only while the notice is styled -->
+                        <StackPanel x:Name="NoticePanel">
+                            <TextBlock Text="{loc:T designer.notice.art.label}" FontSize="11" Margin="0,0,0,4" />
+                            <TextBlock x:Name="NoticeArtPathText" Text="{loc:T designer.notice.art.none}" FontSize="11"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button Content="{loc:T designer.notice.browse.label}" Padding="10,3" Click="OnBrowseNoticeArt" />
+                                <Button Content="{loc:T designer.notice.clear.label}" Padding="10,3" Margin="6,0,0,0" Click="OnClearNoticeArt" />
+                            </StackPanel>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="{loc:T designer.notice.background.label}" FontSize="11" Margin="0,0,0,4" />
+                                    <Button x:Name="NoticeBackgroundSwatch" Width="34" Height="24" HorizontalAlignment="Left"
+                                            Click="OnPickNoticeBackground" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{loc:T designer.notice.border.label}" FontSize="11" Margin="0,0,0,4" />
+                                    <Button x:Name="NoticeBorderSwatch" Width="34" Height="24" HorizontalAlignment="Left"
+                                            Click="OnPickNoticeBorder" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="{loc:T designer.notice.text-color.label}" FontSize="11" Margin="0,0,0,4" />
+                                    <Button x:Name="NoticeTextColorSwatch" Width="34" Height="24" HorizontalAlignment="Left"
+                                            Click="OnPickNoticeTextColor" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="3">
+                                    <TextBlock Text="{loc:T designer.notice.glyph-color.label}" FontSize="11" Margin="0,0,0,4" />
+                                    <Button x:Name="NoticeGlyphColorSwatch" Width="34" Height="24" HorizontalAlignment="Left"
+                                            Click="OnPickNoticeGlyphColor" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{loc:T designer.notice.radius.label}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <TextBox x:Name="NoticeRadiusBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </Grid>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="56" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{loc:T designer.text.font}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <!-- Editable for the same reason FontCombo is. -->
+                                <ComboBox x:Name="NoticeFontCombo" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="True"
+                                          SelectionChanged="OnControlChanged" LostFocus="OnControlChanged" />
+                                <TextBlock Grid.Column="3" Text="{loc:T designer.text.size}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <TextBox x:Name="NoticeFontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </Grid>
+                            <CheckBox x:Name="NoticeBoldCheck" Content="{loc:T designer.bold.label}" Margin="0,0,0,10"
+                                      Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="NoticeShowGlyphCheck" Content="{loc:T designer.notice.show-glyph.label}" VerticalAlignment="Center"
+                                          Checked="OnControlChanged" Unchecked="OnControlChanged" />
+                                <TextBlock Grid.Column="2" Text="{loc:T designer.notice.glyph-size.label}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
+                                <TextBox x:Name="NoticeGlyphSizeBox" Grid.Column="3" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                            </Grid>
+                            <!-- Positions inside the artwork: shown only while there is artwork -->
+                            <StackPanel x:Name="NoticeArtPanel">
+                                <TextBlock Text="{loc:T designer.notice.text-box.label}" FontSize="11" Margin="0,0,0,4" />
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NoticeTextXBox" Grid.Column="0" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                                    <TextBox x:Name="NoticeTextYBox" Grid.Column="2" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                                    <TextBox x:Name="NoticeTextWidthBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                                </Grid>
+                                <TextBlock Text="{loc:T designer.notice.glyph-pos.label}" FontSize="11" Margin="0,0,0,4" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NoticeGlyphXBox" Grid.Column="0" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                                    <TextBox x:Name="NoticeGlyphYBox" Grid.Column="2" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
+                                </Grid>
+                            </StackPanel>
                         </StackPanel>
 
                         <TextBlock Text="{loc:T designer.text.scale}" FontWeight="SemiBold" Margin="0,18,0,6" />
