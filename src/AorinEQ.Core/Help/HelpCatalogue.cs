@@ -36,6 +36,8 @@ public static class HelpCatalogue
             "settings.animation-check.title", "settings.animation-check.subtitle", "#the-osd"),
         new("settings.animation-duration", SettingsSections.Osd,
             "settings.animation-duration.title", null, "#the-osd"),
+        new("settings.device-notice", SettingsSections.Osd,
+            "settings.device-notice.title", "settings.device-notice.subtitle", "#the-osd"),
         // ---- skins ----
         new("settings.skin-credit", SettingsSections.Skins,
             "settings.skin-credit.title", "settings.skin-credit.subtitle", "#skins"),

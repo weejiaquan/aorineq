@@ -41,8 +41,11 @@
   - *Replace Windows volume* — the keys drive the real Windows level, you just get a nicer OSD.
   - *Equalizer APO preamp* — digital attenuation before the audio reaches the device, for USB
     DACs that ignore Windows volume entirely (the slider moves, nothing changes).
-* **A volume per playback device** — follows the Windows default device, remembers where you left
-  each one, and switches silently.
+* **A volume per playback device** — follows the Windows default device and remembers where you
+  left each one.
+* **It tells you when the output moves** — a USB DAC that drops out is replaced by Windows without
+  a word. AorinEQ names the new playback device on screen, drawn by itself, so Do Not Disturb
+  does not hide it.
 * **A fully skinnable OSD** — PNG, GIF or sprite-sheet artwork, an optional muted layer, per-pixel
   click-through, and click / drag / scroll on the artwork to set the level.
 * **Percent text you actually style** — font, size, colour, bold, outline, shadow, and left /

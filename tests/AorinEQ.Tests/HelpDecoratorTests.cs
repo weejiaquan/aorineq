@@ -16,7 +16,8 @@ namespace AorinEQ.Tests;
 /// defects they pin are invisible to every other kind of test. The catalogue tests prove the WORDS
 /// are right; HelpXamlCoverageTests proves every card HAS help. Neither can see that opening that
 /// help shoved the rest of the page downward, which is what it did.</summary>
-public class HelpDecoratorTests : IClassFixture<StaWpf>
+[Collection("Wpf")]
+public class HelpDecoratorTests
 {
     private readonly StaWpf _sta;
     private readonly Xunit.Abstractions.ITestOutputHelper _out;

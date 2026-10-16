@@ -55,6 +55,9 @@ public sealed record Settings(
     // into this release, which is exactly who needs telling that Discover is there.
     bool HasSeenDiscover = false,
     AirPlaySetting? AirPlay = null,
+    // On for everyone, including a settings file written before this existed: a property the
+    // json lacks takes this default, and a notice nobody was told about is how it gets found.
+    bool DeviceNoticeEnabled = true,
     // Endpoint GUIDs whose automatic Equalizer APO repair the user declined or that the repair
     // refused — never offered unprompted again (see EapoAutoRepair). A driver update gives the
     // device a NEW GUID, so this cannot suppress the post-update repair it exists for.

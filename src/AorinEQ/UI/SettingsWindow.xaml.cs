@@ -579,6 +579,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         AnimationDurationSlider.Value = settings.AnimationMs;
         AnimationDurationLabel.Text = Loc.T("settings.animation-duration.ms", settings.AnimationMs);
 
+        DeviceNoticeBox.IsChecked = settings.DeviceNoticeEnabled;
+
         SelectByTag(StepCombo, settings.StepPercent.ToString());
     }
 
@@ -825,6 +827,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         RaiseOsdSettingsChanged();
     }
 
+    private void OnDeviceNoticeChanged(object sender, RoutedEventArgs e) => RaiseOsdSettingsChanged();
+
     private void OnStepChanged(object sender, SelectionChangedEventArgs e) => RaiseOsdSettingsChanged();
 
     private void OnTrayActionChanged(object sender, SelectionChangedEventArgs e) => RaiseTrayBehaviourChanged();
@@ -866,7 +870,8 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             HideDelaySeconds: HideDelaySlider.Value,
             AnimationEnabled: AnimationCheckBox.IsChecked == true,
             AnimationMs: (int)AnimationDurationSlider.Value,
-            StepPercent: int.TryParse(SelectedTag(StepCombo), out var step) ? step : 2));
+            StepPercent: int.TryParse(SelectedTag(StepCombo), out var step) ? step : 2,
+            DeviceNoticeEnabled: DeviceNoticeBox.IsChecked == true));
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
