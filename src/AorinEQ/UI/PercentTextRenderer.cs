@@ -85,7 +85,9 @@ internal static class PercentTextRenderer
         return formatted.WidthIncludingTrailingWhitespace;
     }
 
-    private static SolidColorBrush? Brush(string? hex)
+    /// <summary>A frozen brush for a user-authored colour, or null when it does not parse. Also
+    /// the device notice's colour parser (<see cref="NoticeView"/>).</summary>
+    internal static SolidColorBrush? Brush(string? hex)
     {
         var c = ParseColor(hex);
         if (c is null) return null;

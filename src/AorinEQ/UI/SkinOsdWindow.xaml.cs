@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -137,18 +138,20 @@ public partial class SkinOsdWindow : Window
             // raising MouseLeftButtonUp — keep _dragging accurate.
     }
 
-    /// <summary>Decodes a PNG with BitmapCacheOption.OnLoad so the file handle is released
-    /// immediately — the skin folder must not stay locked while the OSD is showing. Also sets
-    /// BitmapCreateOptions.IgnoreImageCache: WPF's process-wide bitmap cache otherwise keys on the
-    /// URI alone, so reloading a skin whose PNGs were edited in place (same path, new bytes) would
-    /// silently serve the stale cached image instead of the updated one.</summary>
+    /// <summary>Decodes a PNG with BitmapCacheOption.OnLoad from a stream this method owns, so the
+    /// file handle is released as soon as it returns — the skin folder must not stay locked while
+    /// the OSD is showing. The stream rather than a UriSource for two reasons: a URI-sourced
+    /// BitmapImage that fails to decode keeps the file open until the GC finalizes it (a corrupt
+    /// skin PNG would lock its own folder against the fix), and WPF's process-wide bitmap cache
+    /// keys on the URI alone, so a skin whose PNGs were edited in place (same path, new bytes)
+    /// could be served the stale image. A stream has no URI to cache on.</summary>
     internal static BitmapImage LoadBitmap(string path)
     {
+        using var stream = File.OpenRead(path);
         var bmp = new BitmapImage();
         bmp.BeginInit();
         bmp.CacheOption = BitmapCacheOption.OnLoad;
-        bmp.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-        bmp.UriSource = new Uri(path, UriKind.Absolute);
+        bmp.StreamSource = stream;
         bmp.EndInit();
         bmp.Freeze();
         return bmp;

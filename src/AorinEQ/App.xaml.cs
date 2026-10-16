@@ -2845,8 +2845,10 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>Shows the device notice. Always on the standard <see cref="OsdWindow"/>, which
-    /// draws it itself: a skin is somebody's artwork for a volume bar and has nowhere to put a
-    /// sentence. Only one OSD window is ever visible at a time, so a skin OSD that is up gives way.
+    /// draws it in the look <see cref="OsdPlates.NoticeFor"/> picks for the OSD style - including
+    /// a skin's own notice, pushed in by <see cref="ApplyOsdConfig"/>, so the skin OSD window
+    /// never has to make room for a sentence. Only one OSD window is ever visible at a time, so a
+    /// skin OSD that is up gives way.
     ///
     /// The window can be missing: the endpoint backend is listening before the OSD is built, and a
     /// setup dialog in between pumps the dispatcher.</summary>
@@ -2933,6 +2935,7 @@ public partial class App : System.Windows.Application
 
         if (s.OsdStyle != OsdStyles.Skin)
         {
+            _osd.SetSkinNotice(null, 1.0);
             _useSkinOsd = false;
             _loadedSkinFolder = null;
             _loadedSkinStamp = null;
@@ -2945,6 +2948,7 @@ public partial class App : System.Windows.Application
         if (!info.IsValid)
         {
             _tray?.ShowWarning(info.Error ?? "Skin not found.");
+            _osd.SetSkinNotice(null, 1.0);
             _useSkinOsd = false; // in-memory fallback only — see remarks above
             _loadedSkinFolder = null;
             _loadedSkinStamp = null;
@@ -2975,6 +2979,7 @@ public partial class App : System.Windows.Application
             catch (Exception ex)
             {
                 _tray?.ShowWarning(ex.Message);
+                _osd.SetSkinNotice(null, 1.0);
                 _useSkinOsd = false; // in-memory fallback only — see remarks above
                 _loadedSkinFolder = null;
                 _loadedSkinStamp = null;
@@ -2984,6 +2989,7 @@ public partial class App : System.Windows.Application
             }
         }
         _skinOsd.ApplyConfig(s);
+        _osd.SetSkinNotice(info.Notice, info.Scale);
         // The HUD's volume widget renders the SAME validated SkinInfo — one loader, one
         // validation, one set of pixels for both surfaces.
         _hud?.SetSkin(info);

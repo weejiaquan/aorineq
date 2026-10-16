@@ -18,7 +18,6 @@ public partial class OsdWindow : Window
     // the XAML FontFamily lists both so whichever is installed renders them.
     private const string GlyphVolume = "\uE767"; // 'Volume'
     private const string GlyphMute = "\uE74F";   // 'Mute'
-    private const string GlyphDevice = "\uE7F5"; // 'Speakers'
     private const double NoticeMaxWidth = 480;
     private const double DarkPillWidth = 300;
     private const double DarkPillHeight = 64;
@@ -47,6 +46,11 @@ public partial class OsdWindow : Window
     // theme or accent color actually changed — not on every volume keypress.
     private bool? _fluentLight;
     private System.Windows.Media.Color? _fluentAccent;
+
+    // The active skin's notice look and scale, pushed in by App alongside the skin. Only used
+    // while the style is "skin"; null there means the skin describes no notice.
+    private SkinNotice? _skinNotice;
+    private double _skinNoticeScale = 1.0;
 
     public event Action<int>? PercentChangedByUser;
 
@@ -88,7 +92,6 @@ public partial class OsdWindow : Window
     public OsdWindow()
     {
         InitializeComponent();
-        NoticeGlyphText.Text = GlyphDevice;
         _hideTimer.Tick += (_, _) =>
         {
             // IsMouseOver: user is interacting; IsMouseCaptureWithin: the volume Slider's Thumb
@@ -198,24 +201,40 @@ public partial class OsdWindow : Window
         Present(wa, isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin, _hideDelay);
     }
 
+    /// <summary>The active skin's notice look (null: it describes none, or no skin is loaded) and
+    /// the skin's scale, which applies to notice art. Takes effect from the next notice.</summary>
+    public void SetSkinNotice(SkinNotice? notice, double scale)
+    {
+        _skinNotice = notice;
+        _skinNoticeScale = scale;
+    }
+
     /// <summary>Shows a line of text in place of the volume bar - the default playback device
     /// changing. It is the same window, so it lands on the same anchor, never takes focus, holds
     /// while hovered and fades on the same timer - held for <see cref="DeviceNotice.HoldFor"/>,
     /// longer than the bar; the next <see cref="ShowVolume"/> puts the bar back.
     ///
-    /// The plate grows with the name up to <see cref="NoticeMaxWidth"/> and trims beyond it, so a
-    /// long name costs width before it costs letters and never leaves the plate.</summary>
-    public void ShowNotice(string text)
+    /// It is drawn in the look <see cref="OsdPlates.NoticeFor"/> picks for the OSD style and the
+    /// system theme. A plate grows with the name up to <see cref="NoticeMaxWidth"/> and trims
+    /// beyond it, so a long name costs width before it costs letters and never leaves the plate;
+    /// a skin's notice art is exactly its own size.</summary>
+    public void ShowNotice(string text) => ShowNotice(text, SystemTheme.AppsUseLightTheme());
+
+    /// <summary><see cref="ShowNotice(string)"/> with the theme given rather than read, so the
+    /// light and dark looks can both be shown on one machine.</summary>
+    internal void ShowNotice(string text, bool light)
     {
-        NoticeText.Text = text;
+        var look = OsdPlates.NoticeFor(_style, light, _skinNotice);
+        NoticeRoot.Apply(look, look.HasArt ? _skinNoticeScale : 1.0);
+        NoticeRoot.SetText(text);
         StyleHost.Visibility = Visibility.Collapsed;
         // The strip belongs to the volume bar. ShowVolume's caller sets it again before every show.
         AirPlayBar.Visibility = Visibility.Collapsed;
         NoticeRoot.Visibility = Visibility.Visible;
 
-        NoticeRoot.Measure(new System.Windows.Size(NoticeMaxWidth, double.PositiveInfinity));
-        Width = Math.Max(DarkPillWidth, NoticeRoot.DesiredSize.Width);
-        Height = DarkPillHeight;
+        var size = NoticeRoot.MeasureNotice(NoticeMaxWidth);
+        Width = size.Width;
+        Height = size.Height;
 
         Present(SystemParameters.WorkArea, DefaultMargin, DeviceNotice.HoldFor(_hideDelay));
     }
@@ -354,20 +373,19 @@ public partial class OsdWindow : Window
             _fluentLight = light;
             _fluentAccent = accent;
 
+            // Panel colours come from the same plate the fluent notice is drawn with, so the two
+            // cannot drift apart. They are built-in constants and always parse.
+            var plate = light ? OsdPlates.FluentLight : OsdPlates.FluentDark;
             var accentBrush = Frozen(new SolidColorBrush(accent));
-            var textBrush = light ? System.Windows.Media.Brushes.Black : System.Windows.Media.Brushes.White;
+            var textBrush = NoticeView.Paint(plate.Text.Color, null);
             // The thumb's center is a "cutout" that matches the panel background, not the text
             // color, so the accent ring reads as floating on top of the panel.
             var thumbCenterBrush = light
                 ? System.Windows.Media.Brushes.White
                 : Frozen(new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x20, 0x20, 0x20)));
 
-            FluentRoot.Background = Frozen(new SolidColorBrush(light
-                ? System.Windows.Media.Color.FromArgb(0xF2, 0xF3, 0xF3, 0xF3)
-                : System.Windows.Media.Color.FromArgb(0xF2, 0x20, 0x20, 0x20)));
-            FluentRoot.BorderBrush = Frozen(new SolidColorBrush(light
-                ? System.Windows.Media.Color.FromArgb(0x14, 0x00, 0x00, 0x00)
-                : System.Windows.Media.Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)));
+            FluentRoot.Background = NoticeView.Paint(plate.Background, null);
+            FluentRoot.BorderBrush = NoticeView.Paint(plate.Border, null);
             // Unfilled track color isn't specified by the spec (only the panel background/border and
             // the accent fill/thumb are); this reuses the same subtle overlay tone as the panel
             // border, just a bit more opaque so the track reads as a track rather than disappearing.
