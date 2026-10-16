@@ -21,6 +21,7 @@ contract and the share payload. The website carries the same material in a frien
 - [`aorineq://` links](#aorineq-links)
 - [Auto-update](#auto-update)
 - [Files AorinEQ owns](#files-aorineq-owns)
+- [Dev builds](#dev-builds)
 - [Notes and limitations](#notes-and-limitations)
 
 ## Requirements
@@ -142,10 +143,13 @@ All four support:
 - **Announce device changes** — on by default. Whenever the Windows default playback device
   changes, whether Windows moved it or you did, the new device's name appears where the OSD does,
   for four seconds, or the hide delay if that is longer. A name longer than 48 characters is cut with an ellipsis; "No output
-  device" is shown when nothing is left to play through. It is always drawn as a plain dark plate
-  — in every style, including a custom skin, so skins need no artwork for it — and it is
-  AorinEQ's own window rather than a Windows notification, so Do Not Disturb does not suppress it.
-  Starting AorinEQ announces nothing, and one switch is one notice.
+  device" is shown when nothing is left to play through. Its look follows the OSD style: *Dark
+  pill* a dark rounded plate, *Minimal bar* a smaller, tighter one, *Windows 11* a light or dark
+  plate that follows Windows' own theme (re-read every time the notice shows), and *Custom skin*
+  whatever [the skin describes](#the-device-notice), or the dark pill when it describes nothing, so
+  skins need no artwork for it. It is AorinEQ's own window rather than a Windows notification, so
+  Do Not Disturb does not suppress it. Starting AorinEQ announces nothing, and one switch is one
+  notice.
 
 The OSD never takes focus, and drag/click/scroll on it set the volume.
 
@@ -160,6 +164,7 @@ A skin is a folder in `%APPDATA%\AorinEQ\skins\<name>\`:
 | `muted.png` or `muted.gif` | optional — shown alone while muted |
 | `airplay-empty.png` or `.gif` | optional — the AirPlay strip at 0 % |
 | `airplay-full.png` or `.gif` | optional — the AirPlay strip at 100 % |
+| `notice.png` or `.gif` | optional — the device-changed notice's artwork |
 | `skin.json` | optional — everything below |
 
 `.png` wins over `.gif` if both exist. All layers must share one logical frame size.
@@ -256,6 +261,14 @@ static skin with no number.
     "dropdownHit": { "x": 258, "y": 4, "w": 30, "h": 24 }  // where a click opens the device list
   },
 
+  // --- the device notice (optional; omit for the dark pill) ---
+  "notice": {
+    "background": "#F2202020",   // plate colour (no notice.png)
+    "cornerRadius": 12,
+    "text": { "color": "#FFFFFFFF", "fontSize": 14, "bold": false },
+    "glyph": { "show": true, "size": 18 }
+  },
+
   // --- credits, used by the skin picker and the gallery ---
   "title": "mika bar",
   "author": "your name",
@@ -304,6 +317,52 @@ with a tray warning. Metadata is normalised on load: trimmed, length-capped by t
 stripped of control characters and bidi overrides — a credit line renders in the picker and on a
 public page, so it is never allowed to lie about itself.
 
+### The device notice
+
+The line that names the new playback device when Windows' default moves (see
+[the OSD](#the-osd)). A skin may describe it in an optional `notice` block, in one of two ways:
+
+- **A plate** — no `notice.png`. AorinEQ draws a rounded rectangle, the device name and a small
+  device glyph, using the block's colours, corner, padding and font. Text and glyph are laid out by
+  the padding, so `text.x`/`text.y`, `glyph.y` and `textWidth` have no effect here.
+- **Art** — a `notice.png` (or `.gif`) is drawn instead of the plate, and the block places the
+  text and glyph on it. The art's own size is the notice's size. A GIF shows
+  its **first frame** only; the notice does not animate. A PNG sprite sheet needs `frames`.
+
+Every field is optional; field names are case-insensitive.
+
+| Field | Default | |
+| --- | --- | --- |
+| `background` | `#F2202020` | plate colour, `#AARRGGBB` or `#RRGGBB`. Plate only |
+| `border` | none | plate outline colour. Plate only |
+| `cornerRadius` | 12 | clamped 0–64. Plate only |
+| `padding.x`, `padding.y` | 16, 10 | clamped 0–64. Plate only |
+| `text.color` | white | |
+| `text.fontFamily` | Segoe UI | left at the default, it inherits AorinEQ's own font chain, so CJK device names still draw |
+| `text.fontSize` | 14 | clamped 4–200 |
+| `text.bold` | false | the default text is SemiBold; `true` makes it Bold |
+| `text.align` | `left` | `left`, `center` or `right`: what `text.x` anchors |
+| `text.x`, `text.y` | 48, centred | art only; image pixels, clamped into the art |
+| `textWidth` | to the art's right edge less 12 | art only; bounds the line so a long name cannot run off the art, clamped to what is left right of `text.x` |
+| `glyph.show` | true | |
+| `glyph.size` | 18 | clamped 4–200 |
+| `glyph.color` | the text colour | |
+| `glyph.x`, `glyph.y` | 16, centred | art only; image pixels, clamped into the art |
+| `frames` | 1 | art only; sprite-sheet frames in `notice.png`, so the height must divide evenly |
+
+The notice text has **no outline and no shadow** — those belong to `percentText` and the AirPlay
+labels, and are not read here. Put contrast in the artwork.
+
+A skin with neither a `notice` block nor `notice.*` art gets the dark pill. A `notice` block with
+art that is missing, mismatched with `frames`, or not a valid image fails **soft**: the volume skin
+is unaffected, the notice falls back to the dark pill, and the reason is kept with the skin.
+A `notice` that is not an object is ignored the same way.
+
+The four shipped skins each draw their own. A copy of one made before notices existed is topped up
+**additively** the next time AorinEQ starts: only when the folder has no `notice.*` file and
+`skin.json` has no `notice` key, it gains `notice.png` and the block, and nothing else in it is
+touched. Skins you have already given a notice are left alone.
+
 ### Animated skins
 
 Each layer can animate, three ways — identical once loaded:
@@ -325,7 +384,7 @@ Skins travel as plain zip files. **Export…** in the designer writes one (regen
 `preview.png` from the installed pixels — a bundled preview in someone else's zip is never
 trusted, let alone extracted). **Import skin…** in Settings, or **Import…** in the designer,
 installs one. Only the known file names are ever extracted, from the archive root or one folder
-deep, so a zip cannot write outside the skin folder; the old folder is moved aside and restored if
+deep (including `notice.png`/`.gif`, so a shared notice arrives with its artwork), so a zip cannot write outside the skin folder; the old folder is moved aside and restored if
 anything fails. Zips are capped at 20 MB.
 
 **Share…** in the designer exports the zip *and* copies a ready-to-fill
@@ -343,6 +402,10 @@ without hand-editing anything:
 - Drag the two coloured handles to set the fill range, or type the pixel values.
 - Drag the percentage number where you want it, and set font, size, bold, colour, alignment,
   outline and shadow.
+- Style the device notice: tick **Style the device notice**, then either pick notice art
+  (**Browse…**) and place its text box and glyph, or leave the art off and set the plate's colours,
+  corner radius, font, size, bold and glyph. It previews on its own checkerboard beside the OSD;
+  with the option off the skin saves no notice and the preview shows the dark pill.
 - Set the scale, and fill in the optional details (title, author, description, version, tags,
   source URL) that the picker and the gallery show.
 - **Test on desktop** shows the draft as a real OSD at your configured position — clicking,
@@ -704,6 +767,14 @@ Uninstalling asks whether to keep `%APPDATA%\AorinEQ` and keeps it unless you sa
 
 Upgrading from before v3.0.0 migrates `%APPDATA%\apo-volume`, `apo-volume.txt` and its include
 line, and the autostart entry, once and automatically.
+
+## Dev builds
+
+Only builds made by `publish.ps1` (`-p:AorinEQBuildKind=release`) are releases. Every other build
+— `dotnet build`, the IDE, CI's gate — is a dev build and says so, so it cannot be mistaken for the
+installed one: Settings → About shows a **DEV BUILD** badge with the commit, branch and build
+time; the tray icon carries an amber dot; and its tooltip ends in "(dev)". The branch is read from
+`.git/HEAD`, and is left out in a git worktree or on a detached HEAD. A release shows none of this.
 
 ## Notes and limitations
 
