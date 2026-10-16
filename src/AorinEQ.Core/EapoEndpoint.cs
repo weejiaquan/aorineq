@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.AccessControl;
 using Microsoft.Win32;
 
@@ -18,6 +19,10 @@ public sealed record RegValue(string Name, string Kind, string[]? Data)
     /// has to put back the kind as well as the bytes.</summary>
     public const string KindExpandString = "ExpandString";
     public const string KindMultiString = "MultiString";
+    /// <summary>REG_DWORD, stored as its unsigned decimal. Endpoints carry one in FxProperties —
+    /// PKEY_AudioEndpoint_Disable_SysFx, the "audio enhancements" switch — and an endpoint that
+    /// cannot be backed up cannot be repaired, so without this a USB DAC was refused outright.</summary>
+    public const string KindDWord = "DWord";
     /// <summary>The value did not exist. Restoring it means DELETING whatever is there now.</summary>
     public const string KindAbsent = "Absent";
 
@@ -27,7 +32,8 @@ public sealed record RegValue(string Name, string Kind, string[]? Data)
 
     /// <summary>Whether this build can write this value back. A backup is only worth taking if
     /// every value in it can be restored, so anything else must stop a repair before it starts.</summary>
-    public bool IsRestorable => Kind is KindAbsent or KindString or KindExpandString or KindMultiString;
+    public bool IsRestorable => Kind is KindAbsent or KindString or KindExpandString or KindMultiString
+        || (Kind == KindDWord && Data is [var d] && uint.TryParse(d, NumberStyles.None, CultureInfo.InvariantCulture, out _));
 
     public string? Single => Kind == KindString && Data is { Length: 1 } ? Data[0] : null;
 }
@@ -154,7 +160,7 @@ public static class EapoEndpoint
         }
     }
 
-    private static RegValue Capture(RegistryKey key, string name)
+    internal static RegValue Capture(RegistryKey key, string name)
     {
         var kind = key.GetValueKind(name);
         var data = key.GetValue(name);
@@ -165,6 +171,8 @@ public static class EapoEndpoint
                 new RegValue(name, RegValue.KindExpandString, [s]),
             RegistryValueKind.MultiString when data is string[] m =>
                 new RegValue(name, RegValue.KindMultiString, m),
+            RegistryValueKind.DWord when data is int d =>
+                new RegValue(name, RegValue.KindDWord, [unchecked((uint)d).ToString(CultureInfo.InvariantCulture)]),
             // Anything else is recorded honestly as something this build cannot write back, which
             // is what makes CanRepair refuse rather than risk an unrestorable change.
             _ => new RegValue(name, "Unsupported:" + kind, null),
@@ -392,7 +400,7 @@ public static class EapoEndpoint
         root?.DeleteSubKeyTree(endpointGuid, throwOnMissingSubKey: false);
     }
 
-    private static void WriteValues(RegistryKey key, IReadOnlyList<RegValue> values)
+    internal static void WriteValues(RegistryKey key, IReadOnlyList<RegValue> values)
     {
         foreach (var value in values)
         {
@@ -409,6 +417,11 @@ public static class EapoEndpoint
                     break;
                 case RegValue.KindMultiString:
                     key.SetValue(value.Name, value.Data!, RegistryValueKind.MultiString);
+                    break;
+                case RegValue.KindDWord when value.IsRestorable:
+                    key.SetValue(value.Name,
+                        unchecked((int)uint.Parse(value.Data![0], NumberStyles.None, CultureInfo.InvariantCulture)),
+                        RegistryValueKind.DWord);
                     break;
                 default:
                     throw new InvalidOperationException(

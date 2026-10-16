@@ -205,6 +205,27 @@ public sealed class EapoHealthTracker
     }
 }
 
+/// <summary>When AorinEQ starts the endpoint repair by itself instead of waiting for a click.
+///
+/// A Windows update that replaces the audio driver detaches Equalizer APO, and nothing re-attaches
+/// it: a balloon pointing at a button left the user to notice, open Settings, and click — after
+/// every update. So the repairable fault (installed, not switched on for this device) starts the
+/// repair on the same EDGE that would have raised the balloon; the UAC prompt is the consent.
+///
+/// Once per device, not once per fault: a device the user declined (or that the repair refused)
+/// is in <paramref name="declined"/> and is only ever repaired from the button again. That is
+/// what stops a headset somebody deliberately runs without Equalizer APO from raising a UAC
+/// prompt every time it reconnects — while a driver update, which re-creates the endpoint under a
+/// new GUID, still gets its automatic repair.</summary>
+public static class EapoAutoRepair
+{
+    public static bool ShouldStart(EapoHealthUpdate update, IReadOnlyCollection<string>? declined) =>
+        update.Notify
+        && update.Event is EapoHealthEvent.Unhealthy or EapoHealthEvent.Lost
+        && update.Snapshot is { Installed: true, ActiveOnDevice: false, EndpointGuid: { } guid }
+        && declined?.Contains(guid, StringComparer.OrdinalIgnoreCase) != true;
+}
+
 /// <summary>Every sentence the health monitor says, in one place and free of jargon.
 ///
 /// It lives in Core, next to the state machine that decides WHEN to say something, because what
@@ -258,6 +279,11 @@ public static class EapoHealthCopy
     /// different job, and saying "re-enable" would be a lie.</summary>
     public static string RepairButtonText(EapoHealthSnapshot s) =>
         s.Installed ? "Re-enable Equalizer APO" : "Set up Equalizer APO";
+
+    /// <summary>Said instead of <see cref="Balloon"/> when <see cref="EapoAutoRepair"/> starts the
+    /// repair: a UAC prompt nobody clicked for needs a reason on screen next to it.</summary>
+    public const string AutoRepairBalloon = "Equalizer APO stopped running on your playback device, "
+        + "so AorinEQ is switching it back on. Approve the Windows prompt to continue.";
 
     /// <summary>The tray balloon, or null when this update is not worth interrupting for. Short
     /// enough to survive Windows' balloon truncation, and it always names the consequence rather
