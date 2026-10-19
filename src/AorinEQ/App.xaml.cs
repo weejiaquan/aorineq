@@ -974,7 +974,7 @@ public partial class App : System.Windows.Application
             _settingsWindow.SwitchToSystemModeRequested += OnSwitchToSystemModeRequested;
             _settingsWindow.RepairEapoRequested += OnEapoRepairRequested;
             _settingsWindow.UndoEapoRepairRequested += OnEapoUndoRepairRequested;
-            _settingsWindow.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
+            _settingsWindow.SetEapoUndoAvailable(DefaultEndpointBackup() is not null);
             _settingsWindow.HudModeChanged += OnHudModeToggled;
             _settingsWindow.HudBehaviourChanged += (fullscreen, playing, fps) =>
                 _hud?.SetBehaviour(fullscreen, playing, fps);
@@ -1492,12 +1492,17 @@ public partial class App : System.Windows.Application
         // lost power — leaves a backup still marked "applying". The endpoint is then in a state
         // nothing has checked, so the user is told, once, that the way out exists. Only ever a
         // balloon: undoing somebody's audio settings without asking is exactly the behaviour this
-        // whole feature is careful not to have.
-        if (EapoRepairBackup.Load(EapoRepair.BackupPath) is { IsInterrupted: true })
+        // whole feature is careful not to have. The click goes to the page that can undo THAT
+        // slot: the Volume page's Undo acts on the default device, and the only other slot the
+        // helper ever writes is VB-Cable's, whose undo is the AirPlay page's EQ toggle.
+        if (EapoRepair.LoadAllBackups().Any(b => b.IsInterrupted))
         {
+            var page = DefaultEndpointBackup() is { IsInterrupted: true }
+                ? SettingsSections.Volume
+                : SettingsSections.AirPlay;
             _tray?.ShowActionableWarning(
                 Loc.T("app.an-equalizer-apo-repair-didn-t"),
-                () => _ = OpenSettingsAsync(SettingsSections.Volume));
+                () => _ = OpenSettingsAsync(page));
         }
     }
 
@@ -1660,32 +1665,37 @@ public partial class App : System.Windows.Application
             // Before anything in the machine-wide directory is read as an instruction. %ProgramData%
             // is user-writable by default, and the backup tells the undo what to write where.
             EapoRepair.SecureStateDirectory();
+            // Records written by releases with one shared slot move into their device's own slot,
+            // now that this process is the only one that can write the locked directory.
+            EapoRepair.MigrateLegacyBackup();
 
+            var guid = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId());
             EapoRepairResult result;
-            if (undo)
+            if (guid is null)
+            {
+                result = new EapoRepairResult(EapoRepairOutcome.Refused,
+                    Loc.T("app.windows-isn-t-reporting-a-playback"));
+            }
+            else if (undo)
             {
                 // A backup an unelevated process could have authored is not a record of what this
                 // program did — it is somebody else's instructions for an elevated write into HKLM.
                 // Refused rather than sanitised: there is no safe subset of "arbitrary values into
                 // an arbitrary endpoint".
-                result = !EapoRepair.IsTrustworthyStateFile(EapoRepair.BackupPath)
+                var slot = EapoRepair.BackupPathFor(guid);
+                result = !EapoRepair.IsTrustworthyStateFile(slot)
                     ? new EapoRepairResult(EapoRepairOutcome.Refused,
-                        File.Exists(EapoRepair.BackupPath)
+                        File.Exists(slot)
                             ? Loc.T("app.aorineq-won-t-undo-from-a")
                             : Loc.T("app.there-s-nothing-to-undo-aorineq"))
-                    : EapoRepairBackup.Load(EapoRepair.BackupPath) is { } backup
-                        ? EapoRepair.Undo(backup, Restart)
+                    : EapoRepairBackup.Load(slot) is { } backup
+                        ? EapoRepair.Undo(backup, Restart, slot)
                         : new EapoRepairResult(EapoRepairOutcome.Refused,
                             Loc.T("app.there-s-nothing-to-undo-aorineq"));
             }
             else
             {
-                var guid = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId());
-                result = guid is null
-                    ? new EapoRepairResult(EapoRepairOutcome.Refused,
-                        Loc.T("app.windows-isn-t-reporting-a-playback"))
-                    : EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid),
-                        endpointStillExists: AudioEndpoint.IsEndpointPresent);
+                result = EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid));
             }
 
             EapoRepair.SaveResult(result with { Token = token });
@@ -1846,7 +1856,7 @@ public partial class App : System.Windows.Application
             // start another automatic repair from inside this one.
             CheckEapoHealth(force: true);
             _eapoRepairRunning = false;
-            _settingsWindow?.SetEapoUndoAvailable(EapoRepairBackup.Load(EapoRepair.BackupPath) is not null);
+            _settingsWindow?.SetEapoUndoAvailable(DefaultEndpointBackup() is not null);
         }
     }
 
@@ -1859,11 +1869,18 @@ public partial class App : System.Windows.Application
     /// changed" in that case would understate it at the one moment the user needs to know.</summary>
     private static string NoVerdictMessage(int exitCode)
     {
-        var backup = EapoRepairBackup.Load(EapoRepair.BackupPath);
+        var backup = DefaultEndpointBackup();
         if (backup is null)
             return Loc.T("app.the-repair-stopped-before-it-reported", exitCode);
         return Loc.T("app.the-repair-stopped-before-it-reported-2", exitCode);
     }
+
+    /// <summary>The undo record for the device the user is listening through — what Settings'
+    /// Undo button acts on.</summary>
+    private static EapoRepairBackup? DefaultEndpointBackup() =>
+        AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()) is { } guid
+            ? EapoRepair.LoadBackupFor(guid)
+            : null;
 
     /// <summary>The health banner's "Switch to Windows volume mode" button: the same live
     /// transition the Settings radios run, so there is exactly one path that changes volume mode

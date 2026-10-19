@@ -310,16 +310,25 @@ public class EapoRepairTests
     }
 
     [Fact]
-    public void The_backup_lives_somewhere_both_accounts_can_reach()
+    public void Each_endpoint_has_its_own_slot_somewhere_both_accounts_can_reach()
     {
         // Machine-wide, not per-user: the repair runs elevated and the undo reads it unelevated,
         // and a standard user typing an administrator's credentials makes those two different
-        // profiles.
-        _out.WriteLine(EapoRepair.BackupPath);
-        Assert.StartsWith(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            EapoRepair.BackupPath, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(ApoPaths.StateFolderName, EapoRepair.BackupPath);
+        // profiles. One slot PER ENDPOINT, so repairing VB-Cable never touches the speakers' undo.
+        var a = EapoRepair.BackupPathFor("{9C1AF7FF-0000-0000-0000-000000000001}");
+        var aLower = EapoRepair.BackupPathFor("{9c1af7ff-0000-0000-0000-000000000001}");
+        var b = EapoRepair.BackupPathFor("{9c1af7ff-0000-0000-0000-000000000002}");
+        _out.WriteLine($"{a}\n{b}\nlegacy: {EapoRepair.BackupPath}");
+
+        Assert.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            a, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(EapoRepair.StateDirectory, Path.GetDirectoryName(a));
+        Assert.Equal(EapoRepair.StateDirectory, Path.GetDirectoryName(EapoRepair.BackupPath));
+        Assert.Contains(ApoPaths.StateFolderName, a);
+        Assert.Equal("repair-backup-{9c1af7ff-0000-0000-0000-000000000001}.json", Path.GetFileName(a));
+        Assert.Equal(a, aLower);   // one device, one slot, however its GUID was cased
+        Assert.NotEqual(a, b);
+        Assert.Throws<ArgumentException>(() => EapoRepair.BackupPathFor("..\\..\\evil"));
     }
 
     // ---------------------------------------------------------------- refusals, without writing
@@ -340,7 +349,7 @@ public class EapoRepairTests
     /// started with no backup, and delete the file afterwards. That is a test reaching into shared
     /// state it does not own: run the suite while a real repair is pending and it fails on the
     /// assert, or worse, deletes the only record of how to put a device back. Nothing here needs
-    /// the real path — only that there is exactly ONE slot, which a temp file models exactly.</summary>
+    /// the real path — only that a slot is one file, which a temp file models exactly.</summary>
     private static string OwnSlot() =>
         Path.Combine(Path.GetTempPath(), "AorinEQ.Tests", Guid.NewGuid().ToString("N") + ".json");
 
@@ -370,7 +379,7 @@ public class EapoRepairTests
         var slot = OwnSlot();
         // Whatever the user's own machine-wide slot holds, this test must leave it exactly so —
         // asserted as "unchanged", not as "absent", because a pending real repair is legitimate.
-        var realSlotBefore = File.Exists(EapoRepair.BackupPath);
+        var realSlotBefore = File.Exists(EapoRepair.BackupPathFor(guid!));
 
         var result = EapoRepair.Repair(guid!,
             () => throw new InvalidOperationException("audio must not be restarted"),
@@ -381,7 +390,7 @@ public class EapoRepairTests
         Assert.Equal(EapoRepairOutcome.AlreadyActive, result.Outcome);
         Assert.Equal(before, Describe(EapoEndpoint.ReadFxProperties(guid!)));
         Assert.False(File.Exists(slot)); // no backup taken for a no-op
-        Assert.Equal(realSlotBefore, File.Exists(EapoRepair.BackupPath));
+        Assert.Equal(realSlotBefore, File.Exists(EapoRepair.BackupPathFor(guid!)));
     }
 
     [Fact]
@@ -408,17 +417,18 @@ public class EapoRepairTests
     /// hardware. This one can only ever be refused.</summary>
     private const string NoSuchDevice = "{deadbeef-0000-0000-0000-000000000000}";
 
-    // These three drive EapoRepair.Repair past its "is Equalizer APO installed?" gate, which comes
-    // BEFORE the backup-slot guard they are actually about. Without the install they are refused
-    // for the wrong reason and assert nothing - so they are labelled, like every other test here
-    // that needs the real thing to talk to. See Requires.cs.
+    // This drives EapoRepair.Repair past its "is Equalizer APO installed?" gate, which comes
+    // BEFORE the slot guard it is actually about. Without the install it is refused for the wrong
+    // reason and asserts nothing - so it is labelled, like every other test here that needs the
+    // real thing to talk to. See Requires.cs. (An_interrupted_repair_blocks_only_its_own_endpoint,
+    // below, is the same guard seen across two slots.)
     [Fact]
     [Trait(Requires.Key, Requires.EqualizerApo)]
     public void An_unfinished_repair_is_never_overwritten_by_a_new_one()
     {
-        // There is ONE backup slot. A repair that never reached its verification left the only
-        // description of a device nothing has checked since; starting another repair over it would
-        // destroy that record. The user has to undo first.
+        // Each device has its own slot. A repair of THIS device that never reached its
+        // verification left the only description of a device nothing has checked since; starting
+        // another repair of it over that record would destroy it. The user has to undo first.
         var path = OwnSlot();
         var guid = NoSuchDevice;
         try
@@ -437,33 +447,6 @@ public class EapoRepairTests
             // …and the record it protects is still exactly where it was.
             Assert.True(EapoRepairBackup.Load(path)!.IsInterrupted);
             Assert.Equal("x", EapoRepairBackup.Load(path)!.FxValues[0].Name);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
-    }
-
-    [Fact]
-    [Trait(Requires.Key, Requires.EqualizerApo)]
-    public void An_undo_held_for_another_device_is_never_thrown_away()
-    {
-        var path = OwnSlot();
-        var guid = NoSuchDevice;
-        try
-        {
-            new EapoRepairBackup("{99999999-8888-7777-6666-555555555555}", EapoRepairBackup.Applied,
-                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
-
-            var result = EapoRepair.Repair(guid,
-                () => throw new InvalidOperationException("audio must not be restarted"),
-                () => throw new InvalidOperationException("nothing should be verified"),
-                backupPath: path);
-
-            _out.WriteLine(result.Message);
-            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
-            Assert.Contains("different playback device", result.Message);
-            Assert.Equal("{99999999-8888-7777-6666-555555555555}", EapoRepairBackup.Load(path)!.EndpointGuid);
         }
         finally
         {
@@ -902,112 +885,172 @@ public class EapoRepairTests
         }
     }
 
-    // ------------------------------------------------- the backup guard vs a device that is gone
+    // ------------------------------------------------- one slot per endpoint
 
-    /// <summary>The GUID every test in this section backs up — never this machine's, so nothing
-    /// here can collide with a real pending undo.</summary>
-    private const string OtherDevice = "{99999999-8888-7777-6666-555555555555}";
+    private const string DeviceA = "{aaaaaaaa-1111-2222-3333-444444444444}";
+    private const string DeviceB = "{bbbbbbbb-1111-2222-3333-444444444444}";
+
+    /// <summary>A state directory THIS TEST owns, in its own temp folder — never ProgramData.</summary>
+    private static string OwnStateDirectory()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "AorinEQ.Tests", "state-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static EapoRepairBackup RecordFor(string guid, string stage) =>
+        new(guid, stage, DateTimeOffset.UtcNow, [RegValue.Absent("x")], null);
 
     [Fact]
     [Trait(Requires.Key, Requires.EqualizerApo)]
-    public void An_undo_for_a_device_Windows_no_longer_has_does_not_block_repairing_the_new_one()
+    public void An_interrupted_repair_blocks_only_its_own_endpoint()
     {
-        // The lockout this guards against, seen on a real machine: a driver update re-creates the
-        // endpoint under a NEW GUID, the old GUID goes not-present, and the applied backup for it
-        // refused every repair of the new endpoint with "undo the other device first" — protecting
-        // an undo for hardware Windows no longer has. When the backed-up endpoint is gone, the
-        // guard must stand aside.
-        var path = OwnSlot();
+        // Review focus: a repair of A was interrupted (helper killed) while B holds its own undo.
+        // A must refuse; B must get past the guard. B's slot is made read-only so its repair fails
+        // at the backup save — the first step AFTER the guard — with no registry write at all.
+        var dir = OwnStateDirectory();
+        var slotA = EapoRepair.BackupPathFor(DeviceA, dir);
+        var slotB = EapoRepair.BackupPathFor(DeviceB, dir);
         try
         {
-            new EapoRepairBackup(OtherDevice, EapoRepairBackup.Applied,
-                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
-            // The slot is made unwritable so the repair fails at its own backup save — the first
-            // step AFTER the guard — proving the guard was passed without one registry write.
-            File.SetAttributes(path, FileAttributes.ReadOnly);
+            RecordFor(DeviceA, EapoRepairBackup.Applying).Save(slotA);
+            RecordFor(DeviceB, EapoRepairBackup.Applied).Save(slotB);
+            File.SetAttributes(slotB, FileAttributes.ReadOnly);
 
-            string? asked = null;
-            var result = EapoRepair.Repair(NoSuchDevice,
+            var a = EapoRepair.Repair(DeviceA,
                 () => throw new InvalidOperationException("audio must not be restarted"),
                 () => throw new InvalidOperationException("nothing should be verified"),
-                backupPath: path,
-                endpointStillExists: guid => { asked = guid; return false; });
+                backupPath: slotA);
+            var b = EapoRepair.Repair(DeviceB,
+                () => throw new InvalidOperationException("audio must not be restarted"),
+                () => throw new InvalidOperationException("nothing should be verified"),
+                backupPath: slotB);
+            _out.WriteLine($"A (interrupted slot): {a.Outcome} - {a.Message}");
+            _out.WriteLine($"B (applied slot, other device interrupted): {b.Outcome} - {b.Message}");
 
-            _out.WriteLine(result.Message);
-            Assert.Equal(OtherDevice, asked); // judged on the BACKED-UP device, not the new one
-            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
-            Assert.DoesNotContain("different playback device", result.Message);
-            Assert.Contains("couldn't save a record", result.Message);
+            Assert.Equal(EapoRepairOutcome.Refused, a.Outcome);
+            Assert.Contains("didn't finish", a.Message);
+            Assert.True(EapoRepairBackup.Load(slotA)!.IsInterrupted);
+            Assert.Equal(EapoRepairOutcome.Refused, b.Outcome);
+            Assert.Contains("couldn't save a record", b.Message);  // past the guard, stopped before any write
+            Assert.DoesNotContain("different playback device", b.Message);
         }
         finally
         {
-            if (File.Exists(path)) { File.SetAttributes(path, FileAttributes.Normal); File.Delete(path); }
-            if (File.Exists(path + ".new")) File.Delete(path + ".new");
+            if (File.Exists(slotB)) File.SetAttributes(slotB, FileAttributes.Normal);
+            Directory.Delete(dir, recursive: true);
         }
     }
 
     [Fact]
-    [Trait(Requires.Key, Requires.EqualizerApo)]
-    public void The_guard_still_blocks_while_the_other_device_exists_or_nobody_can_ask()
+    public void Two_endpoints_are_undone_independently()
     {
-        var path = OwnSlot();
+        // Undo of fake devices with no captured values is a registry no-op (see
+        // A_revert_that_cannot_bring_audio_back...), so the slot bookkeeping runs for real
+        // without touching anybody's hardware.
+        var dir = OwnStateDirectory();
+        var slotA = EapoRepair.BackupPathFor(DeviceA, dir);
+        var slotB = EapoRepair.BackupPathFor(DeviceB, dir);
         try
         {
-            new EapoRepairBackup(OtherDevice, EapoRepairBackup.Applied,
-                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
+            var a = new EapoRepairBackup(DeviceA, EapoRepairBackup.Applied, DateTimeOffset.UtcNow, [], null);
+            var b = new EapoRepairBackup(DeviceB, EapoRepairBackup.Applied, DateTimeOffset.UtcNow, [], null);
+            a.Save(slotA);
+            b.Save(slotB);
 
-            // The device is still there: its undo still wins over a new repair.
-            var blocked = EapoRepair.Repair(NoSuchDevice,
-                () => throw new InvalidOperationException("audio must not be restarted"),
-                () => throw new InvalidOperationException("nothing should be verified"),
-                backupPath: path, endpointStillExists: _ => true);
-            Assert.Equal(EapoRepairOutcome.Refused, blocked.Outcome);
-            Assert.Contains("different playback device", blocked.Message);
+            var undoA = EapoRepair.Undo(a, restartAudio: () => true, backupPath: slotA);
+            _out.WriteLine($"undo A: {undoA.Outcome}; A slot exists={File.Exists(slotA)}; B slot exists={File.Exists(slotB)}");
+            Assert.Equal(EapoRepairOutcome.Undone, undoA.Outcome);
+            Assert.False(File.Exists(slotA));
+            Assert.Equal(DeviceB, EapoRepair.LoadBackupFor(DeviceB, dir)!.EndpointGuid);
 
-            // A caller that cannot ask (no predicate) must assume the device is present — absence
-            // of evidence is not licence to overwrite the only undo.
-            var stillBlocked = EapoRepair.Repair(NoSuchDevice,
-                () => throw new InvalidOperationException("audio must not be restarted"),
-                () => throw new InvalidOperationException("nothing should be verified"),
-                backupPath: path);
-            Assert.Equal(EapoRepairOutcome.Refused, stillBlocked.Outcome);
-            Assert.Contains("different playback device", stillBlocked.Message);
-            Assert.Equal(OtherDevice, EapoRepairBackup.Load(path)!.EndpointGuid);
+            var undoB = EapoRepair.Undo(b, restartAudio: () => true, backupPath: slotB);
+            _out.WriteLine($"undo B: {undoB.Outcome}; remaining records: {EapoRepair.LoadAllBackups(dir).Count}");
+            Assert.Equal(EapoRepairOutcome.Undone, undoB.Outcome);
+            Assert.Empty(EapoRepair.LoadAllBackups(dir));
         }
         finally
         {
-            if (File.Exists(path)) File.Delete(path);
+            Directory.Delete(dir, recursive: true);
         }
     }
 
     [Fact]
-    [Trait(Requires.Key, Requires.EqualizerApo)]
-    public void An_unfinished_repair_blocks_even_when_its_device_is_gone()
+    public void The_legacy_single_slot_moves_into_its_devices_own_slot_once()
     {
-        // Deliberately conservative: an interrupted backup describes changes nothing has verified,
-        // and a not-present device can come back (a USB interface re-attached). Overwriting the
-        // only record of what was displaced is not an option; Undo is the designed way out and
-        // writes to the orphaned key just fine.
-        var path = OwnSlot();
+        var dir = OwnStateDirectory();
+        var legacy = Path.Combine(dir, Path.GetFileName(EapoRepair.BackupPath));
         try
         {
-            new EapoRepairBackup(OtherDevice, EapoRepairBackup.Applying,
-                DateTimeOffset.UtcNow, [RegValue.Absent("x")], null).Save(path);
+            RecordFor(DeviceA, EapoRepairBackup.Applied).Save(legacy);
+            Assert.Equal(DeviceA, EapoRepair.LoadBackupFor(DeviceA, dir)!.EndpointGuid); // readable before migration
+            Assert.Null(EapoRepair.LoadBackupFor(DeviceB, dir));                         // and only for its device
 
-            var result = EapoRepair.Repair(NoSuchDevice,
-                () => throw new InvalidOperationException("audio must not be restarted"),
-                () => throw new InvalidOperationException("nothing should be verified"),
-                backupPath: path, endpointStillExists: _ => false);
-
-            _out.WriteLine(result.Message);
-            Assert.Equal(EapoRepairOutcome.Refused, result.Outcome);
-            Assert.Contains("didn't finish", result.Message);
-            Assert.True(EapoRepairBackup.Load(path)!.IsInterrupted);
+            bool moved = EapoRepair.MigrateLegacyBackup(dir);
+            _out.WriteLine($"migrated={moved}; files now: {string.Join(", ", Directory.GetFiles(dir).Select(Path.GetFileName))}");
+            Assert.True(moved);
+            Assert.False(File.Exists(legacy));
+            Assert.Equal(DeviceA, EapoRepairBackup.Load(EapoRepair.BackupPathFor(DeviceA, dir))!.EndpointGuid);
+            Assert.False(EapoRepair.MigrateLegacyBackup(dir)); // nothing left to move
         }
         finally
         {
-            if (File.Exists(path)) File.Delete(path);
+            Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void Migration_never_overwrites_a_slot_that_already_holds_a_record()
+    {
+        var dir = OwnStateDirectory();
+        var legacy = Path.Combine(dir, Path.GetFileName(EapoRepair.BackupPath));
+        var slot = EapoRepair.BackupPathFor(DeviceA, dir);
+        try
+        {
+            RecordFor(DeviceA, EapoRepairBackup.Applied).Save(legacy);
+            RecordFor(DeviceA, EapoRepairBackup.Applying).Save(slot);
+
+            bool moved = EapoRepair.MigrateLegacyBackup(dir);
+            _out.WriteLine($"migrated={moved}; legacy still there={File.Exists(legacy)}; slot stage={EapoRepairBackup.Load(slot)!.Stage}");
+            Assert.False(moved);
+            Assert.True(File.Exists(legacy));
+            Assert.True(EapoRepairBackup.Load(slot)!.IsInterrupted);
+            Assert.Equal(2, EapoRepair.LoadAllBackups(dir).Count);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void An_unreadable_legacy_record_is_left_where_it_is()
+    {
+        var dir = OwnStateDirectory();
+        var legacy = Path.Combine(dir, Path.GetFileName(EapoRepair.BackupPath));
+        try
+        {
+            File.WriteAllText(legacy, "{ not json");
+            Assert.False(EapoRepair.MigrateLegacyBackup(dir));
+            Assert.True(File.Exists(legacy));
+            Assert.Empty(EapoRepair.LoadAllBackups(dir));
+            _out.WriteLine("corrupt legacy record: not migrated, not counted, not deleted");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_state_directory_that_does_not_exist_holds_no_records()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "AorinEQ.Tests", "absent-" + Guid.NewGuid().ToString("N"));
+        Assert.Empty(EapoRepair.LoadAllBackups(dir));
+        Assert.Null(EapoRepair.LoadBackupFor(DeviceA, dir));
+        Assert.Null(EapoRepair.LoadBackupFor("not-a-guid", dir));
+        Assert.False(EapoRepair.MigrateLegacyBackup(dir));
+        _out.WriteLine("absent directory: no records, nothing migrated");
     }
 
     [Fact]
