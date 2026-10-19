@@ -28,6 +28,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private int _imgHeight;
     private double _lastTextWidth; // measured percent-text width (scale-multiplied), for align/drag math
     private string? _editingSkinName; // null = designing a new skin
+    // The strip this designer cannot edit, handed back to the writer unchanged on save.
+    private SkinAirPlay? _airPlay;
     // True from construction (same pattern as SettingsWindow): sliders with an initial Value
     // raise ValueChanged DURING InitializeComponent, before sibling elements exist — the guard
     // must already be up. PopulateSkinList drops it once the window is fully built.
@@ -159,6 +161,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     internal void LoadSkin(SkinInfo info)
     {
         _editingSkinName = info.Name;
+        _airPlay = info.AirPlay;
         _emptySource = info.EmptyPath;
         _fullSource = info.FullPath;
         _mutedSource = info.MutedPath;
@@ -194,6 +197,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private void ClearEditor()
     {
         _editingSkinName = null;
+        _airPlay = null;
         _emptySource = null;
         _fullSource = null;
         _mutedSource = null;
@@ -1063,7 +1067,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         NoticePreview.SetText(Loc.T("designer.notice.sample"));
     }
 
-    private SkinConfig CurrentConfig()
+    internal SkinConfig CurrentConfig()
     {
         SkinText? text = CurrentSkinText();
         // GIF layers self-describe; recording 1 keeps skin.json meaningful for the loader.
@@ -1080,7 +1084,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
             MutedFrames: _mutedSource is null || IsGif(_mutedSource) ? 1 : ParseFrames(MutedFramesBox),
             MutedDim: Math.Round(MutedDimSlider.Value, 2),
             Meta: CurrentMeta(),
-            Notice: CurrentNotice());
+            Notice: CurrentNotice(),
+            AirPlay: _airPlay);
     }
 
     // ----- preview dragging: the percent number and the two fill-range handles are all

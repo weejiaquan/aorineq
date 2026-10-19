@@ -482,10 +482,11 @@ public class DefaultSkinsTests : IDisposable
         var folder = Path.Combine(_root, SkinArt.Default);
         var loaded = SkinLoader.Load(folder);
         Assert.NotNull(loaded.Notice);
+        Assert.NotNull(loaded.AirPlay);
 
         SkinWriter.Save(_root, SkinArt.Default, loaded.EmptyPath, loaded.FullPath,
             new SkinConfig(loaded.Text, loaded.Scale, FillStartX: loaded.FillStartX, FillEndX: loaded.FillEndX,
-                Meta: loaded.Meta, Notice: null),
+                Meta: loaded.Meta, Notice: null, AirPlay: loaded.AirPlay),
             loaded.MutedPath);
         var topped = DefaultSkins.EnsureInstalled(_root);
         var jsonText = File.ReadAllText(Path.Combine(folder, "skin.json"));
@@ -494,12 +495,16 @@ public class DefaultSkinsTests : IDisposable
         _out.WriteLine("topped up: " + (topped.Count == 0 ? "(nothing)" : string.Join(", ", topped)));
         _out.WriteLine("skin.json: " + jsonText);
         _out.WriteLine($"notice={reloaded.Notice?.ToString() ?? "(none)"} error={reloaded.NoticeError ?? "(none)"}");
+        _out.WriteLine($"strip expected {loaded.AirPlay}");
+        _out.WriteLine($"strip actual   {reloaded.AirPlay?.ToString() ?? "(none)"} error={reloaded.AirPlayError ?? "(none)"}");
         Assert.Empty(topped);
         Assert.Empty(Directory.GetFiles(folder, "notice.*"));
         using var doc = System.Text.Json.JsonDocument.Parse(jsonText);
         Assert.Equal(System.Text.Json.JsonValueKind.False, doc.RootElement.GetProperty("notice").ValueKind);
         Assert.True(reloaded.IsValid, reloaded.Error);
         Assert.Null(reloaded.Notice);
+        Assert.Equal(loaded.AirPlay, reloaded.AirPlay);
+        Assert.Equal(2, Directory.GetFiles(folder, "airplay-*").Length);
     }
 
     /// <summary>Nothing is left behind mid-write. The staging folder is a dot-folder, which

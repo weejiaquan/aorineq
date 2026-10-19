@@ -314,4 +314,29 @@ public class SkinNoticeTests : IDisposable
         Assert.NotNull(imported.Notice);
         Assert.True(imported.Notice.HasArt);
     }
+
+    /// <summary>A plate is read with its text position and glyph X (SkinLoader.LoadNotice reads
+    /// text.x/text.y and glyph.x for plates too), so the writer has to write them back: a loaded
+    /// plate saved unchanged loads as the same notice. Defaults (0, 0, 16) stay omitted, so every
+    /// plate the writer wrote before still resaves byte-identically.</summary>
+    [Fact]
+    public void A_plate_with_positions_round_trips_through_save_and_load()
+    {
+        var folder = MakeSkin("plate-positions",
+            """{"notice":{"background":"#FF102030","text":{"x":60,"y":4},"glyph":{"x":20}}}""");
+        var loaded = LoadLogged(folder).Notice;
+        Assert.NotNull(loaded);
+        Assert.False(loaded.HasArt);
+
+        SkinWriter.Save(_root, "plate-positions", Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
+            new SkinConfig(null, 1.0, Notice: loaded));
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        var reloaded = LoadLogged(folder).Notice;
+
+        _out.WriteLine("skin.json after save: " + json);
+        _out.WriteLine($"expected text=({loaded.Text.X},{loaded.Text.Y}) glyph.x={loaded.Glyph.X}; " +
+                       $"actual text=({reloaded?.Text.X},{reloaded?.Text.Y}) glyph.x={reloaded?.Glyph.X}");
+        Assert.Equal((60, 4, 20), (loaded.Text.X, loaded.Text.Y, loaded.Glyph.X));
+        Assert.Equal(loaded, reloaded);
+    }
 }

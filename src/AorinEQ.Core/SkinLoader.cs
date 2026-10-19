@@ -10,7 +10,13 @@ public sealed record SkinText(bool Show, int X, int Y,
     string Color = "#FFFFFFFF", string FontFamily = "Segoe UI", double FontSize = 14, bool Bold = false,
     string? OutlineColor = null, double OutlineWidth = 0,
     string? ShadowColor = null, double ShadowBlur = 4, double ShadowDepth = 2,
-    string Align = "left");
+    string Align = "left")
+{
+    /// <summary>A hidden text that carries nothing else. The writer omits it, so it is the same
+    /// skin as no text at all; a hidden text with any other field set is written with
+    /// "show": false and keeps its position and styling.</summary>
+    public static SkinText Hidden { get; } = new(false, 0, 0);
+}
 
 /// <summary>A rectangle in skin coordinates - the click target a skin declares for the AirPlay
 /// dropdown. Always inside the bar it belongs to: the loader clamps it, because a region running

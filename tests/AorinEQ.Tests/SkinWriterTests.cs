@@ -479,4 +479,32 @@ public class SkinWriterTests : IDisposable
         _out.WriteLine("description: " + loaded.Description!.Replace("\n", "\\n"));
         Assert.Equal("line one\nline two", loaded.Description);
     }
+
+    /// <summary>Hidden is not the same as never styled: a number turned off keeps where it was and
+    /// how it looked, so turning it back on is not starting over.</summary>
+    [Fact]
+    public void A_hidden_percent_text_keeps_its_position_and_styling()
+    {
+        var hidden = new SkinText(false, 40, 12, Color: "#FF00FF00", FontSize: 30, Align: "center");
+        var folder = SkinWriter.Save(_root, "hidden", _emptySrc, _fullSrc, new SkinConfig(hidden, 1.0));
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+
+        _out.WriteLine("json: " + json);
+        Assert.Contains(
+            "\"percentText\":{\"show\":false,\"x\":40,\"y\":12,\"color\":\"#FF00FF00\",\"fontSize\":30,\"align\":\"center\"}",
+            json);
+        Assert.Equal(hidden, SkinLoader.Load(folder).Text);
+    }
+
+    /// <summary>...while a hidden text carrying nothing is the same skin as no text and writes
+    /// nothing - so every skin written before this fix resaves byte-identically.</summary>
+    [Fact]
+    public void A_plain_hidden_text_is_the_same_skin_as_no_text_and_writes_nothing()
+    {
+        var folder = SkinWriter.Save(_root, "plain-hidden", _emptySrc, _fullSrc, new SkinConfig(SkinText.Hidden, 1.0));
+
+        _out.WriteLine("skin.json exists: " + File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.Null(SkinLoader.Load(folder).Text);
+    }
 }

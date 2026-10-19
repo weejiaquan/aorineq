@@ -400,4 +400,30 @@ public class SkinDesignerNoticeTests : IDisposable
         Assert.False(enabled);
         Assert.Equal(Loc.T("designer.status.notice-not-loaded", info.Name, info.NoticeError!), status);
     }
+
+    /// <summary>Between this commit and the new designer, the old one still saves skins. The
+    /// writer no longer carries the strip on its own, so the old designer must hand it the strip
+    /// it loaded - or every save would delete the skin's AirPlay art and block.</summary>
+    [Fact]
+    public void The_old_designer_hands_the_loaded_strip_to_the_writer()
+    {
+        var folder = MakeSkin("strip", """{"airplay":{"fillStartX":8,"nameText":{"show":true,"x":30,"y":6}}}""");
+        WritePng(Path.Combine(folder, "airplay-empty.png"), 300, 40);
+        WritePng(Path.Combine(folder, "airplay-full.png"), 300, 40);
+        var info = LoadLogged(folder);
+        Assert.NotNull(info.AirPlay);
+
+        var (loadedStrip, clearedStrip) = WithDesigner(d =>
+        {
+            d.LoadSkin(info);
+            var loaded = d.CurrentConfig().AirPlay;
+            d.SkinSelect.SelectedIndex = -1; // no skin selected: OnSkinSelected clears the editor, as "New skin…" does
+            return (loaded, d.CurrentConfig().AirPlay);
+        });
+
+        _out.WriteLine($"expected {info.AirPlay}");
+        _out.WriteLine($"actual   {loadedStrip?.ToString() ?? "(none)"}; after clearing: {clearedStrip?.ToString() ?? "(none)"} (expected none)");
+        Assert.Equal(info.AirPlay, loadedStrip);
+        Assert.Null(clearedStrip);
+    }
 }
