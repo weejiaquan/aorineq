@@ -218,7 +218,7 @@
   "designer.text.y": "Y",
   "designer.text.font": "フォント",
   "designer.text.size": "サイズ",
-  "designer.weight.label": "太さ",
+  "designer.weight.label": "文字の太さ",
   "designer.weight.thin": "極細 100",
   "designer.weight.extra-light": "特細 200",
   "designer.weight.light": "細字 300",
