@@ -1,27 +1,35 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 namespace AorinEQ.Core;
 
-/// <summary>Authenticode checks for a file AorinEQ is about to run elevated.
+/// <summary>Authenticode check for a file AorinEQ is about to run elevated.
 ///
-/// Two questions, both required: is the signature intact and chained to a trusted root
-/// (<see cref="IsSignatureValid"/>), and WHO signed it (<see cref="SignerCommonName"/>). Either
-/// alone is worthless — any signed program verifies, and a tampered file still carries its
-/// original certificate.</summary>
+/// One question with one answer: WHO signed this file, provided the signature is intact and chained
+/// to a trusted root. The name comes from the very signature WinVerifyTrust validated, never from a
+/// second read of the file.
+///
+/// Contract for callers: open the file with <c>new FileStream(path, FileMode.Open, FileAccess.Read,
+/// FileShare.Read)</c> (no write or delete sharing) and keep it open until the process is launched, so
+/// the bytes verified are the bytes run.</summary>
 public static class Authenticode
 {
-    /// <summary>WinVerifyTrust with the generic Authenticode policy, no UI, revocation checked for
-    /// the whole chain except the root. Never throws.</summary>
-    public static bool IsSignatureValid(string path)
+    private const string CommonNameOid = "2.5.4.3";
+
+    /// <summary>WinVerifyTrust with the generic Authenticode policy, no UI, revocation checked for the
+    /// whole chain except the root, against the open <paramref name="file"/>. Returns the CN of the
+    /// validated signer's certificate, or null when the signature is not valid (tampered, unsigned,
+    /// untrusted, revocation unreachable — the HRESULT is traced) or the subject has no CN RDN.
+    /// Never throws for a bad or unsigned file.</summary>
+    public static string? VerifiedSignerCommonName(FileStream file)
     {
-        if (!File.Exists(path))
-            return false;
         var fileInfo = new WinTrustFileInfo
         {
             cbStruct = (uint)Marshal.SizeOf<WinTrustFileInfo>(),
-            pcwszFilePath = path,
+            pcwszFilePath = file.Name,
+            hFile = file.SafeFileHandle.DangerousGetHandle(),
         };
         IntPtr pFile = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustFileInfo>());
         bool marshalled = false;
@@ -42,7 +50,13 @@ public static class Authenticode
             var action = GenericVerifyV2;
             try
             {
-                return WinVerifyTrust(NoUiWindow, ref action, ref data) == 0;
+                int verdict = WinVerifyTrust(NoUiWindow, ref action, ref data);
+                if (verdict != 0)
+                {
+                    Trace.TraceWarning($"Authenticode: WinVerifyTrust rejected '{file.Name}' with 0x{verdict:X8}");
+                    return null;
+                }
+                return LeafCommonName(data.hWVTStateData);
             }
             finally
             {
@@ -56,21 +70,36 @@ public static class Authenticode
             if (marshalled)
                 Marshal.DestroyStructure<WinTrustFileInfo>(pFile);
             Marshal.FreeHGlobal(pFile);
+            GC.KeepAlive(file);
         }
     }
 
-    /// <summary>The CN of the certificate the file's embedded signature names, or null when the
-    /// file has none. Does NOT verify anything — pair it with <see cref="IsSignatureValid"/>.</summary>
-    public static string? SignerCommonName(string path)
+    /// <summary>CN RDN of the leaf certificate WinVerifyTrust validated; the state must still be open.</summary>
+    private static string? LeafCommonName(IntPtr state)
     {
+        IntPtr provider = WTHelperProvDataFromStateData(state);
+        if (provider == IntPtr.Zero)
+            return null;
+        IntPtr signer = WTHelperGetProvSignerFromChain(provider, 0, false, 0);
+        if (signer == IntPtr.Zero)
+            return null;
+        var signerData = Marshal.PtrToStructure<CryptProviderSigner>(signer);
+        if (signerData.pasCertChain == IntPtr.Zero || signerData.csCertChain == 0)
+            return null;
+        var leaf = Marshal.PtrToStructure<CryptProviderCert>(signerData.pasCertChain);
+        if (leaf.pCert == IntPtr.Zero)
+            return null;
         try
         {
-            using var signer = X509Certificate.CreateFromSignedFile(path);
-            using var certificate = new X509Certificate2(signer);
-            return certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+            using var certificate = new X509Certificate2(leaf.pCert); // duplicates the context
+            foreach (var rdn in certificate.SubjectName.EnumerateRelativeDistinguishedNames())
+                if (!rdn.HasMultipleElements && rdn.GetSingleElementType().Value == CommonNameOid)
+                    return rdn.GetSingleElementValue();
+            return null;
         }
-        catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
+        catch (CryptographicException ex)
         {
+            Trace.TraceWarning($"Authenticode: validated certificate unreadable: {ex.Message}");
             return null;
         }
     }
@@ -110,6 +139,31 @@ public static class Authenticode
         public uint dwUIContext;
         public IntPtr pSignatureSettings;
     }
+
+    // Leading fields only; the rest of each native struct is never touched. FILETIME is two DWORDs.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CryptProviderSigner
+    {
+        public uint cbStruct;
+        public uint verifyAsOfLow;
+        public uint verifyAsOfHigh;
+        public uint csCertChain;
+        public IntPtr pasCertChain;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CryptProviderCert
+    {
+        public uint cbStruct;
+        public IntPtr pCert;
+    }
+
+    [DllImport("wintrust.dll", ExactSpelling = true)]
+    private static extern IntPtr WTHelperProvDataFromStateData(IntPtr stateData);
+
+    [DllImport("wintrust.dll", ExactSpelling = true)]
+    private static extern IntPtr WTHelperGetProvSignerFromChain(IntPtr provData, uint signerIndex,
+        [MarshalAs(UnmanagedType.Bool)] bool counterSigner, uint counterSignerIndex);
 
     [DllImport("wintrust.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
     private static extern int WinVerifyTrust(IntPtr hwnd, ref Guid action, ref WinTrustData data);
