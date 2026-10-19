@@ -110,6 +110,16 @@ public static class SkinClamps
         Align = Align(text.Align),
     };
 
+    /// <summary><see cref="Text"/>, except that a text which clamps to <see cref="SkinText.Hidden"/>
+    /// is no text: the writer omits it and the loader reads it back as null, so the document must
+    /// hold null too, or a save and a reload would disagree.</summary>
+    public static SkinText? OptionalText(SkinText? text)
+    {
+        if (text is null) return null;
+        var clamped = Text(text);
+        return clamped == SkinText.Hidden ? null : clamped;
+    }
+
     internal static string OrDefault(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value;
 

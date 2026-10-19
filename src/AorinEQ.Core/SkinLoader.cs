@@ -183,10 +183,8 @@ public static class SkinLoader
             if (full.Error is not null)
                 return Bad(full.Error);
 
-            if (empty.LogicalWidth != full.LogicalWidth || empty.LogicalHeight != full.LogicalHeight)
-                return Bad(
-                    $"{Path.GetFileName(full.Path)} frame is {full.LogicalWidth}×{full.LogicalHeight} " +
-                    $"but {Path.GetFileName(empty.Path)} frame is {empty.LogicalWidth}×{empty.LogicalHeight}");
+            if (FrameMismatch(Path.GetFileName(full.Path), full, Path.GetFileName(empty.Path), empty) is { } fullMismatch)
+                return Bad(fullMismatch);
 
             // Optional muted layer: same resolution and logical-frame-size rules as empty/full,
             // just never required — absence means "dim the empty layer by mutedDim" instead.
@@ -197,10 +195,8 @@ public static class SkinLoader
                 var muted = ResolveLayer(folder, "muted", mutedFrames);
                 if (muted.Error is not null)
                     return Bad(muted.Error);
-                if (muted.LogicalWidth != empty.LogicalWidth || muted.LogicalHeight != empty.LogicalHeight)
-                    return Bad(
-                        $"{Path.GetFileName(muted.Path)} frame is {muted.LogicalWidth}×{muted.LogicalHeight} " +
-                        $"but {Path.GetFileName(empty.Path)} frame is {empty.LogicalWidth}×{empty.LogicalHeight}");
+                if (FrameMismatch(Path.GetFileName(muted.Path), muted, Path.GetFileName(empty.Path), empty) is { } mutedMismatch)
+                    return Bad(mutedMismatch);
                 mutedPath = muted.Path;
                 mutedIsGif = muted.IsGif;
             }
@@ -216,8 +212,8 @@ public static class SkinLoader
             // empty range is an authoring error worth surfacing rather than guessing around.
             int fillStart = SkinClamps.FillStart(fillStartJson, empty.LogicalWidth);
             int fillEnd = SkinClamps.FillEnd(fillEndJson, empty.LogicalWidth);
-            if (fillStart >= fillEnd)
-                return Bad($"fillStartX ({fillStart}) must be less than fillEndX ({fillEnd})");
+            if (FillRangeError("", fillStart, fillEnd) is { } fillError)
+                return Bad(fillError);
 
             return new SkinInfo(name, folder, empty.Path, full.Path,
                 empty.LogicalWidth, empty.LogicalHeight, text, scale,
@@ -296,20 +292,16 @@ public static class SkinLoader
         var full = ResolveLayer(folder, "airplay-full", fullFrames);
         if (full.Error is not null) return (null, full.Error);
 
-        if (empty.LogicalWidth != full.LogicalWidth || empty.LogicalHeight != full.LogicalHeight)
-        {
-            return (null,
-                $"airplay-full frame is {full.LogicalWidth}\u00d7{full.LogicalHeight} but "
-                + $"airplay-empty frame is {empty.LogicalWidth}\u00d7{empty.LogicalHeight}");
-        }
+        if (FrameMismatch("airplay-full", full, "airplay-empty", empty) is { } stripMismatch)
+            return (null, stripMismatch);
 
         int width = empty.LogicalWidth;
         int height = empty.LogicalHeight;
 
         int fillStart = SkinClamps.FillStart(json?.FillStartX, width);
         int fillEnd = SkinClamps.FillEnd(json?.FillEndX, width);
-        if (fillStart >= fillEnd)
-            return (null, $"airplay fillStartX ({fillStart}) must be less than fillEndX ({fillEnd})");
+        if (FillRangeError("airplay ", fillStart, fillEnd) is { } stripFill)
+            return (null, stripFill);
 
         // No declared region means the whole bar opens the dropdown, so a skin that only drops in
         // two PNGs still gets a usable control rather than a decorative strip.
@@ -432,6 +424,24 @@ public static class SkinLoader
             return ImageProbe.Evaluate(gifPath, layer, declaredFrames, GifHeader.Read(gifPath));
         return new LayerProbe(pngPath, false, 0, 0, LayerProblem.NotFound, $"{layer}.png or {layer}.gif not found");
     }
+
+    /// <summary>Whether two layers have the same logical frame size.</summary>
+    internal static bool SameFrame(LayerProbe a, LayerProbe b) =>
+        a.LogicalWidth == b.LogicalWidth && a.LogicalHeight == b.LogicalHeight;
+
+    /// <summary>Null when <paramref name="layer"/>'s frame matches <paramref name="reference"/>'s,
+    /// else the reason, naming each by its label. The loader and the Skin Designer's document both
+    /// report a mismatch through here, so they say the same thing.</summary>
+    internal static string? FrameMismatch(string label, LayerProbe layer, string referenceLabel, LayerProbe reference) =>
+        SameFrame(layer, reference)
+            ? null
+            : $"{label} frame is {layer.LogicalWidth}\u00d7{layer.LogicalHeight} " +
+              $"but {referenceLabel} frame is {reference.LogicalWidth}\u00d7{reference.LogicalHeight}";
+
+    /// <summary>Null for a usable fill range, else the reason. <paramref name="prefix"/> is "" for
+    /// the volume bar and "airplay " for the strip, as the messages have always read.</summary>
+    internal static string? FillRangeError(string prefix, int start, int end) =>
+        start < end ? null : $"{prefix}fillStartX ({start}) must be less than fillEndX ({end})";
 
     /// <summary>Lists every subfolder of skinsRoot as a SkinInfo (valid and invalid alike). Empty list if root is missing.</summary>
     public static IReadOnlyList<SkinInfo> Scan(string skinsRoot)

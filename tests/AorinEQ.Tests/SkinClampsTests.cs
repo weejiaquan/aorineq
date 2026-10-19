@@ -122,4 +122,16 @@ public class SkinClampsTests
         var expected = new SkinText(true, 3, 4, "#FFFFFFFF", "Segoe UI", 4, true, null, 20, null, 50, 0, "right");
         Check("Text(raw)", expected, SkinClamps.Text(raw));
     }
+
+    [Fact]
+    public void A_hidden_text_carrying_nothing_is_no_text_at_all()
+    {
+        var styled = new SkinText(false, 5, 0);
+        _out.WriteLine($"null -> {SkinClamps.OptionalText(null)?.ToString() ?? "(null)"}; " +
+                       $"blank hidden -> {SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "))?.ToString() ?? "(null)"}; " +
+                       $"styled -> {SkinClamps.OptionalText(styled)}");
+        Assert.Null(SkinClamps.OptionalText(null));
+        Assert.Null(SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " ")));
+        Assert.Equal(styled, SkinClamps.OptionalText(styled));
+    }
 }
