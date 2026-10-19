@@ -1,6 +1,7 @@
 ﻿<ui:FluentWindow x:Class="AorinEQ.UI.SettingsWindow"
                  xmlns:loc="clr-namespace:AorinEQ.UI"
                  xmlns:help="clr-namespace:AorinEQ.UI"
+                 xmlns:core="clr-namespace:AorinEQ.Core;assembly=AorinEQ.Core"
                  FontFamily="{StaticResource AppFontFamily}"
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -780,6 +781,32 @@
                         </ui:CardControl.Header>
                         <ComboBox x:Name="AirPlaySourceCombo" PreviewMouseWheel="OnComboWheel" MinWidth="240"
                                   SelectionChanged="OnAirPlaySourceChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl x:Name="AirPlayCableCard" Margin="{StaticResource RowMargin}"
+                                    help:Help.Topic="settings.air-play-cable">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock x:Name="AirPlayCableTitle" Style="{StaticResource RowTitle}"
+                                              Text="{loc:T settings.air-play-cable.title}" />
+                                <ui:TextBlock x:Name="AirPlayCableSubtitle" Style="{StaticResource RowSubtitle}"
+                                              Text="{loc:T settings.air-play-cable.subtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel HorizontalAlignment="Right">
+                            <ui:Button x:Name="AirPlayCableButton" Appearance="Primary" HorizontalAlignment="Right"
+                                       Icon="{ui:SymbolIcon ArrowDownload24}"
+                                       Content="{loc:T settings.air-play-cable.install}" Click="OnAirPlayCableButton" />
+                            <ui:TextBlock x:Name="AirPlayCableDonationText" Style="{StaticResource RowSubtitle}"
+                                          Margin="0,6,0,0" HorizontalAlignment="Right"
+                                          Text="{loc:T settings.air-play-cable.donationware}" />
+                            <!-- Primary text, not the accent brush: see the About page's link for why.
+                                 The address is VirtualCable.VendorPage, so it is written once. -->
+                            <ui:HyperlinkButton x:Name="AirPlayCableVendorLink" Padding="0" HorizontalAlignment="Right"
+                                                Content="{loc:T settings.air-play-cable.vendor-link}"
+                                                NavigateUri="{x:Static core:VirtualCable.VendorPage}"
+                                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
                     </ui:CardControl>
 
                     <ui:CardControl x:Name="AirPlayOnlyCard" Visibility="Collapsed" Margin="{StaticResource RowMargin}"

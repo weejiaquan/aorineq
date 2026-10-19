@@ -26,6 +26,16 @@ public partial class SettingsWindow
     /// <summary>The active VB-Cable endpoint, or null when there is none — App's last word on it.</summary>
     private string? _cableEndpointId;
     private bool _airPlayStreaming;
+    private VirtualCableState _cableState = VirtualCableState.Missing;
+
+    /// <summary>"Install VB-Cable" on the card.</summary>
+    public event Action? VirtualCableInstallRequested;
+
+    /// <summary>"Open Sound settings", for a cable that is installed but turned off.</summary>
+    public event Action? SoundSettingsRequested;
+
+    /// <summary>"Restart now", after an install Windows needs a restart to finish.</summary>
+    public event Action? VirtualCableRestartRequested;
 
     /// <summary>The user flipped "EQ the AirPlay stream". App runs the elevated helper and answers
     /// with <see cref="SetAirPlayEqStream"/>.</summary>
@@ -97,11 +107,88 @@ public partial class SettingsWindow
     /// only and EQ rows appear; without one they are hidden.</summary>
     public void SetVirtualCable(VirtualCableState state, string? cableEndpointId)
     {
+        _cableState = state;
         _cableEndpointId = state == VirtualCableState.Present ? cableEndpointId : null;
         var present = _cableEndpointId is not null ? Visibility.Visible : Visibility.Collapsed;
         AirPlayOnlyCard.Visibility = present;
         AirPlayEqStreamCard.Visibility = present;
+        AirPlayCableCard.Visibility = _cableEndpointId is null ? Visibility.Visible : Visibility.Collapsed;
+        ApplyCableCard();
         ApplyAirPlayOnly();
+    }
+
+    /// <summary>The card's words and its one button, by state (spec §5). Every arm names its keys
+    /// literally, so the string-table usage check can see them. Only the Missing state talks about
+    /// donations: the other two already have VB-Cable.</summary>
+    private void ApplyCableCard()
+    {
+        switch (_cableState)
+        {
+            case VirtualCableState.Inactive:
+                AirPlayCableTitle.Text = Loc.T("settings.airplay.cable.inactive-title");
+                AirPlayCableSubtitle.Text = Loc.T("settings.airplay.cable.inactive-subtitle");
+                AirPlayCableButton.Content = Loc.T("settings.airplay.cable.open-sound-settings");
+                break;
+            case VirtualCableState.PendingReboot:
+                AirPlayCableTitle.Text = Loc.T("settings.airplay.cable.pending-title");
+                AirPlayCableSubtitle.Text = Loc.T("settings.airplay.cable.pending-subtitle");
+                AirPlayCableButton.Content = Loc.T("settings.airplay.cable.restart-now");
+                break;
+            default:
+                AirPlayCableTitle.Text = Loc.T("settings.air-play-cable.title");
+                AirPlayCableSubtitle.Text = Loc.T("settings.air-play-cable.subtitle");
+                AirPlayCableButton.Content = Loc.T("settings.air-play-cable.install");
+                break;
+        }
+        AirPlayCableButton.IsEnabled = true;
+        var donation = _cableState == VirtualCableState.Missing ? Visibility.Visible : Visibility.Collapsed;
+        AirPlayCableDonationText.Visibility = donation;
+        AirPlayCableVendorLink.Visibility = donation;
+    }
+
+    /// <summary>A progress line under the card's title while App installs, with the button
+    /// disabled. Null puts the card back to describing its state.</summary>
+    public void SetVirtualCableProgress(string? text)
+    {
+        if (text is null)
+        {
+            ApplyCableCard();
+            return;
+        }
+        AirPlayCableSubtitle.Text = text;
+        AirPlayCableButton.IsEnabled = false;
+    }
+
+    /// <summary>A finished attempt's verdict ("Install cancelled."), left under the title with the
+    /// button usable again so the user can retry.</summary>
+    public void SetVirtualCableVerdict(string text)
+    {
+        ApplyCableCard();
+        AirPlayCableSubtitle.Text = text;
+    }
+
+    /// <summary>App changed the AirPlay block itself (the post-install "turn on AirPlay only?"), so
+    /// the page's copy follows — or the next control the user touches would raise the old one.</summary>
+    public void SetAirPlaySetting(AirPlaySetting setting)
+    {
+        _airPlay = setting;
+        ApplyAirPlayOnly();
+    }
+
+    private void OnAirPlayCableButton(object sender, RoutedEventArgs e)
+    {
+        switch (_cableState)
+        {
+            case VirtualCableState.Inactive:
+                SoundSettingsRequested?.Invoke();
+                break;
+            case VirtualCableState.PendingReboot:
+                VirtualCableRestartRequested?.Invoke();
+                break;
+            default:
+                VirtualCableInstallRequested?.Invoke();
+                break;
+        }
     }
 
     /// <summary>Whether Equalizer APO is on VB-Cable — read from the machine by App, never stored.

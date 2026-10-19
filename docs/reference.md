@@ -544,6 +544,18 @@ on the cable.
 The cable is recognised by its hardware id (`VBAudioVACWDM`), not its name, so renaming it in Sound
 settings changes nothing.
 
+**Installing VB-Cable.** Without it the page shows **Install VB-Cable (free, 1 MB)**. AorinEQ reads
+VB-Audio's page for the newest driver pack (falling back to Pack45), downloads it from
+`download.vb-audio.com` only, refuses any archive whose entries are not plain file names, and runs
+the setup only if its Authenticode signature is intact **and** names VB-Audio's publisher
+(`BUREL VINCENT Entrepreneur individuel`). VB-Audio's own installer then runs - you accept their
+licence, Windows asks for administrator permission. If the device appears within ten seconds you
+are offered AirPlay only; otherwise Windows needs a restart, the card says so, and AorinEQ tells you
+when the cable is ready (it stops waiting after three starts). A package that can't be found or
+downloaded, or an installer that can't be started, opens VB-Audio's page instead; a download that
+fails verification is never run. A cable that is installed but disabled gets **Open Sound
+settings** rather than a reinstall. VB-Cable is donationware by VB-Audio.
+
 ### EQ the AirPlay stream
 
 VB-Cable is its own playback device, so Equalizer APO has to be switched on for it separately. The

@@ -279,4 +279,129 @@ public class AirPlayCablePageTests
         Assert.Equal((busy, refused, Visibility.Visible, false), r.CableAsked); // the Volume page still shows its run
         Assert.Equal((refused, busy), r.DefaultAsked);                         // the EQ card still shows its run
     }
+
+    // ---------------------------------------------------------------- the install card
+
+    [Theory]
+    [InlineData(VirtualCableState.Missing)]
+    [InlineData(VirtualCableState.Inactive)]
+    [InlineData(VirtualCableState.PendingReboot)]
+    public void Without_a_working_cable_the_card_says_what_its_state_needs(VirtualCableState state)
+    {
+        var r = With(Settings.Default, w =>
+        {
+            w.SetVirtualCable(state, null);
+            return (Card: w.AirPlayCableCard.Visibility, Title: w.AirPlayCableTitle.Text,
+                Subtitle: w.AirPlayCableSubtitle.Text, Button: w.AirPlayCableButton.Content as string,
+                Enabled: w.AirPlayCableButton.IsEnabled, Donation: w.AirPlayCableDonationText.Visibility,
+                Link: w.AirPlayCableVendorLink.Visibility, Only: w.AirPlayOnlyCard.Visibility);
+        });
+        // Spec §5's table, row by row.
+        var (title, subtitle, button) = state switch
+        {
+            VirtualCableState.Inactive => (Loc.T("settings.airplay.cable.inactive-title"),
+                Loc.T("settings.airplay.cable.inactive-subtitle"), Loc.T("settings.airplay.cable.open-sound-settings")),
+            VirtualCableState.PendingReboot => (Loc.T("settings.airplay.cable.pending-title"),
+                Loc.T("settings.airplay.cable.pending-subtitle"), Loc.T("settings.airplay.cable.restart-now")),
+            _ => (Loc.T("settings.air-play-cable.title"), Loc.T("settings.air-play-cable.subtitle"),
+                Loc.T("settings.air-play-cable.install")),
+        };
+        var donation = state == VirtualCableState.Missing ? Visibility.Visible : Visibility.Collapsed;
+        _out.WriteLine($"{state}: {r}");
+        Assert.Equal(Visibility.Visible, r.Card);
+        Assert.Equal(title, r.Title);
+        Assert.Equal(subtitle, r.Subtitle);
+        Assert.Equal(button, r.Button);
+        Assert.True(r.Enabled);
+        Assert.Equal(donation, r.Donation); // only the Missing state talks about donations
+        Assert.Equal(donation, r.Link);
+        Assert.Equal(Visibility.Collapsed, r.Only);
+    }
+
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void A_working_cable_hides_the_install_card()
+    {
+        var cable = StandInCable();
+        var card = With(Settings.Default, w =>
+        {
+            w.SetVirtualCable(VirtualCableState.Present, cable);
+            return w.AirPlayCableCard.Visibility;
+        });
+        _out.WriteLine($"cable present -> install card {card}");
+        Assert.Equal(Visibility.Collapsed, card);
+    }
+
+    [Theory]
+    [InlineData(VirtualCableState.Missing, "install")]
+    [InlineData(VirtualCableState.Inactive, "sound-settings")]
+    [InlineData(VirtualCableState.PendingReboot, "restart")]
+    public void The_card_button_asks_app_for_what_its_state_needs(VirtualCableState state, string expected)
+    {
+        var asked = With(Settings.Default, w =>
+        {
+            var log = new List<string>();
+            w.VirtualCableInstallRequested += () => log.Add("install");
+            w.SoundSettingsRequested += () => log.Add("sound-settings");
+            w.VirtualCableRestartRequested += () => log.Add("restart");
+            w.SetVirtualCable(state, null);
+            Click(w.AirPlayCableButton);
+            return log;
+        });
+        _out.WriteLine($"{state}: clicked -> [{string.Join(", ", asked)}]");
+        Assert.Equal(new[] { expected }, asked);
+    }
+
+    [Fact]
+    public void Progress_locks_the_button_and_a_verdict_hands_it_back_with_the_reason()
+    {
+        var progress = Loc.T("app.vbcable.downloading");
+        var verdict = Loc.T("app.vbcable.cancelled");
+        var r = With(Settings.Default, w =>
+        {
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            w.SetVirtualCableProgress(progress);
+            var during = (w.AirPlayCableSubtitle.Text, w.AirPlayCableButton.IsEnabled);
+            w.SetVirtualCableVerdict(verdict);
+            var after = (w.AirPlayCableSubtitle.Text, w.AirPlayCableButton.IsEnabled);
+            w.SetVirtualCableProgress(null);
+            var idle = (w.AirPlayCableSubtitle.Text, w.AirPlayCableButton.IsEnabled);
+            return (During: during, After: after, Idle: idle);
+        });
+        _out.WriteLine($"during {r.During}; verdict {r.After}; idle {r.Idle}");
+        Assert.Equal((progress, false), r.During);
+        Assert.Equal((verdict, true), r.After);   // retry is possible straight away
+        Assert.Equal((Loc.T("settings.air-play-cable.subtitle"), true), r.Idle);
+    }
+
+    [Fact]
+    public void The_vendor_link_is_the_one_vendor_page_constant()
+    {
+        var uri = With(Settings.Default, w => w.AirPlayCableVendorLink.NavigateUri?.ToString());
+        _out.WriteLine($"vendor link -> {uri}");
+        Assert.Equal(VirtualCable.VendorPage, uri);
+    }
+
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void App_turning_AirPlay_only_on_moves_the_page_without_raising_a_change()
+    {
+        // The post-install "turn on AirPlay only?" — App changed the setting, so the page follows,
+        // and must not echo it back as if the user had done it.
+        var cable = StandInCable();
+        var r = With(WithAirPlay(AirPlaySetting.Default), w =>
+        {
+            var raised = new List<AirPlaySetting>();
+            w.SetVirtualCable(VirtualCableState.Present, cable);
+            w.AirPlaySettingsChanged += raised.Add;
+            w.SetAirPlaySetting(AirPlaySetting.Default with { AirPlayOnly = true });
+            return (Toggle: w.AirPlayOnlyBox.IsChecked, Source: SelectedSource(w),
+                Enabled: w.AirPlaySourceCombo.IsEnabled, Raised: raised.Count);
+        });
+        _out.WriteLine($"after SetAirPlaySetting: {r}");
+        Assert.True(r.Toggle);
+        Assert.Equal(cable, r.Source);
+        Assert.False(r.Enabled);
+        Assert.Equal(0, r.Raised);
+    }
 }

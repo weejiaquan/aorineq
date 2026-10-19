@@ -46,6 +46,9 @@ public partial class App
 
         window.AirPlayEqStreamToggled += on => _ = SetAirPlayEqStreamAsync(on);
         window.AirPlayEqEditRequested += OpenEqEditorOnAirPlayCable;
+        window.VirtualCableInstallRequested += () => _ = InstallVirtualCableAsync();
+        window.SoundSettingsRequested += OpenSoundSettings;
+        window.VirtualCableRestartRequested += ConfirmRestartForVirtualCable;
         // VB-Cable can be installed, enabled or removed while the window is hidden or behind
         // another one — the user turns CABLE Input on in Windows' Sound settings and comes back —
         // so the page is told afresh every time the window is activated, and once now. The push

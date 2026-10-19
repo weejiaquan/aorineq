@@ -2385,12 +2385,22 @@ public partial class App : System.Windows.Application
     private static void OpenUrl(string url)
     {
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return;
+        LaunchShell(url);
+    }
+
+    /// <summary>Windows' Sound page — where a disabled CABLE Input is turned back on.</summary>
+    private static void OpenSoundSettings() => LaunchShell("ms-settings:sound");
+
+    /// <summary>Hands a URL or a settings URI to the shell. Best effort; the Process handle is
+    /// released at once.</summary>
+    private static void LaunchShell(string target)
+    {
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target)
             {
                 UseShellExecute = true,
-            });
+            })?.Dispose();
         }
         catch (System.ComponentModel.Win32Exception)
         {
