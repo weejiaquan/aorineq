@@ -248,6 +248,82 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         return true;
     }
 
+    internal enum UnsavedChoice { Save, Discard, Cancel }
+
+    private bool _asking;
+
+    internal bool NeedsUnsavedPrompt => _history.IsDirty;
+
+    /// <summary>What an answer to the unsaved-changes prompt does. Save saves - and only a save
+    /// that worked lets the caller go on; Don't save lets it go on; Cancel stops it.</summary>
+    internal bool ApplyUnsavedChoice(UnsavedChoice choice) => choice switch
+    {
+        UnsavedChoice.Save => Save(),
+        UnsavedChoice.Discard => true,
+        _ => false,
+    };
+
+    /// <summary>Ends what is mid-way before the document is judged or let go: a running drag (one
+    /// step), the picker (its typed hex committed) and with it the eyedropper - so the prompt never
+    /// comes up over a drag or a pinned picker, and a pending edit counts as unsaved.</summary>
+    internal void EndInteractions()
+    {
+        Overlay.FinishDrag();
+        ClosePicker();
+    }
+
+    /// <summary>True when the caller may go on: nothing unsaved, or the user chose.</summary>
+    private async Task<bool> ConfirmLeaveAsync()
+    {
+        EndInteractions();
+        return !NeedsUnsavedPrompt || ApplyUnsavedChoice(await AskUnsavedAsync());
+    }
+
+    private async Task<UnsavedChoice> AskUnsavedAsync()
+    {
+        if (_asking) return UnsavedChoice.Cancel; // a second close click while the box is up
+        _asking = true;
+        try
+        {
+            var box = new Wpf.Ui.Controls.MessageBox
+            {
+                Owner = this,
+                Title = "AorinEQ",
+                Content = Loc.T("designer.unsaved.message", _history.Current.Name),
+                PrimaryButtonText = Loc.T("designer.save.label"),
+                SecondaryButtonText = Loc.T("designer.unsaved.discard"),
+                CloseButtonText = Loc.T("designer.unsaved.cancel"),
+                IsSecondaryButtonEnabled = true,
+            };
+            return await box.ShowDialogAsync(true, System.Threading.CancellationToken.None) switch
+            {
+                Wpf.Ui.Controls.MessageBoxResult.Primary => UnsavedChoice.Save,
+                Wpf.Ui.Controls.MessageBoxResult.Secondary => UnsavedChoice.Discard,
+                _ => UnsavedChoice.Cancel,
+            };
+        }
+        finally
+        {
+            _asking = false;
+        }
+    }
+
+    /// <summary>After "Don't save" on close the designer must reopen on what is on disk, not on
+    /// the edits that were just thrown away.</summary>
+    internal void RevertToSaved()
+    {
+        if (_loadedName is null || !LoadSkin(_loadedName)) NewDocument();
+    }
+
+    private async void CloseAfterAsking()
+    {
+        var choice = await AskUnsavedAsync();
+        if (!ApplyUnsavedChoice(choice)) return;
+        if (choice == UnsavedChoice.Discard) RevertToSaved();
+        CleanupTestOsd();
+        Hide();
+    }
+
     /// <summary>Rebuilds the skin picker from the skins folder (invalid skins disabled, with the
     /// error as tooltip - the Settings picker's policy) and selects <paramref name="selectName"/>.</summary>
     private void PopulateSkinList(string? selectName)
@@ -278,14 +354,22 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _populatingSkins = false;
     }
 
-    private void OnSkinSelected(object sender, SelectionChangedEventArgs e)
+    private async void OnSkinSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_populatingSkins || SkinSelect.SelectedItem is not ComboBoxItem { Tag: string name }) return;
+        if (!await ConfirmLeaveAsync())
+        {
+            SelectSkinItem(_loadedName); // stay on the skin being edited
+            return;
+        }
         // A skin that broke after the list was read: the picker goes back to what is still open.
         if (!LoadSkin(name)) SelectSkinItem(_loadedName);
     }
 
-    private void OnNew(object sender, RoutedEventArgs e) => NewDocument();
+    private async void OnNew(object sender, RoutedEventArgs e)
+    {
+        if (await ConfirmLeaveAsync()) NewDocument();
+    }
 
     private void OnUndo(object sender, RoutedEventArgs e) => Undo();
 
@@ -308,8 +392,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     /// <summary>Imports a shared skin zip: name from the zip's file name, collision confirmed, then
     /// the imported skin opens and the app is told.</summary>
-    private void OnImportZip(object sender, RoutedEventArgs e)
+    private async void OnImportZip(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmLeaveAsync()) return;
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Filter = "Skin zip (*.zip)|*.zip",
@@ -496,15 +581,20 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        // Disposed (app exit, test teardown): really close. Otherwise App owns the lifetime and a
-        // close only hides, like SettingsWindow.
+        // Disposed (app exit, test teardown): really close, without asking. Otherwise App owns the
+        // lifetime and a close only hides, like SettingsWindow - after asking about unsaved edits.
         if (_disposed)
         {
             base.OnClosing(e);
             return;
         }
         e.Cancel = true;
-        ClosePicker();
+        EndInteractions();
+        if (NeedsUnsavedPrompt)
+        {
+            CloseAfterAsking();
+            return;
+        }
         CleanupTestOsd();
         Hide();
     }

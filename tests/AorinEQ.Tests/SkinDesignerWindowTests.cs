@@ -2095,4 +2095,104 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.Equal((false, false, false, false, false), r.empty);
         Assert.Equal((true, true, true), r.loaded);
     }
+
+    [Fact]
+    public void Unsaved_choices_save_discard_or_stay()
+    {
+        var folder = MakeSkin("choices", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("choices");
+            bool cleanAsks = d.NeedsUnsavedPrompt;
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            bool dirtyAsks = d.NeedsUnsavedPrompt;
+            bool cancel = d.ApplyUnsavedChoice(SkinDesignerWindow.UnsavedChoice.Cancel);
+            bool discard = d.ApplyUnsavedChoice(SkinDesignerWindow.UnsavedChoice.Discard);
+            double diskAfterDiscard = SkinLoader.Load(folder).Scale;
+            bool save = d.ApplyUnsavedChoice(SkinDesignerWindow.UnsavedChoice.Save);
+            return (cleanAsks, dirtyAsks, cancel, discard, diskAfterDiscard, save,
+                Disk: SkinLoader.Load(folder).Scale, AsksAfterSave: d.NeedsUnsavedPrompt);
+        });
+        _out.WriteLine($"{r}");
+        Assert.False(r.cleanAsks);
+        Assert.True(r.dirtyAsks);
+        Assert.False(r.cancel);
+        Assert.True(r.discard);
+        Assert.Equal(1.0, r.diskAfterDiscard);
+        Assert.True(r.save);
+        Assert.Equal(2.0, r.Disk);
+        Assert.False(r.AsksAfterSave);
+    }
+
+    [Fact]
+    public void A_save_that_cannot_happen_keeps_the_user_where_they_are()
+    {
+        var r = WithDesigner(d =>
+        {
+            d.NewDocument();
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            return (d.NeedsUnsavedPrompt, Go: d.ApplyUnsavedChoice(SkinDesignerWindow.UnsavedChoice.Save));
+        });
+        _out.WriteLine($"expected a prompt and Save refusing to leave (an untitled skin with no art cannot save); actual {r}");
+        Assert.True(r.NeedsUnsavedPrompt);
+        Assert.False(r.Go);
+    }
+
+    /// <summary>Review focus: after "Don't save" on close, the designer reopens on what is on disk.</summary>
+    [Fact]
+    public void Discarding_reverts_to_what_is_on_disk()
+    {
+        var folder = MakeSkin("revert", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("revert");
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            d.Save();
+            d.Commit(SkinEdits.SetScale(d.Document, 3));
+            d.RevertToSaved();
+            var reverted = (d.Document, d.NeedsUnsavedPrompt);
+            d.NewDocument();
+            d.Commit(SkinEdits.SetName(d.Document, "never saved"));
+            d.RevertToSaved();
+            return (reverted, Fresh: d.Document);
+        });
+        _out.WriteLine($"{r}");
+        Assert.Equal(SkinDocument.FromInfo(SkinLoader.Load(folder)), r.reverted.Document);
+        Assert.Equal(2.0, r.reverted.Document.Config.Scale);
+        Assert.False(r.reverted.NeedsUnsavedPrompt);
+        Assert.Equal(SkinDocument.New(Loc.T("designer.untitled")), r.Fresh);
+    }
+
+    /// <summary>The prompt never comes up mid-interaction: a running drag ends as one step, the
+    /// picker's typed hex reaches the document (so a clean skin with only that pending edit asks),
+    /// and the eyedropper stops.</summary>
+    [Fact]
+    public void Leaving_ends_a_drag_the_picker_and_the_eyedropper_first()
+    {
+        MakeSkin("interactions", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("interactions");
+            var start = Centre(d, SkinLayer.PercentText);
+            d.Overlay.BeginDragAt(() => start);
+            d.Overlay.DragTo(start + new Vector(10, 0), snap: false);
+            d.EndInteractions();
+            d.Overlay.DragTo(start + new Vector(20, 0), snap: false); // the mouse moving on edits nothing
+            var drag = (d.Document.Config.Text!.X, d.NeedsUnsavedPrompt);
+
+            d.LoadSkin("interactions");
+            Click(PercentTextColours(d)[0].Swatch);
+            d.Picker!.HexBox.Text = "#FF654321"; // typed, not committed
+            d.StartEyedropper();
+            bool askedBefore = d.NeedsUnsavedPrompt;
+            d.EndInteractions();
+            var picker = (d.Document.Config.Text?.Color, askedBefore, After: d.NeedsUnsavedPrompt,
+                PickerOpen: d.Picker.IsOpen, Eyedropper: d.Overlay.EyedropperActive);
+            return (drag, picker);
+        });
+        _out.WriteLine("expected: drag ended at x 50 and dirty; picker hex #FF654321 committed, clean before and dirty after, picker shut, eyedropper off");
+        _out.WriteLine($"actual  : drag {r.drag}; picker {r.picker}");
+        Assert.Equal((50, true), r.drag);
+        Assert.Equal(("#FF654321", false, true, false, false), r.picker);
+    }
 }
