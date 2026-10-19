@@ -8,21 +8,35 @@ public static class AudioEndpoint
 {
     /// <summary>Returns the default render endpoint id, e.g.
     /// <c>{0.0.0.00000000}.{9c1af7ff-....}</c>, or null when it can't be determined (no audio
-    /// device, audio service down). Never throws.</summary>
-    public static string? GetDefaultRenderEndpointId()
+    /// device, audio service down). Never throws. The Multimedia role — what players use.</summary>
+    public static string? GetDefaultRenderEndpointId() => GetDefaultRenderEndpointId(ERole.Multimedia);
+
+    /// <summary>The default render endpoint for one role. Windows keeps three (console,
+    /// multimedia, communications) and the Sound panel sets all three together; AirPlay only has
+    /// to record and restore each of them separately.</summary>
+    internal static string? GetDefaultRenderEndpointId(ERole role)
     {
         try
         {
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
-            int hr = enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Multimedia, out var device);
-            if (hr != 0 || device is null)
-                return null;
-            hr = device.GetId(out var idPtr);
-            if (hr != 0 || idPtr == IntPtr.Zero)
-                return null;
-            var id = Marshal.PtrToStringUni(idPtr);
-            Marshal.FreeCoTaskMem(idPtr);
-            return id;
+            try
+            {
+                if (enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, role, out var device) != 0
+                    || device is null)
+                    return null;
+                try
+                {
+                    return ReadId(device);
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(device);
+                }
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(enumerator);
+            }
         }
         catch (COMException)
         {
@@ -34,11 +48,77 @@ public static class AudioEndpoint
         }
     }
 
+    /// <summary>The device's full endpoint id, or null when it will not say.</summary>
+    private static string? ReadId(IMMDevice device)
+    {
+        if (device.GetId(out var idPtr) < 0 || idPtr == IntPtr.Zero)
+            return null;
+        try
+        {
+            return Marshal.PtrToStringUni(idPtr);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(idPtr);
+        }
+    }
+
     /// <summary>Enumerates the ACTIVE render endpoints with their display names (the EQ
     /// editor's device tabs). Best-effort like the default-endpoint read: failures shrink the
     /// list (possibly to empty) instead of throwing.</summary>
     public static IReadOnlyList<RenderEndpoint> GetRenderEndpoints() =>
         Enumerate(DeviceStateActive) ?? [];
+
+    /// <summary>Render endpoints Windows still knows but is not using: disabled in Sound settings,
+    /// or not present because their device is disabled in Device Manager. Used to tell "VB-Cable is
+    /// installed but turned off" from "VB-Cable is not installed".</summary>
+    public static IReadOnlyList<RenderEndpoint> GetInactiveRenderEndpoints() =>
+        Enumerate(DeviceStateDisabled | DeviceStateNotPresent) ?? [];
+
+    /// <summary>The device instance id of the hardware (or virtual driver) behind an endpoint,
+    /// e.g. <c>ROOT\MEDIA\0000</c>, read from the endpoint's own property store. Null when the
+    /// endpoint does not exist or will not say. Never throws.</summary>
+    public static string? GetDeviceInstanceId(string endpointId)
+    {
+        try
+        {
+            var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+            try
+            {
+                if (enumerator.GetDevice(endpointId, out var device) < 0 || device is null)
+                    return null;
+                try
+                {
+                    var key = new PropertyKey { FmtId = PkeyEndpointDeviceInstanceFmtId, Pid = 2 };
+                    return ReadStringProperty(device, key) is { } raw ? StripEnumeratorPrefix(raw) : null;
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(device);
+                }
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(enumerator);
+            }
+        }
+        catch (COMException)
+        {
+            return null;
+        }
+        catch (InvalidCastException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>"{1}.ROOT\MEDIA\0000" → "ROOT\MEDIA\0000". The "{n}." is the audio stack's own
+    /// enumerator tag; the configuration manager only knows the part after it.</summary>
+    internal static string StripEnumeratorPrefix(string raw)
+    {
+        int end = raw.IndexOf("}.", StringComparison.Ordinal);
+        return raw.StartsWith('{') && end > 0 ? raw[(end + 2)..] : raw;
+    }
 
     /// <summary>Whether Windows still has this endpoint at all — attached, disabled, or with its
     /// jack unplugged. NOT-PRESENT is deliberately outside the mask: it is what an endpoint
@@ -75,13 +155,10 @@ public static class AudioEndpoint
                             continue;
                         try
                         {
-                            if (device.GetId(out var idPtr) < 0 || idPtr == IntPtr.Zero)
+                            if (ReadId(device) is not { } id || EndpointGuid(id) is not { } guid)
                                 continue;
-                            var id = Marshal.PtrToStringUni(idPtr);
-                            Marshal.FreeCoTaskMem(idPtr);
-                            if (id is null || EndpointGuid(id) is not { } guid)
-                                continue;
-                            result.Add(new RenderEndpoint(id, guid, ReadFriendlyName(device) ?? guid));
+                            var nameKey = new PropertyKey { FmtId = PkeyDeviceFriendlyNameFmtId, Pid = 14 };
+                            result.Add(new RenderEndpoint(id, guid, ReadStringProperty(device, nameKey) ?? guid));
                         }
                         finally
                         {
@@ -104,9 +181,10 @@ public static class AudioEndpoint
         return result;
     }
 
-    /// <summary>PKEY_Device_FriendlyName via the endpoint's property store, e.g.
-    /// "Speakers (Realtek High Definition Audio)". Null when unreadable.</summary>
-    private static string? ReadFriendlyName(IMMDevice device)
+    /// <summary>One VT_LPWSTR property of the endpoint's property store — the friendly name
+    /// ("Speakers (Realtek High Definition Audio)") or the parent device instance. Null when
+    /// unreadable.</summary>
+    private static string? ReadStringProperty(IMMDevice device, PropertyKey key)
     {
         const int stgmRead = 0;
         if (device.OpenPropertyStore(stgmRead, out var storePtr) < 0 || storePtr == IntPtr.Zero)
@@ -116,7 +194,6 @@ public static class AudioEndpoint
             var store = (IPropertyStore)Marshal.GetObjectForIUnknown(storePtr);
             try
             {
-                var key = new PropertyKey { FmtId = PkeyDeviceFriendlyNameFmtId, Pid = 14 };
                 if (store.GetValue(ref key, out var value) < 0)
                     return null;
                 try
@@ -164,11 +241,18 @@ public static class AudioEndpoint
 
     private const int DeviceStateActive = 0x1;    // DEVICE_STATE_ACTIVE
     private const int DeviceStateDisabled = 0x2;  // DEVICE_STATE_DISABLED
-    private const int DeviceStateUnplugged = 0x8; // DEVICE_STATE_UNPLUGGED — NOTPRESENT (0x4) is
-                                                  // deliberately never asked for; see IsEndpointPresent
+    private const int DeviceStateNotPresent = 0x4; // DEVICE_STATE_NOTPRESENT — only for
+                                                   // GetInactiveRenderEndpoints; IsEndpointPresent
+                                                   // deliberately never asks for it
+    private const int DeviceStateUnplugged = 0x8; // DEVICE_STATE_UNPLUGGED
     private const ushort VtLpwstr = 31;        // VT_LPWSTR
     private static readonly Guid PkeyDeviceFriendlyNameFmtId =
         new("a45c254e-df1c-4efd-8020-67d146a850e0");
+    /// <summary>{b3f8fa53-0004-438e-9003-51a46e139bfc},2 — the endpoint's parent device instance
+    /// ("{1}.ROOT\MEDIA\0000"). Verified readable through the property store for active, disabled,
+    /// not-present and unplugged endpoints alike (2026-10-18).</summary>
+    private static readonly Guid PkeyEndpointDeviceInstanceFmtId =
+        new("b3f8fa53-0004-438e-9003-51a46e139bfc");
 
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PropVariant pvar);
