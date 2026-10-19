@@ -75,6 +75,26 @@ public class SkinTypographyTests : IDisposable
         Assert.Equal(new[] { numberAndNotice, labels, labels, numberAndNotice }, weights);
     }
 
+    /// <summary>Each text's default weight has one source, <see cref="SkinText.HiddenOf"/>: what the
+    /// loader gives a text without a weight is that text's HiddenOf weight (the notice's default
+    /// plate text included), and the writer leaves exactly that weight out.</summary>
+    [Theory]
+    [InlineData(SkinLayer.PercentText, 600)]
+    [InlineData(SkinLayer.AirPlayName, 400)]
+    [InlineData(SkinLayer.AirPlayLevel, 400)]
+    [InlineData(SkinLayer.NoticeText, 600)]
+    public void Each_texts_default_weight_comes_from_its_hidden_text(SkinLayer layer, int expected)
+    {
+        var info = LoadStyled("one-source-" + layer, "");
+        var loaded = SkinEdits.TextOf(SkinDocument.FromInfo(info), layer)!;
+        var json = File.ReadAllText(Path.Combine(Save("one-source-saved-" + layer, info), "skin.json"));
+        _out.WriteLine($"{layer}: HiddenOf weight {SkinText.HiddenOf(layer).Weight}, loaded {loaded.Weight}, default notice text {SkinLoader.DefaultNotice.Text.Weight}; saved: {json}");
+        Assert.Equal(expected, SkinText.HiddenOf(layer).Weight);
+        Assert.Equal(SkinText.HiddenOf(layer).Weight, loaded.Weight);
+        Assert.Equal(SkinText.HiddenOf(SkinLayer.NoticeText).Weight, SkinLoader.DefaultNotice.Text.Weight);
+        Assert.DoesNotContain("weight", json);
+    }
+
     [Theory]
     [InlineData("0", 100)]
     [InlineData("150", 200)]

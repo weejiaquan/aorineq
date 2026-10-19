@@ -81,11 +81,11 @@ public static class SkinWriter
             else
                 DeleteLayer(folder, SkinLoader.NoticeLayer);
 
-            bool hasText = config.Text is { } text && text != SkinText.Hidden;
+            var percentText = OptionalText(config.Text, SkinLayer.PercentText);
             var meta = config.Meta ?? SkinMeta.None;
             var airPlay = config.AirPlay is { } a ? BuildAirPlay(a) : null;
 
-            if (airPlay is not null || config.Notice is not null || noticeOff || hasText
+            if (airPlay is not null || config.Notice is not null || noticeOff || percentText is not null
                 || config.Scale != SkinClamps.DefaultScale || config.Fps != SkinClamps.DefaultFps
                 || config.EmptyFrames != 1 || config.FullFrames != 1
                 || config.MutedFrames != 1 || config.MutedDim != SkinClamps.DefaultMutedDim
@@ -107,7 +107,7 @@ public static class SkinWriter
                     version = meta.Version,
                     tags = meta.Tags.Count == 0 ? null : meta.Tags,
                     sourceUrl = meta.SourceUrl,
-                    percentText = hasText ? BuildText(config.Text!, SkinClamps.DefaultWeight) : null,
+                    percentText,
                     scale = config.Scale,
                     fps = config.Fps,
                     emptyFrames = config.EmptyFrames,
@@ -162,10 +162,16 @@ public static class SkinWriter
 
     /// <summary>Serializes one text overlay (the percent number, either AirPlay label) with only
     /// the styling fields that differ from the loader's defaults, so a plainly positioned number
-    /// round-trips as {show,x,y}. "show" is written as it is: a hidden text that reaches here has
-    /// something to keep. <paramref name="defaultWeight"/> is the text's own default weight.</summary>
-    private static Dictionary<string, object?> BuildText(SkinText t, int defaultWeight) =>
-        TextMembers(new Dictionary<string, object?> { ["show"] = t.Show, ["x"] = t.X, ["y"] = t.Y }, t, defaultWeight)!;
+    /// round-trips as {show,x,y}; null for no text, or for the layer's
+    /// <see cref="SkinText.HiddenOf"/>, which is the same skin. "show" is written as it is: a
+    /// hidden text that reaches here has something to keep.</summary>
+    private static Dictionary<string, object?>? OptionalText(SkinText? t, SkinLayer layer)
+    {
+        var none = SkinText.HiddenOf(layer);
+        return t is null || t == none
+            ? null
+            : TextMembers(new Dictionary<string, object?> { ["show"] = t.Show, ["x"] = t.X, ["y"] = t.Y }, t, none.Weight);
+    }
 
     /// <summary><paramref name="placement"/> followed by the styling members every text writes,
     /// each only where it differs from the loader's default; null when none is set. The legacy
@@ -197,8 +203,8 @@ public static class SkinWriter
         ["fillEndX"] = a.FillEndX == a.Width ? null : a.FillEndX,
         ["emptyFrames"] = a.EmptyFrames == 1 ? null : a.EmptyFrames,
         ["fullFrames"] = a.FullFrames == 1 ? null : a.FullFrames,
-        ["nameText"] = a.Name is { } name && name != SkinText.HiddenLabel ? BuildText(name, SkinClamps.DefaultLabelWeight) : null,
-        ["percentText"] = a.Percent is { } level && level != SkinText.HiddenLabel ? BuildText(level, SkinClamps.DefaultLabelWeight) : null,
+        ["nameText"] = OptionalText(a.Name, SkinLayer.AirPlayName),
+        ["percentText"] = OptionalText(a.Percent, SkinLayer.AirPlayLevel),
         ["dropdownHit"] = a.DropdownHit == new SkinHitRect(0, 0, a.Width, a.Height) ? null : BuildHit(a.DropdownHit),
         ["connectHit"] = a.ConnectHit is { } connect ? BuildHit(connect) : null,
         ["connectColor"] = a.ConnectColor,

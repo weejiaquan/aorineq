@@ -168,7 +168,7 @@ public partial class SkinDesignerWindow
         double Width() => layer == SkinLayer.PercentText ? _info.Width : _history.Current.Config.AirPlay?.Width ?? 0;
         double Height() => layer == SkinLayer.PercentText ? _info.Height : _history.Current.Config.AirPlay?.Height ?? 0;
 
-        SkinText Current(SkinDocument d) => SkinEdits.TextOf(d, layer) ?? SkinEdits.HiddenTextOf(layer);
+        SkinText Current(SkinDocument d) => SkinEdits.TextOf(d, layer) ?? SkinText.HiddenOf(layer);
         SkinDocument Change(SkinDocument d, Func<SkinText, SkinText> change) =>
             SkinEdits.SetText(d, layer, change(Current(d)), _probe);
 

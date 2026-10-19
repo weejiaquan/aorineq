@@ -29,10 +29,10 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
         Debug.Assert(info.IsValid, $"FromInfo needs a valid skin; got: {info.Error}");
         bool wholeWidth = info.FillStartX == 0 && info.FillEndX == info.Width;
         var strip = info.AirPlay is { } a
-            ? a with { Name = SkinClamps.OptionalText(a.Name, SkinText.HiddenLabel), Percent = SkinClamps.OptionalText(a.Percent, SkinText.HiddenLabel) }
+            ? a with { Name = SkinClamps.OptionalText(a.Name, SkinLayer.AirPlayName), Percent = SkinClamps.OptionalText(a.Percent, SkinLayer.AirPlayLevel) }
             : null;
         return new SkinDocument(info.Name, info.EmptyPath, info.FullPath, info.MutedPath,
-            new SkinConfig(SkinClamps.OptionalText(info.Text, SkinText.Hidden), info.Scale, info.Fps,
+            new SkinConfig(SkinClamps.OptionalText(info.Text, SkinLayer.PercentText), info.Scale, info.Fps,
                 info.EmptyFrames, info.FullFrames,
                 wholeWidth ? null : info.FillStartX, wholeWidth ? null : info.FillEndX,
                 info.MutedFrames, info.MutedDim, info.Meta, info.Notice, strip),

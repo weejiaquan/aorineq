@@ -140,15 +140,14 @@ public static class SkinClamps
         Align = Align(text.Align),
     };
 
-    /// <summary><see cref="Text"/>, except that a text which clamps to <paramref name="hidden"/> -
-    /// <see cref="SkinText.Hidden"/>, or <see cref="SkinText.HiddenLabel"/> for an AirPlay label -
-    /// is no text: the writer omits it and the loader reads it back as null, so the document must
-    /// hold null too, or a save and a reload would disagree.</summary>
-    public static SkinText? OptionalText(SkinText? text, SkinText hidden)
+    /// <summary><see cref="Text"/>, except that a text which clamps to its layer's
+    /// <see cref="SkinText.HiddenOf"/> is no text: the writer omits it and the loader reads it back
+    /// as null, so the document must hold null too, or a save and a reload would disagree.</summary>
+    public static SkinText? OptionalText(SkinText? text, SkinLayer layer)
     {
         if (text is null) return null;
         var clamped = Text(text);
-        return clamped == hidden ? null : clamped;
+        return clamped == SkinText.HiddenOf(layer) ? null : clamped;
     }
 
     internal static string OrDefault(string? value, string fallback) =>

@@ -7,7 +7,7 @@ namespace AorinEQ.Core;
 /// which falls back gracefully on malformed values; a null OutlineColor/ShadowColor means that
 /// effect is off. Weight is an OpenType weight (100-900); LetterSpacing is extra room between
 /// characters in skin pixels, as FontSize is. Defaults reproduce the pre-styling look (white,
-/// 14px, SemiBold); an AirPlay label's default weight is <see cref="SkinClamps.DefaultLabelWeight"/>.</summary>
+/// 14px, SemiBold); each text's own default weight is its <see cref="HiddenOf"/>'s.</summary>
 public sealed record SkinText(bool Show, int X, int Y,
     string Color = SkinClamps.DefaultTextColor, string FontFamily = SkinClamps.DefaultFontFamily,
     double FontSize = SkinClamps.DefaultFontSize, int Weight = SkinClamps.DefaultWeight,
@@ -23,6 +23,12 @@ public sealed record SkinText(bool Show, int X, int Y,
 
     /// <summary><see cref="Hidden"/> for an AirPlay label, whose default weight is its own.</summary>
     public static SkinText HiddenLabel { get; } = Hidden with { Weight = SkinClamps.DefaultLabelWeight };
+
+    /// <summary>What a text layer holds as no text: hidden, carrying nothing, at that text's own
+    /// default weight. The one place a text is given its default - the loader, the writer, the
+    /// document and the edits all ask here, so a load and a save cannot disagree about it.</summary>
+    public static SkinText HiddenOf(SkinLayer layer) =>
+        layer is SkinLayer.AirPlayName or SkinLayer.AirPlayLevel ? HiddenLabel : Hidden;
 }
 
 /// <summary>A rectangle in skin coordinates - the click target a skin declares for the AirPlay
@@ -166,7 +172,7 @@ public static class SkinLoader
                     return Bad($"skin.json is invalid: {ex.Message}");
                 }
 
-                text = ReadText(parsed?.PercentText, SkinClamps.DefaultWeight) ?? text;
+                text = ReadText(parsed?.PercentText, SkinLayer.PercentText) ?? text;
                 if (parsed?.Scale is { } rawScale)
                     scale = SkinClamps.Scale(rawScale);
                 if (parsed?.Fps is { } rawFps)
@@ -248,8 +254,8 @@ public static class SkinLoader
     ///
     /// Shared by the volume bar's percent text and by both of the AirPlay bar's labels: three
     /// callers, one set of defaults, so a clamp fixed in one place is fixed everywhere.</summary>
-    private static SkinText? ReadText(SkinTextJson? t, int defaultWeight) =>
-        t is null ? null : ReadStyle(t, new SkinText(t.Show, t.X, t.Y), defaultWeight);
+    private static SkinText? ReadText(SkinTextJson? t, SkinLayer layer) =>
+        t is null ? null : ReadStyle(t, new SkinText(t.Show, t.X, t.Y), SkinText.HiddenOf(layer).Weight);
 
     /// <summary>The styling every text reads - the percent number, the AirPlay labels and the
     /// notice name - put on <paramref name="at"/> and clamped. A weight wins over the legacy
@@ -349,14 +355,14 @@ public static class SkinLoader
             empty.IsGif, full.IsGif,
             empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
             fillStart, fillEnd,
-            ReadText(json?.NameText, SkinClamps.DefaultLabelWeight), ReadText(json?.PercentText, SkinClamps.DefaultLabelWeight), hit,
+            ReadText(json?.NameText, SkinLayer.AirPlayName), ReadText(json?.PercentText, SkinLayer.AirPlayLevel), hit,
             connect, json?.ConnectColor), null);
     }
 
     /// <summary>The dark-pill plate: what a notice looks like when nothing says otherwise.</summary>
     public static readonly SkinNotice DefaultNotice = new(
         "#F2202020", null, 12, 16, 10,
-        new SkinText(true, 0, 0),
+        SkinText.HiddenOf(SkinLayer.NoticeText) with { Show = true },
         new SkinNoticeGlyph(true, 16, 0, 18, null));
 
     private static SkinNoticeJson? ParseNotice(JsonElement? element)

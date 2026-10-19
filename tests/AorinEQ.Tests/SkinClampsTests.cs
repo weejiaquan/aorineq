@@ -155,12 +155,12 @@ public class SkinClampsTests
     public void A_hidden_text_carrying_nothing_is_no_text_at_all()
     {
         var styled = new SkinText(false, 5, 0);
-        _out.WriteLine($"null -> {SkinClamps.OptionalText(null, SkinText.Hidden)?.ToString() ?? "(null)"}; " +
-                       $"blank hidden -> {SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "), SkinText.Hidden)?.ToString() ?? "(null)"}; " +
-                       $"styled -> {SkinClamps.OptionalText(styled, SkinText.Hidden)}");
-        Assert.Null(SkinClamps.OptionalText(null, SkinText.Hidden));
-        Assert.Null(SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "), SkinText.Hidden));
-        Assert.Equal(styled, SkinClamps.OptionalText(styled, SkinText.Hidden));
+        _out.WriteLine($"null -> {SkinClamps.OptionalText(null, SkinLayer.PercentText)?.ToString() ?? "(null)"}; " +
+                       $"blank hidden -> {SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "), SkinLayer.PercentText)?.ToString() ?? "(null)"}; " +
+                       $"styled -> {SkinClamps.OptionalText(styled, SkinLayer.PercentText)}");
+        Assert.Null(SkinClamps.OptionalText(null, SkinLayer.PercentText));
+        Assert.Null(SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "), SkinLayer.PercentText));
+        Assert.Equal(styled, SkinClamps.OptionalText(styled, SkinLayer.PercentText));
     }
 
     /// <summary>"Nothing" depends on the text: an AirPlay label's default weight is Normal, so a
@@ -171,10 +171,10 @@ public class SkinClampsTests
     {
         var label = SkinText.HiddenLabel;
         var number = SkinText.Hidden;
-        var r = (LabelAsLabel: SkinClamps.OptionalText(label, SkinText.HiddenLabel),
-            LabelAsNumber: SkinClamps.OptionalText(label, SkinText.Hidden),
-            NumberAsLabel: SkinClamps.OptionalText(number, SkinText.HiddenLabel),
-            WeightOffScale: SkinClamps.OptionalText(label with { Weight = 420 }, SkinText.HiddenLabel));
+        var r = (LabelAsLabel: SkinClamps.OptionalText(label, SkinLayer.AirPlayName),
+            LabelAsNumber: SkinClamps.OptionalText(label, SkinLayer.PercentText),
+            NumberAsLabel: SkinClamps.OptionalText(number, SkinLayer.AirPlayName),
+            WeightOffScale: SkinClamps.OptionalText(label with { Weight = 420 }, SkinLayer.AirPlayName));
         _out.WriteLine($"label weight {label.Weight}, number weight {number.Weight}: {r}");
         Assert.Equal(400, label.Weight);
         Assert.Equal(600, number.Weight);

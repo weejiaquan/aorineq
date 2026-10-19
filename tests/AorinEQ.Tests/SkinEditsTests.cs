@@ -321,7 +321,7 @@ public class SkinEditsTests : IDisposable
     public void SetText_carries_every_type_field_on_every_text(SkinLayer layer)
     {
         var doc = Loaded("style-" + layer, """{"notice":{}}""", strip: true, noticeArt: true);
-        var start = SkinEdits.TextOf(doc, layer) ?? SkinEdits.HiddenTextOf(layer) with { Show = true, X = 4, Y = 2 };
+        var start = SkinEdits.TextOf(doc, layer) ?? SkinText.HiddenOf(layer) with { Show = true, X = 4, Y = 2 };
         var next = SkinEdits.SetText(doc, layer, start with
         {
             Weight = 449, Italic = true, LetterSpacing = 250,
@@ -343,14 +343,14 @@ public class SkinEditsTests : IDisposable
     public void A_hidden_text_at_its_own_default_weight_is_no_text()
     {
         var doc = Loaded("hidden", """{"percentText":{"show":true,"x":3,"y":4},"airplay":{"nameText":{"show":true,"x":3,"y":4}}}""", strip: true);
-        var r = (Number: SkinEdits.SetText(doc, SkinLayer.PercentText, SkinEdits.HiddenTextOf(SkinLayer.PercentText), _probe).Config.Text,
-            Label: SkinEdits.SetText(doc, SkinLayer.AirPlayName, SkinEdits.HiddenTextOf(SkinLayer.AirPlayName), _probe).Config.AirPlay!.Name,
+        var r = (Number: SkinEdits.SetText(doc, SkinLayer.PercentText, SkinText.HiddenOf(SkinLayer.PercentText), _probe).Config.Text,
+            Label: SkinEdits.SetText(doc, SkinLayer.AirPlayName, SkinText.HiddenOf(SkinLayer.AirPlayName), _probe).Config.AirPlay!.Name,
             LabelAtNumberWeight: SkinEdits.SetText(doc, SkinLayer.AirPlayName, SkinText.Hidden, _probe).Config.AirPlay!.Name);
-        _out.WriteLine($"HiddenTextOf: number {SkinEdits.HiddenTextOf(SkinLayer.PercentText)}, label {SkinEdits.HiddenTextOf(SkinLayer.AirPlayLevel)}");
+        _out.WriteLine($"HiddenOf: number {SkinText.HiddenOf(SkinLayer.PercentText)}, label {SkinText.HiddenOf(SkinLayer.AirPlayLevel)}");
         _out.WriteLine($"expected (null, null, a hidden label at 600); actual {r}");
-        Assert.Equal(SkinText.Hidden, SkinEdits.HiddenTextOf(SkinLayer.PercentText));
-        Assert.Equal(SkinText.HiddenLabel, SkinEdits.HiddenTextOf(SkinLayer.AirPlayName));
-        Assert.Equal(SkinText.HiddenLabel, SkinEdits.HiddenTextOf(SkinLayer.AirPlayLevel));
+        Assert.Equal(SkinText.Hidden, SkinText.HiddenOf(SkinLayer.PercentText));
+        Assert.Equal(SkinText.HiddenLabel, SkinText.HiddenOf(SkinLayer.AirPlayName));
+        Assert.Equal(SkinText.HiddenLabel, SkinText.HiddenOf(SkinLayer.AirPlayLevel));
         Assert.Null(r.Number);
         Assert.Null(r.Label);
         Assert.Equal(SkinText.Hidden, r.LabelAtNumberWeight); // 600 is not a label's default: it is kept
