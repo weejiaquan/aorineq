@@ -101,6 +101,31 @@ public class SkinArchiveTests : IDisposable
     }
 
     [Fact]
+    public void Import_skips_a_climbing_entry_even_when_its_file_name_is_whitelisted()
+    {
+        // "../skin.json" used to import as skin.json: only the LAST segment was looked at, and it is
+        // on the whitelist. The shared guard refuses the whole entry instead, so a hostile archive
+        // cannot smuggle a skin.json in under a traversal name.
+        var skin = MakeSkinFolder("climb-src", withJson: false);
+        var hostileJson = Path.Combine(_dir, "hostile.json");
+        File.WriteAllText(hostileJson, "{ \"scale\": 9 }");
+        var zip = Path.Combine(_dir, "climb.zip");
+        using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+        {
+            archive.CreateEntryFromFile(Path.Combine(skin, "empty.png"), "empty.png");
+            archive.CreateEntryFromFile(Path.Combine(skin, "full.png"), "full.png");
+            archive.CreateEntryFromFile(hostileJson, "../skin.json");
+        }
+
+        var imported = SkinArchive.Import(zip, _root, "climb-test");
+        var files = Directory.GetFiles(imported).Select(Path.GetFileName).ToArray();
+        _out.WriteLine("files in imported folder: " + string.Join(", ", files));
+
+        Assert.DoesNotContain("skin.json", files);
+        Assert.Equal(2, files.Length);
+    }
+
+    [Fact]
     public void Import_of_incomplete_zip_throws_and_cleans_up()
     {
         var skin = MakeSkinFolder("incomplete-src", withJson: false);

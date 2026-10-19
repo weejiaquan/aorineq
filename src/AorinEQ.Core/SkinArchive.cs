@@ -136,11 +136,11 @@ public static class SkinArchive
                 Directory.CreateDirectory(staging);
                 foreach (var entry in archive.Entries)
                 {
-                    // Normalize separators; skip directory entries.
-                    var parts = entry.FullName.Replace('\\', '/')
-                        .Split('/', StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length is 0 or > 2)
-                        continue; // deeper nesting is not a skin layout
+                    // The shared guard: separators normalised, and an entry that climbs, roots or
+                    // names a drive is skipped whole — not trimmed down to its last segment.
+                    var parts = ZipEntryName.Segments(entry.FullName);
+                    if (parts is null or { Length: 0 or > 2 })
+                        continue; // unsafe, a directory entry, or deeper than a skin layout
                     var fileName = parts[^1];
                     if (!AllowedFiles.Contains(fileName, StringComparer.OrdinalIgnoreCase))
                         continue;
