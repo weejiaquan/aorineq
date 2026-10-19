@@ -521,7 +521,7 @@ public class VirtualCableInstallerTests
     }
 
     [Fact]
-    public void The_startup_sweep_deletes_every_left_over_work_folder_and_survives_one_it_cannot_delete()
+    public void The_startup_sweep_deletes_idle_work_folders_and_leaves_one_in_use_whole_until_it_is_free()
     {
         var root = Path.Combine(Path.GetTempPath(), "aorineq-sweep-test-" + Guid.NewGuid().ToString("N"));
         var gone1 = Directory.CreateDirectory(Path.Combine(root, Guid.NewGuid().ToString("N"))).FullName;
@@ -530,20 +530,70 @@ public class VirtualCableInstallerTests
         File.WriteAllText(Path.Combine(gone1, "pack.zip"), "x");
         File.WriteAllText(Path.Combine(gone2, "VBCABLE_Setup_x64.exe"), "x");
         var heldFile = Path.Combine(held, "vbMmeCable64_win7.sys");
+        var heldSibling = Path.Combine(held, "vbMmeCable64_win7.inf");
+        File.WriteAllText(heldSibling, "inf");
         try
         {
             using (new FileStream(heldFile, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 VirtualCableInstaller.DeleteStaleWorkFolders(root); // must not throw on the held one
-                _out.WriteLine($"after the sweep: gone1={Directory.Exists(gone1)} gone2={Directory.Exists(gone2)} held={File.Exists(heldFile)}");
+                _out.WriteLine($"after the sweep: gone1={Directory.Exists(gone1)} gone2={Directory.Exists(gone2)} "
+                    + $"held={File.Exists(heldFile)} sibling={File.Exists(heldSibling)}");
                 Assert.False(Directory.Exists(gone1));
                 Assert.False(Directory.Exists(gone2));
-                Assert.True(File.Exists(heldFile)); // a file in use stays for the next start
+                Assert.True(File.Exists(heldFile));
+                Assert.True(File.Exists(heldSibling)); // skipped whole, not half-deleted
             }
             VirtualCableInstaller.DeleteStaleWorkFolders(root); // the next start gets it
             _out.WriteLine($"second sweep: held={Directory.Exists(held)} root={Directory.Exists(root)}");
             Assert.False(Directory.Exists(held));
             Assert.True(Directory.Exists(root)); // the root itself is left for the next install
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_work_folder_whose_setup_is_still_running_survives_the_sweep_with_every_file_intact()
+    {
+        // AorinEQ quit while VB-Audio's wizard was still up: the setup holds its own exe open for
+        // reading (as a running image does), and the driver files beside it are what it installs.
+        var root = Path.Combine(Path.GetTempPath(), "aorineq-sweep-test-" + Guid.NewGuid().ToString("N"));
+        var live = Directory.CreateDirectory(Path.Combine(root, Guid.NewGuid().ToString("N"))).FullName;
+        var names = new[] { "VBCABLE_Setup_x64.exe", "vbMmeCable64_win7.inf", "vbMmeCable64_win7.sys", "vbaudio_cable64_win7.cat" };
+        foreach (var name in names)
+            File.WriteAllText(Path.Combine(live, name), name);
+        try
+        {
+            using (new FileStream(Path.Combine(live, names[0]), FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                VirtualCableInstaller.DeleteStaleWorkFolders(root);
+                var left = names.Where(n => File.Exists(Path.Combine(live, n))).ToList();
+                _out.WriteLine($"while the setup runs: {left.Count}/{names.Length} files left: {string.Join(", ", left)}");
+                Assert.Equal(names, left);
+                Assert.All(names, n => Assert.Equal(n, File.ReadAllText(Path.Combine(live, n))));
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_work_folder_with_nothing_held_open_is_deleted_by_the_sweep()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aorineq-sweep-test-" + Guid.NewGuid().ToString("N"));
+        var idle = Directory.CreateDirectory(Path.Combine(root, Guid.NewGuid().ToString("N"))).FullName;
+        File.WriteAllText(Path.Combine(idle, "VBCABLE_Setup_x64.exe"), "x");
+        File.WriteAllText(Path.Combine(idle, "pack.zip"), "x");
+        try
+        {
+            VirtualCableInstaller.DeleteStaleWorkFolders(root);
+            _out.WriteLine($"idle folder exists after the sweep: {Directory.Exists(idle)}");
+            Assert.False(Directory.Exists(idle));
         }
         finally
         {

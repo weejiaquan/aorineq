@@ -115,10 +115,13 @@ public static class VirtualCableInstaller
         }
     }
 
-    /// <summary>Deletes every work folder under <paramref name="root"/> — the ones an install left
-    /// behind when AorinEQ was quit or killed mid-flow, before its own cleanup ran. Only for a
-    /// moment no install can be running (the single instance's startup). Best effort: a folder that
-    /// cannot go stays for the next start, and nothing here throws.</summary>
+    /// <summary>Deletes the work folders under <paramref name="root"/> that an install left behind
+    /// when AorinEQ was quit or killed mid-flow, before its own cleanup ran. Called at the single
+    /// instance's startup, before anything can be clicked, so no install of THIS process is running
+    /// - but VB-Audio's elevated setup may still be: quitting AorinEQ does not close its wizard. A
+    /// folder with any file that cannot be opened exclusively (the running setup holds its own exe)
+    /// is skipped whole, so the .inf/.sys/.cat beside it are not pulled from under the setup; the
+    /// next start sweeps it. Best effort: a folder that cannot go stays, and nothing here throws.</summary>
     public static void DeleteStaleWorkFolders(string root)
     {
         string[] folders;
@@ -132,10 +135,44 @@ public static class VirtualCableInstaller
             Trace.TraceWarning($"VirtualCableInstaller: couldn't list '{root}': {ex.Message}");
             return;
         }
+        int swept = 0;
         foreach (var folder in folders)
+        {
+            if (HasFileInUse(folder))
+            {
+                Trace.TraceInformation($"VirtualCableInstaller: left '{folder}': a file in it is in use.");
+                continue;
+            }
             DeleteWorkFolder(folder);
-        if (folders.Length > 0)
-            Trace.TraceInformation($"VirtualCableInstaller: swept {folders.Length} stale work folder(s) under '{root}'.");
+            swept++;
+        }
+        if (swept > 0)
+            Trace.TraceInformation($"VirtualCableInstaller: swept {swept} stale work folder(s) under '{root}'.");
+    }
+
+    /// <summary>Whether any file under <paramref name="folder"/> is held open by someone: it cannot
+    /// be opened with no sharing at all. A folder that cannot even be listed counts as in use.</summary>
+    private static bool HasFileInUse(string folder)
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    using var probe = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     /// <summary>Extracts every entry of the package into one folder, by name. EVERY name is checked
