@@ -334,7 +334,7 @@ public class SkinDesignerWindowTests : IDisposable
             d.Select(layer);
             var weight = Choice(d, Loc.T("designer.weight.label"));
             var shown = ((ComboBoxItem)weight.Combo.SelectedItem).Content;
-            bool bold = Fields<ToggleField>(d.PropertiesHost).Any(f => (string)f.Switch.Content == "Bold");
+            var typeToggles = Fields<ToggleField>(PropertySection(d, Loc.T("designer.section.type"))).Select(f => (string)f.Switch.Content).ToList();
             weight.Combo.SelectedIndex = 8;                                   // Black 900
             Toggle(d, Loc.T("designer.italic.label")).Switch.IsChecked = true;
             Type(Number(d, Loc.T("designer.letter-spacing.label")).Box, N(2.5));
@@ -343,17 +343,17 @@ public class SkinDesignerWindowTests : IDisposable
             var undoneOnce = SkinEdits.TextOf(d.Document, layer)!;
             d.History.Redo();
             bool saved = d.Save();
-            return (shown, bold, edited, undoneOnce, saved);
+            return (shown, typeToggles, edited, undoneOnce, saved);
         });
         var info = SkinLoader.Load(folder);
         var reloaded = SkinEdits.TextOf(SkinDocument.FromInfo(info), layer)!;
-        _out.WriteLine($"{layer} (art {art}): weight shown {r.shown}; a Bold toggle present: {r.bold}");
+        _out.WriteLine($"{layer} (art {art}): weight shown {r.shown}; toggles in Type: [{string.Join(", ", r.typeToggles)}], expected only {Loc.T("designer.italic.label")}");
         _out.WriteLine($"edited   {r.edited}");
         _out.WriteLine($"one undo {r.undoneOnce}");
         _out.WriteLine($"reloaded {reloaded}");
         _out.WriteLine(File.ReadAllText(Path.Combine(folder, "skin.json")));
         Assert.Equal(Loc.T(defaultWeight == 600 ? "designer.weight.semi-bold" : "designer.weight.regular"), r.shown);
-        Assert.False(r.bold, "the Bold toggle is still there");
+        Assert.Equal(new[] { Loc.T("designer.italic.label") }, r.typeToggles); // no Bold toggle, under any key or language
         Assert.Equal((900, true, 2.5), (r.edited.Weight, r.edited.Italic, r.edited.LetterSpacing));
         Assert.Equal((900, true, 0.0), (r.undoneOnce.Weight, r.undoneOnce.Italic, r.undoneOnce.LetterSpacing)); // spacing was one step
         Assert.True(r.saved);

@@ -104,6 +104,33 @@ public class PercentTextRendererTests
         Assert.True(Math.Abs(r.ItalicInk - r.Upright) > 0.01, "italic and upright are too alike for this test to tell them apart");
     }
 
+    /// <summary>A trimmed text is a prefix of it followed by an ellipsis, spaced or not: its width
+    /// is exactly what some prefix plus "…" measures, and no bare prefix measures that. A
+    /// proportional face, so a dropped ellipsis cannot hide behind equal advances.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    public void A_trimmed_text_ends_in_an_ellipsis(double spacing)
+    {
+        const string text = "Speakers (Realtek High Definition Audio)";
+        var style = new SkinText(true, 0, 0, FontSize: 20, LetterSpacing: spacing);
+        var r = _sta.Run(() =>
+        {
+            double dip = Dip();
+            double trimmed = PercentTextRenderer.Update(new Path(), style, text, 1.0, dip, null, 150).Width;
+            var withEllipsis = Enumerable.Range(0, text.Length).Where(k =>
+                Math.Abs(PercentTextRenderer.Measure(style, text[..k] + "…", dip).Width - trimmed) < 0.01).ToList();
+            var bare = Enumerable.Range(0, text.Length).Where(k =>
+                Math.Abs(PercentTextRenderer.Measure(style, text[..k], dip).Width - trimmed) < 0.01).ToList();
+            return (trimmed, withEllipsis, bare);
+        });
+        _out.WriteLine($"spacing {spacing}: trimmed to {r.trimmed:0.###} in a 150 box; prefixes that measure that with '…': " +
+                       $"[{string.Join(", ", r.withEllipsis.Select(k => $"'{text[..k]}…'"))}], without: [{string.Join(", ", r.bare.Select(k => $"'{text[..k]}'"))}]");
+        Assert.True(r.trimmed <= 150);
+        Assert.NotEmpty(r.withEllipsis);
+        Assert.Empty(r.bare);
+    }
+
     /// <summary>The boxed layout the notice name uses: a text wider than its box ends in an
     /// ellipsis inside it, spaced or not; one that fits is untouched; a box with no room draws
     /// nothing; a family given outright wins over the style's.</summary>

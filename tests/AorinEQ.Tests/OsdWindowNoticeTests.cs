@@ -122,19 +122,20 @@ public class OsdWindowNoticeTests
             osd.ShowNotice(name);
             osd.UpdateLayout();
             var plate = Part(osd, "NoticeRoot");
-            var text = Notice(osd).NoticeText;
-            double right = text.TranslatePoint(new System.Windows.Point(text.ActualWidth, 0), plate).X;
+            // The ink, not the text's box: the box is the star column whatever is drawn in it.
+            var glyphs = Notice(osd).NoticeText.Glyphs;
+            double right = glyphs.TranslatePoint(new System.Windows.Point(glyphs.Data.Bounds.Right, 0), plate).X;
             return (narrow, osd.Width, right, plate.ActualWidth, SystemParameters.WorkArea,
                 new Rect(osd.Left, osd.Top, osd.Width, osd.Height));
         });
 
         _out.WriteLine($"short name: {shortWidth} wide; {name.Length} full-width characters: {wideWidth} wide, " +
-                       $"text ends at {textRight:0.#} of a {plateWidth:0.#} plate; window {window} in {workArea}");
+                       $"ink ends at {textRight:0.#} of a {plateWidth:0.#} plate; window {window} in {workArea}");
         Assert.Equal(300, shortWidth); // a short name gets the volume bar's own width, not a sliver
         Assert.True(wideWidth > shortWidth, "A long name did not widen the plate at all.");
         Assert.True(wideWidth <= 480, $"The plate grew to {wideWidth}, past its 480 cap.");
         Assert.True(textRight <= plateWidth - 16 + 0.5,
-            $"The name runs to {textRight:0.#}, past the plate's padding at {plateWidth - 16:0.#}.");
+            $"The name's ink runs to {textRight:0.#}, past the plate's padding at {plateWidth - 16:0.#}.");
         Assert.True(workArea.Contains(window), $"The notice {window} is not inside the work area {workArea}.");
     }
 
@@ -255,6 +256,72 @@ public class OsdWindowNoticeTests
             Assert.Equal(Visibility.Collapsed, plate);
         }
         finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>Where a short name's ink sits in the view: its box's left and right, and the ink's.</summary>
+    private static (double BoxLeft, double BoxRight, double InkLeft, double InkRight) InkInBox(OsdWindow osd)
+    {
+        var view = Notice(osd);
+        var text = view.NoticeText;
+        var ink = text.Glyphs.Data.Bounds;
+        double boxLeft = text.TranslatePoint(new System.Windows.Point(0, 0), view).X;
+        return (boxLeft, boxLeft + text.ActualWidth,
+            text.Glyphs.TranslatePoint(new System.Windows.Point(ink.Left, 0), view).X,
+            text.Glyphs.TranslatePoint(new System.Windows.Point(ink.Right, 0), view).X);
+    }
+
+    /// <summary>On art the name is aligned inside its textWidth box by its align, as the
+    /// TextBlock's TextAlignment did. A glyph's side bearing keeps ink a pixel or two off the
+    /// advance edge, hence the tolerance.</summary>
+    [Theory]
+    [InlineData("left")]
+    [InlineData("center")]
+    [InlineData("right")]
+    public void A_name_on_art_is_aligned_inside_its_box(string align)
+    {
+        var folder = TempFolder();
+        try
+        {
+            var art = LoadArtSkin(folder, 320, 56).Notice!;
+            var look = art with { Text = art.Text with { Align = align } };
+            var r = With(osd =>
+            {
+                osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+                osd.SetSkinNotice(look, 1.0);
+                osd.ShowNotice("Hi");
+                osd.UpdateLayout();
+                return InkInBox(osd);
+            });
+            double centre = (r.BoxLeft + r.BoxRight) / 2, inkCentre = (r.InkLeft + r.InkRight) / 2;
+            _out.WriteLine($"align {align}: box {r.BoxLeft:0.##}..{r.BoxRight:0.##} (centre {centre:0.##}), ink {r.InkLeft:0.##}..{r.InkRight:0.##} (centre {inkCentre:0.##})");
+            Assert.True(r.BoxRight - r.BoxLeft > 100, "the box is too narrow for the test to tell the aligns apart");
+            switch (align)
+            {
+                case "left": Assert.InRange(r.InkLeft, r.BoxLeft, r.BoxLeft + 3); break;
+                case "right": Assert.InRange(r.InkRight, r.BoxRight - 3, r.BoxRight); break;
+                default: Assert.InRange(inkCentre, centre - 2, centre + 2); break;
+            }
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>A plate lays the name out by its padding, so a skin's align has no effect there:
+    /// the name starts at the left of its column, as it always has.</summary>
+    [Fact]
+    public void A_plate_name_starts_at_the_left_whatever_its_align()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var r = With(osd =>
+        {
+            osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+            osd.SetSkinNotice(d with { Text = d.Text with { Align = "right" } }, 1.0);
+            osd.ShowNotice("Hi");
+            osd.UpdateLayout();
+            return InkInBox(osd);
+        });
+        _out.WriteLine($"plate, align right: column {r.BoxLeft:0.##}..{r.BoxRight:0.##}, ink {r.InkLeft:0.##}..{r.InkRight:0.##}");
+        Assert.True(r.BoxRight - r.BoxLeft > 100, "the column is too narrow for the test to tell left from right");
+        Assert.InRange(r.InkLeft, r.BoxLeft, r.BoxLeft + 3);
     }
 
     [Fact]
