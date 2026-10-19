@@ -181,9 +181,13 @@ public partial class App : System.Windows.Application
         }
 
         // Disposed first, so Shutdown closes the designer instead of it asking about unsaved edits
-        // in a box nobody can answer during a crash. Best effort too: it may be what broke.
-        try { CloseSkinDesigner(); }
+        // in a box nobody can answer during a crash. Best effort too: it may be what broke - and
+        // apart, so a Dispose that throws still lets the window go.
+        try { _skinDesigner?.Dispose(); }
         catch (Exception) { }
+        try { _skinDesigner?.Close(); }
+        catch (Exception) { }
+        _skinDesigner = null;
 
         try { Shutdown(1); }
         catch (InvalidOperationException) { } // already shutting down
@@ -2148,7 +2152,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — restarting…");
+        _settingsWindow?.SetUpdateStatus(Loc.T("app.is-ready-restarting", release.TagName));
         RestartForUpdate();
     }
 

@@ -150,6 +150,34 @@ public class SkinDesignerWindowTests : IDisposable
     }
 
     [Fact]
+    public void Only_the_volume_bars_art_says_it_must_match_the_empty_and_full_size()
+    {
+        // The strip and the notice art have frame sizes of their own: telling the user otherwise
+        // there would be a wrong instruction.
+        MakeSkin("all-art", "{}", strip: true, noticeArt: (120, 30));
+        var hint = Loc.T("designer.text.png-sprite-sheet-png");
+        SkinLayer[] layers = [SkinLayer.VolumeEmpty, SkinLayer.VolumeFull, SkinLayer.VolumeMuted,
+            SkinLayer.AirPlayEmpty, SkinLayer.AirPlayFull, SkinLayer.NoticeArt];
+        var r = WithDesigner(d =>
+        {
+            Assert.True(d.LoadSkin("all-art"));
+            return layers.ToDictionary(l => l, l =>
+            {
+                d.Select(l);
+                return Fields<TextBlock>(d.PropertiesHost).Any(t => t.Text == hint);
+            });
+        });
+        foreach (var (layer, shown) in r)
+            _out.WriteLine($"{layer}: frame-size hint expected {SkinLayers.BoardOf(layer) == SkinLayer.VolumeBar}, actual {shown}");
+        Assert.True(r[SkinLayer.VolumeEmpty]);
+        Assert.True(r[SkinLayer.VolumeFull]);
+        Assert.True(r[SkinLayer.VolumeMuted]);
+        Assert.False(r[SkinLayer.AirPlayEmpty]);
+        Assert.False(r[SkinLayer.AirPlayFull]);
+        Assert.False(r[SkinLayer.NoticeArt]);
+    }
+
+    [Fact]
     public void A_property_edit_commits_and_undo_restores_it()
     {
         MakeSkin("edit", "{}");

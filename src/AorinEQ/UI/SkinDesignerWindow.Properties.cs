@@ -154,7 +154,8 @@ public partial class SkinDesignerWindow
         }
         if (gif) rows.Add(Hint(Loc.T("designer.art.gif-frames")));
         if (layer is SkinLayer.AirPlayEmpty or SkinLayer.AirPlayFull) rows.Add(Hint(Loc.T("designer.art.first-frame-only")));
-        rows.Add(Hint(Loc.T("designer.text.png-sprite-sheet-png")));
+        // Only the volume bar's layers are tied to each other's size; the strip and the notice art have their own.
+        if (SkinLayers.BoardOf(layer) == SkinLayer.VolumeBar) rows.Add(Hint(Loc.T("designer.text.png-sprite-sheet-png")));
         return [Section(Loc.T("designer.section.art"), [.. rows])];
     }
 
