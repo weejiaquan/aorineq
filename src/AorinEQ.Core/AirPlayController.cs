@@ -83,10 +83,6 @@ public sealed class AirPlayController : IDisposable
     public static bool RetargetSettingApplies(string volumeMode, bool eapoActiveOnSource) =>
         volumeMode == VolumeModes.System || (volumeMode == VolumeModes.Eapo && !eapoActiveOnSource);
 
-    /// <summary>Whether the AutoRetargetVolume setting means anything in this volume mode. The
-    /// Settings page greys the checkbox and explains itself when this is false.</summary>
-    public static bool RetargetSettingApplies(string volumeMode) => volumeMode == VolumeModes.System;
-
     /// <summary>Starts streaming <paramref name="sourceEndpointId"/> (empty = the default render
     /// endpoint) to <paramref name="device"/>. False when the capture or the handshake fails;
     /// <see cref="Snapshot"/> then carries the reason.</summary>
