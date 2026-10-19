@@ -430,4 +430,31 @@ public class SettingsTests : IDisposable
         Assert.Equal(73, loaded.Percent);
         Assert.Null(loaded.EapoAutoRepairDeclined);
     }
+
+    [Fact]
+    public void Recent_colours_and_designer_panel_widths_survive_a_restart()
+    {
+        (Settings.Default with { RecentColors = ["#FF336699", "#80FF0000"], DesignerLayersWidth = 260, DesignerPropertiesWidth = 300 }).Save(_path);
+        _out.WriteLine("saved json: " + File.ReadAllText(_path));
+        var loaded = Settings.Load(_path);
+        Assert.Equal(new[] { "#FF336699", "#80FF0000" }, loaded.RecentColors);
+        Assert.Equal((260.0, 300.0), (loaded.DesignerLayersWidth, loaded.DesignerPropertiesWidth));
+    }
+
+    [Fact]
+    public void Hand_edited_recent_colours_and_widths_are_normalized()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path,
+            """{"Percent":50,"Muted":false,"RecentColors":["#0f0","junk","#FF00FF00"],"DesignerLayersWidth":9999,"DesignerPropertiesWidth":1}""");
+        var loaded = Settings.Load(_path);
+        _out.WriteLine($"recents [{string.Join(", ", loaded.RecentColors ?? [])}] layers {loaded.DesignerLayersWidth} properties {loaded.DesignerPropertiesWidth}");
+        Assert.Equal(new[] { "#FF00FF00" }, loaded.RecentColors);
+        Assert.Equal((Settings.MaxDesignerPanelWidth, Settings.MinDesignerPanelWidth), (loaded.DesignerLayersWidth, loaded.DesignerPropertiesWidth));
+
+        File.WriteAllText(_path, """{"Percent":50,"Muted":false}""");
+        var old = Settings.Load(_path);
+        Assert.Null(old.RecentColors);
+        Assert.Equal((220.0, 320.0), (old.DesignerLayersWidth, old.DesignerPropertiesWidth));
+    }
 }

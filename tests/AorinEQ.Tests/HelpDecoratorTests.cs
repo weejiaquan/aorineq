@@ -91,12 +91,12 @@ public class HelpDecoratorTests
         };
         host.Show();
         host.UpdateLayout();
-        Pump();
+        StaWpf.Pump();
 
         Layout(root);
         HelpDecorator.Decorate(root);
         Layout(root);
-        Pump();
+        StaWpf.Pump();
 
         var toggle = Descendants(card).OfType<ToggleButton>().FirstOrDefault()
             ?? throw new InvalidOperationException(
@@ -109,22 +109,6 @@ public class HelpDecoratorTests
                 + "not in the layout.");
 
         return new Card(root, card, toggle, scroller, popup, host);
-    }
-
-    /// <summary>Runs the dispatcher queue to empty.
-    ///
-    /// The whole of a test body runs inside a single HookThread.Invoke, which occupies the message
-    /// loop for its duration - so without this nothing queued ever runs: Loaded never fires, the
-    /// controls stay unloaded, and WPF refuses to open a Popup whose placement target is not
-    /// loaded. IsOpen then reads back false however it is set, including when assigned directly,
-    /// which looks exactly like a broken feature and is not.</summary>
-    private static void Pump()
-    {
-        var frame = new System.Windows.Threading.DispatcherFrame();
-        System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ContextIdle,
-            new Action(() => frame.Continue = false));
-        System.Windows.Threading.Dispatcher.PushFrame(frame);
     }
 
     private static void Layout(FrameworkElement element)
@@ -162,7 +146,7 @@ public class HelpDecoratorTests
             var closed = card.Root.DesiredSize.Height;
 
             card.Toggle.IsChecked = true;
-            Pump();
+            StaWpf.Pump();
             Layout(card.Root);
 
             return (closed, card.Root.DesiredSize.Height, card.Popup.IsOpen);
@@ -191,12 +175,12 @@ public class HelpDecoratorTests
         var (openedBefore, openAfter) = With(card =>
         {
             card.Toggle.IsChecked = true;
-            Pump();
+            StaWpf.Pump();
             var opened = card.Popup.IsOpen;
 
             card.Scroller!.ScrollToVerticalOffset(60);
             card.Scroller.UpdateLayout();
-            Pump();
+            StaWpf.Pump();
 
             return (opened, card.Popup.IsOpen);
         }, inScrollViewer: true);
@@ -216,11 +200,11 @@ public class HelpDecoratorTests
         var (openedFirst, stillChecked) = With(card =>
         {
             card.Toggle.IsChecked = true;
-            Pump();
+            StaWpf.Pump();
             var opened = card.Popup.IsOpen;
 
             card.Popup.IsOpen = false;
-            Pump();
+            StaWpf.Pump();
             return (opened, card.Toggle.IsChecked == true);
         });
 

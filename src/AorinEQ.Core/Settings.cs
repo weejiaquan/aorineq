@@ -61,9 +61,21 @@ public sealed record Settings(
     // Endpoint GUIDs whose automatic Equalizer APO repair the user declined or that the repair
     // refused — never offered unprompted again (see EapoAutoRepair). A driver update gives the
     // device a NEW GUID, so this cannot suppress the post-update repair it exists for.
-    IReadOnlyList<string>? EapoAutoRepairDeclined = null)
+    IReadOnlyList<string>? EapoAutoRepairDeclined = null,
+    // The colour picker's recent colours, shared by the Skin Designer and the HUD widget menu,
+    // newest first. Null for everyone upgrading into this, which reads as "none yet".
+    IReadOnlyList<string>? RecentColors = null,
+    // The Skin Designer's Layers and Properties panel widths, as the user last dragged them.
+    double DesignerLayersWidth = 220,
+    double DesignerPropertiesWidth = 320)
 {
     public static Settings Default { get; } = new(50, false);
+
+    public const double MinDesignerPanelWidth = 160;
+    public const double MaxDesignerPanelWidth = 520;
+
+    private static double PanelWidth(double width, double fallback) =>
+        double.IsFinite(width) ? Math.Clamp(width, MinDesignerPanelWidth, MaxDesignerPanelWidth) : fallback;
 
     private static EqScopeSetting NormalizeScope(EqScopeSetting scope) => scope with
     {
@@ -117,6 +129,9 @@ public sealed record Settings(
             // Absent for everyone upgrading into this feature, so a missing block becomes the
             // default (disabled) rather than a null the UI has to guard on everywhere.
             AirPlay = NormalizeAirPlay(s.AirPlay ?? AirPlaySetting.Default),
+            RecentColors = s.RecentColors is null ? null : SkinColor.NormalizeRecents(s.RecentColors),
+            DesignerLayersWidth = PanelWidth(s.DesignerLayersWidth, 220),
+            DesignerPropertiesWidth = PanelWidth(s.DesignerPropertiesWidth, 320),
         };
     }
 
