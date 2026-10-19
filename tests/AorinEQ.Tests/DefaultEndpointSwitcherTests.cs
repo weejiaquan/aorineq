@@ -74,13 +74,20 @@ public class DefaultEndpointSwitcherTests
     public void Restoring_to_an_endpoint_that_no_longer_exists_leaves_windows_choice_alone()
     {
         var before = DefaultEndpointSwitcher.Capture();
-        // The current default is not the cable, so a role whose device has gone stays on Windows' choice.
-        var (complete, moved) = DefaultEndpointSwitcher.Restore(new DefaultRenderRecord(NoSuchEndpoint, NoSuchEndpoint, NoSuchEndpoint));
-        var after = DefaultEndpointSwitcher.Capture();
-        _out.WriteLine($"before {before}; restore of a vanished device: complete={complete} moved {moved ?? "(nothing)"}; after {after}");
-        Assert.True(complete);
-        Assert.Null(moved);
-        Assert.Equal(before, after);
+        try
+        {
+            // The current default is not the cable, so a role whose device has gone stays on Windows' choice.
+            var (complete, moved) = DefaultEndpointSwitcher.Restore(new DefaultRenderRecord(NoSuchEndpoint, NoSuchEndpoint, NoSuchEndpoint));
+            var after = DefaultEndpointSwitcher.Capture();
+            _out.WriteLine($"before {before}; restore of a vanished device: complete={complete} moved {moved ?? "(nothing)"}; after {after}");
+            Assert.True(complete);
+            Assert.Null(moved);
+            Assert.Equal(before, after);
+        }
+        finally
+        {
+            PutBack(before);
+        }
     }
 
     [Fact]
@@ -135,7 +142,7 @@ public class DefaultEndpointSwitcherTests
             // AorinEQ's switch, with `before` as the record it would hold: the default it lands on is ours.
             Assert.True(DefaultEndpointSwitcher.SetDefaultForAllRoles(standIn!.Id));
             var landed = AudioEndpoint.GetDefaultRenderEndpointId();
-            var ours = DefaultEndpointSwitcher.Classify(landed, ownTargetId: standIn.Id, before, cableId: standIn.Id);
+            var ours = DefaultEndpointSwitcher.Classify(landed, ownTargetId: standIn.Id, before, [standIn.Id]);
             _out.WriteLine($"our switch to {standIn.FriendlyName}: default now {landed} -> {ours}");
             Assert.Equal(standIn.Id, landed);
             Assert.Equal(DefaultChange.Ours, ours);
@@ -143,7 +150,7 @@ public class DefaultEndpointSwitcherTests
             // The user picks their own device back in Sound settings while the stream runs.
             DefaultRenderDevice.SetDefaultAndSettle(before.Multimedia!);
             var chosen = AudioEndpoint.GetDefaultRenderEndpointId();
-            var theirs = DefaultEndpointSwitcher.Classify(chosen, ownTargetId: null, before, cableId: standIn.Id);
+            var theirs = DefaultEndpointSwitcher.Classify(chosen, ownTargetId: null, before, [standIn.Id]);
             _out.WriteLine($"user switched to {chosen} mid-stream -> {theirs}");
             Assert.Equal(before.Multimedia, chosen);
             Assert.Equal(DefaultChange.UserOverride, theirs);
@@ -159,15 +166,15 @@ public class DefaultEndpointSwitcherTests
     [Fact]
     public void Our_own_switch_arriving_is_ours_whatever_else_is_true()
     {
-        Assert.Equal(DefaultChange.Ours, DefaultEndpointSwitcher.Classify(Cable, Cable, Recorded, Cable));
-        Assert.Equal(DefaultChange.Ours, DefaultEndpointSwitcher.Classify(Speakers, Speakers, null, null));
+        Assert.Equal(DefaultChange.Ours, DefaultEndpointSwitcher.Classify(Cable, Cable, Recorded, [Cable]));
+        Assert.Equal(DefaultChange.Ours, DefaultEndpointSwitcher.Classify(Speakers, Speakers, null, []));
         _out.WriteLine("a notification for the endpoint we just switched to is ours (switch AND restore)");
     }
 
     [Fact]
     public void Without_a_record_nothing_is_ours_to_manage()
     {
-        var change = DefaultEndpointSwitcher.Classify(Headphones, null, null, Cable);
+        var change = DefaultEndpointSwitcher.Classify(Headphones, null, null, [Cable]);
         _out.WriteLine($"no record -> {change}");
         Assert.Equal(DefaultChange.Unrelated, change);
     }
@@ -175,7 +182,7 @@ public class DefaultEndpointSwitcherTests
     [Fact]
     public void A_late_duplicate_for_the_cable_is_still_ours()
     {
-        var change = DefaultEndpointSwitcher.Classify(Cable, null, Recorded, Cable);
+        var change = DefaultEndpointSwitcher.Classify(Cable, null, Recorded, [Cable]);
         _out.WriteLine($"cable is default, record held, no switch in flight -> {change}");
         Assert.Equal(DefaultChange.Ours, change);
     }
@@ -183,7 +190,7 @@ public class DefaultEndpointSwitcherTests
     [Fact]
     public void The_user_picking_another_output_mid_stream_is_their_decision()
     {
-        var change = DefaultEndpointSwitcher.Classify(Headphones, null, Recorded, Cable);
+        var change = DefaultEndpointSwitcher.Classify(Headphones, null, Recorded, [Cable]);
         _out.WriteLine($"user chose headphones mid-stream -> {change}");
         Assert.Equal(DefaultChange.UserOverride, change);
     }
@@ -193,8 +200,8 @@ public class DefaultEndpointSwitcherTests
     {
         // Review focus: the user disables or uninstalls VB-Cable while streaming. Windows moves the
         // default to whatever it likes; the user's ORIGINAL device is what should come back.
-        var disabled = DefaultEndpointSwitcher.Classify(Headphones, null, Recorded, cableId: null);
-        var nothingLeft = DefaultEndpointSwitcher.Classify(null, null, Recorded, cableId: null);
+        var disabled = DefaultEndpointSwitcher.Classify(Headphones, null, Recorded, cableIds: []);
+        var nothingLeft = DefaultEndpointSwitcher.Classify(null, null, Recorded, cableIds: []);
         _out.WriteLine($"cable gone -> {disabled}; cable gone and no device at all -> {nothingLeft}");
         Assert.Equal(DefaultChange.CableLost, disabled);
         Assert.Equal(DefaultChange.CableLost, nothingLeft);
@@ -205,19 +212,23 @@ public class DefaultEndpointSwitcherTests
     private const string CableGuid = "{aaaaaaaa-0000-0000-0000-000000000000}";
     private const string SpeakersGuid = "{bbbbbbbb-0000-0000-0000-000000000000}";
 
+    private const string Cable16Guid = "{cccccccc-0000-0000-0000-000000000000}";
+
     [Theory]
-    [InlineData(true, CableGuid, CableGuid, true)]                                  // our record holds the default on the cable
-    [InlineData(true, "{AAAAAAAA-0000-0000-0000-000000000000}", CableGuid, true)]   // however the GUID is cased
-    [InlineData(true, SpeakersGuid, CableGuid, false)]                              // a reading of another device is news as usual
-    [InlineData(false, CableGuid, CableGuid, false)]                                // no record: the user chose the cable themselves
-    [InlineData(true, CableGuid, null, false)]                                      // the cable is gone
-    [InlineData(true, null, CableGuid, false)]                                      // no default device at all
+    [InlineData(true, CableGuid, new[] { CableGuid }, true)]                                  // our record holds the default on the cable
+    [InlineData(true, "{AAAAAAAA-0000-0000-0000-000000000000}", new[] { CableGuid }, true)]   // however the GUID is cased
+    [InlineData(true, Cable16Guid, new[] { CableGuid, Cable16Guid }, true)]                   // the cable's second endpoint ("CABLE In 16ch") is the cable too
+    [InlineData(true, Cable16Guid, new[] { CableGuid }, false)]                               // ...and only because it is in the set
+    [InlineData(true, SpeakersGuid, new[] { CableGuid, Cable16Guid }, false)]                 // a reading of another device is news as usual
+    [InlineData(false, CableGuid, new[] { CableGuid }, false)]                                // no record: the user chose the cable themselves
+    [InlineData(true, CableGuid, new string[0], false)]                                       // the cable is gone
+    [InlineData(true, null, new[] { CableGuid }, false)]                                      // no default device at all
     public void Only_a_reading_of_the_cable_while_our_record_holds_it_there_is_ours(
-        bool recordHeld, string? readingGuid, string? cableGuid, bool expected)
+        bool recordHeld, string? readingGuid, string[] cableGuids, bool expected)
     {
         var record = recordHeld ? Recorded : null;
-        bool ours = DefaultEndpointSwitcher.IsHeldOnCable(record, readingGuid, cableGuid);
-        _out.WriteLine($"record={(recordHeld ? "held" : "none")} reading={readingGuid ?? "(none)"} cable={cableGuid ?? "(none)"} -> ours={ours}");
+        bool ours = DefaultEndpointSwitcher.IsHeldOnCable(record, readingGuid, cableGuids);
+        _out.WriteLine($"record={(recordHeld ? "held" : "none")} reading={readingGuid ?? "(none)"} cable=[{string.Join(", ", cableGuids)}] -> ours={ours}");
         Assert.Equal(expected, ours);
     }
 
@@ -235,7 +246,7 @@ public class DefaultEndpointSwitcherTests
         // CheckEapoHealth's gate: a reading IsHeldOnCable claims never reaches the tracker.
         var gated = new EapoHealthTracker();
         EapoHealthUpdate? Feed(EapoHealthSnapshot reading, DefaultRenderRecord? held) =>
-            DefaultEndpointSwitcher.IsHeldOnCable(held, reading.EndpointGuid, CableGuid) ? null : gated.Update(reading);
+            DefaultEndpointSwitcher.IsHeldOnCable(held, reading.EndpointGuid, [CableGuid]) ? null : gated.Update(reading);
         var start = Feed(speakers, held: null);
         var onCable = Feed(cable, held: Recorded);   // stream running: record held, default on the cable
         var restored = Feed(back, held: null);       // stream ended: record cleared, default back
@@ -272,7 +283,7 @@ public class DefaultEndpointSwitcherTests
     public void Every_role_whose_recorded_device_is_active_goes_back_to_it()
     {
         var plan = DefaultEndpointSwitcher.PlanRestore(new DefaultRenderRecord(Speakers, Headphones, Speakers),
-            [Cable, Speakers, Headphones], OnCable, Cable);
+            [Cable, Speakers, Headphones], OnCable, [Cable]);
         Log("all recorded devices active", plan);
         Assert.True(plan.Complete);
         Assert.Equal(
@@ -284,7 +295,7 @@ public class DefaultEndpointSwitcherTests
     public void A_recorded_device_matches_its_active_endpoint_however_the_id_is_cased()
     {
         var plan = DefaultEndpointSwitcher.PlanRestore(new DefaultRenderRecord(Speakers, Speakers, Speakers),
-            [Speakers.ToUpperInvariant()], OnCable, Cable);
+            [Speakers.ToUpperInvariant()], OnCable, [Cable]);
         Log("recorded lower case, enumerated upper case", plan);
         Assert.True(plan.Complete);
         Assert.Equal(3, plan.Sets.Count);
@@ -296,7 +307,7 @@ public class DefaultEndpointSwitcherTests
     {
         // The user's speakers were unplugged; Windows already moved every role to the headphones.
         var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [Cable, Headphones],
-            new DefaultRenderRecord(Headphones, Headphones, Headphones), Cable);
+            new DefaultRenderRecord(Headphones, Headphones, Headphones), [Cable]);
         Log("speakers gone, roles on headphones", plan);
         Assert.True(plan.Complete);
         Assert.Empty(plan.Sets);
@@ -307,7 +318,7 @@ public class DefaultEndpointSwitcherTests
     {
         // Listed cable-first on purpose: the fallback must skip the cable, not take the first entry.
         var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [Cable, Headphones, Desk],
-            OnCable, Cable);
+            OnCable, [Cable]);
         Log("speakers gone, every role still on the cable", plan);
         Assert.True(plan.Complete);
         Assert.Equal(
@@ -318,10 +329,41 @@ public class DefaultEndpointSwitcherTests
     [Fact]
     public void A_gone_device_on_the_cable_with_nothing_else_to_move_to_is_incomplete_so_the_record_is_kept()
     {
-        var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [Cable], OnCable, Cable);
+        var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [Cable], OnCable, [Cable]);
         Log("speakers gone, only the cable left", plan);
         Assert.False(plan.Complete);
         Assert.Empty(plan.Sets);
+    }
+
+    private const string Cable16 = "{0.0.0.00000000}.{55555555-0000-0000-0000-000000000000}";
+
+    [Fact]
+    public void No_endpoint_of_the_cable_is_ever_the_fallback_and_any_of_them_counts_as_on_the_cable()
+    {
+        // A VB-Cable pack with two endpoints on its device ("CABLE Input" and "CABLE In 16ch"),
+        // both listed ahead of the only real device. Console sits on the SECOND cable endpoint: it
+        // is still on the cable, and neither cable endpoint may replace the gone speakers.
+        var current = new DefaultRenderRecord(Cable16, Cable, Cable);
+        var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [Cable, Cable16, Headphones], current, [Cable, Cable16]);
+        Log("two cable endpoints listed first, speakers gone", plan);
+        Assert.True(plan.Complete);
+        Assert.DoesNotContain(plan.Sets, s => s.EndpointId == Cable || s.EndpointId == Cable16);
+        Assert.Equal(
+            new (AudioEndpoint.ERole, string)[] { (AudioEndpoint.ERole.Console, Headphones), (AudioEndpoint.ERole.Multimedia, Headphones), (AudioEndpoint.ERole.Communications, Headphones) },
+            plan.Sets);
+
+        var onlyCables = DefaultEndpointSwitcher.PlanRestore(Recorded, [Cable, Cable16], current, [Cable, Cable16]);
+        Log("only the two cable endpoints left", onlyCables);
+        Assert.False(onlyCables.Complete);
+        Assert.Empty(onlyCables.Sets);
+    }
+
+    [Fact]
+    public void A_default_on_the_cables_second_endpoint_is_ours_not_the_users()
+    {
+        var change = DefaultEndpointSwitcher.Classify(Cable16, null, Recorded, [Cable, Cable16]);
+        _out.WriteLine($"default landed on the cable's 16ch endpoint -> {change}");
+        Assert.Equal(DefaultChange.Ours, change);
     }
 
     [Fact]
@@ -331,7 +373,7 @@ public class DefaultEndpointSwitcherTests
         // Communications: device gone, Windows already chose the headphones -> left alone.
         var record = new DefaultRenderRecord(NoSuchEndpoint, Speakers, NoSuchEndpoint);
         var current = new DefaultRenderRecord(Cable, Cable, Headphones);
-        var plan = DefaultEndpointSwitcher.PlanRestore(record, [Cable, Headphones, Speakers], current, Cable);
+        var plan = DefaultEndpointSwitcher.PlanRestore(record, [Cable, Headphones, Speakers], current, [Cable]);
         Log("mixed roles", plan);
         Assert.True(plan.Complete);
         Assert.Equal(new (AudioEndpoint.ERole, string)[] { (AudioEndpoint.ERole.Console, Headphones), (AudioEndpoint.ERole.Multimedia, Speakers) }, plan.Sets);
@@ -341,8 +383,8 @@ public class DefaultEndpointSwitcherTests
     public void An_empty_endpoint_list_is_never_read_as_every_device_gone()
     {
         // GetRenderEndpoints returns [] when the enumeration itself fails: the record must survive.
-        var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [], OnCable, Cable);
-        var noCable = DefaultEndpointSwitcher.PlanRestore(Recorded, [], Recorded, cableId: null);
+        var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [], OnCable, [Cable]);
+        var noCable = DefaultEndpointSwitcher.PlanRestore(Recorded, [], Recorded, cableIds: []);
         Log("empty enumeration, on the cable", plan);
         Log("empty enumeration, no cable", noCable);
         Assert.False(plan.Complete);
@@ -355,7 +397,7 @@ public class DefaultEndpointSwitcherTests
     public void With_no_cable_left_a_gone_device_is_simply_windows_choice()
     {
         var plan = DefaultEndpointSwitcher.PlanRestore(Recorded, [Headphones],
-            new DefaultRenderRecord(Headphones, Headphones, Headphones), cableId: null);
+            new DefaultRenderRecord(Headphones, Headphones, Headphones), cableIds: []);
         Log("speakers and cable gone", plan);
         Assert.True(plan.Complete);
         Assert.Empty(plan.Sets);

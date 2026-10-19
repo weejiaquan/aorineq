@@ -93,10 +93,12 @@ public static class DefaultEndpointSwitcher
     /// did not move; the caller flags that one notification as its own.</summary>
     public static (bool Complete, string? MovedTo) Restore(DefaultRenderRecord record)
     {
+        // One enumeration for both lists, so the cable set describes the same moment as the rest.
+        var active = AudioEndpoint.GetRenderEndpoints();
         var plan = PlanRestore(record,
-            AudioEndpoint.GetRenderEndpoints().Select(e => e.Id).ToList(),
+            active.Select(e => e.Id).ToList(),
             Capture(),
-            VirtualCable.Find()?.Id);
+            active.Where(VirtualCable.IsCable).Select(e => e.Id).ToList());
         var before = AudioEndpoint.GetDefaultRenderEndpointId();
         bool complete = Apply(plan);
         var after = AudioEndpoint.GetDefaultRenderEndpointId();
@@ -106,23 +108,25 @@ public static class DefaultEndpointSwitcher
     }
 
     /// <summary>What putting <paramref name="record"/> back means, role by role, given the ACTIVE
-    /// render endpoints (in Windows' order), the current default per role and the active cable
-    /// (null when there is none):
+    /// render endpoints (in Windows' order), the current default per role and EVERY active cable
+    /// endpoint (a VB-Cable pack can put more than one on its device, e.g. "CABLE In 16ch"; empty
+    /// when there is none):
     /// <list type="bullet">
     /// <item>the recorded endpoint is active: that role goes back to it;</item>
-    /// <item>it is gone and the role is on something other than the cable: Windows' choice stays;</item>
-    /// <item>it is gone and the role is still on the cable: the first active endpoint that is not
-    /// the cable, so nobody is left playing into a device with no speakers; with no such endpoint
-    /// the plan is incomplete.</item>
+    /// <item>it is gone and the role is on something other than a cable endpoint: Windows' choice
+    /// stays;</item>
+    /// <item>it is gone and the role is still on a cable endpoint: the first active endpoint that is
+    /// none of them, so nobody is left playing into a device with no speakers; with no such
+    /// endpoint the plan is incomplete.</item>
     /// </list>
     /// An empty endpoint list is also what a failed enumeration returns, so it never reads as
     /// "everything is gone": the plan is empty and incomplete, and the record is kept.</summary>
     internal static RestorePlan PlanRestore(DefaultRenderRecord record, IReadOnlyList<string> activeIds,
-        DefaultRenderRecord current, string? cableId)
+        DefaultRenderRecord current, IReadOnlyCollection<string> cableIds)
     {
         if (activeIds.Count == 0)
             return new RestorePlan([], Complete: false);
-        var fallback = activeIds.FirstOrDefault(id => !string.Equals(id, cableId, StringComparison.OrdinalIgnoreCase));
+        var fallback = activeIds.FirstOrDefault(id => !IsCableId(id, cableIds));
         var sets = new List<(AudioEndpoint.ERole, string)>();
         bool complete = true;
         foreach (var (role, recorded, now) in new[]
@@ -134,7 +138,7 @@ public static class DefaultEndpointSwitcher
         {
             if (recorded is not null && activeIds.Contains(recorded, StringComparer.OrdinalIgnoreCase))
                 sets.Add((role, recorded));
-            else if (cableId is not null && string.Equals(now, cableId, StringComparison.OrdinalIgnoreCase))
+            else if (IsCableId(now, cableIds))
             {
                 if (fallback is null) complete = false;
                 else sets.Add((role, fallback));
@@ -214,31 +218,34 @@ public static class DefaultEndpointSwitcher
     /// instance is running, and the save behind it would write defaults over the user's settings.</summary>
     public static bool MayRestore(bool ownsInstance, bool settingsAdopted) => ownsInstance && settingsAdopted;
 
-    /// <summary>Whether a reading of <paramref name="endpointGuid"/> describes VB-Cable while
-    /// AorinEQ's own AirPlay-only switch holds the default there (<paramref name="record"/> set).
+    /// <summary>Whether a reading of <paramref name="endpointGuid"/> describes VB-Cable (any of its
+    /// active endpoints, <paramref name="cableGuids"/>) while AorinEQ's own AirPlay-only switch
+    /// holds the default there (<paramref name="record"/> set).
     /// Such a reading is AorinEQ's doing, not news: the health monitor keeps it from its tracker, so
     /// there is no "Equalizer APO isn't running" balloon on every stream, no automatic-repair prompt
     /// for the cable, and no "working again" balloon when the default comes back.</summary>
-    public static bool IsHeldOnCable(DefaultRenderRecord? record, string? endpointGuid, string? cableGuid) =>
-        record is not null && cableGuid is not null
-        && string.Equals(endpointGuid, cableGuid, StringComparison.OrdinalIgnoreCase);
+    public static bool IsHeldOnCable(DefaultRenderRecord? record, string? endpointGuid,
+        IReadOnlyCollection<string> cableGuids) =>
+        record is not null && IsCableId(endpointGuid, cableGuids);
+
+    /// <summary>Whether <paramref name="id"/> (an endpoint id or GUID) is one of the cable's.</summary>
+    private static bool IsCableId(string? id, IReadOnlyCollection<string> cableIds) =>
+        id is not null && cableIds.Contains(id, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Reads one default-device notification. <paramref name="ownTargetId"/> is the
     /// endpoint AorinEQ's last switch moved to and has not yet seen land; <paramref name="record"/>
-    /// is non-null while AirPlay only is managing the default; <paramref name="cableId"/> is the
-    /// ACTIVE VB-Cable endpoint, null when it is gone.</summary>
+    /// is non-null while AirPlay only is managing the default; <paramref name="cableIds"/> are the
+    /// ACTIVE VB-Cable endpoints (every one on its device), empty when it is gone.</summary>
     public static DefaultChange Classify(string? newDefaultId, string? ownTargetId,
-        DefaultRenderRecord? record, string? cableId)
+        DefaultRenderRecord? record, IReadOnlyCollection<string> cableIds)
     {
         if (ownTargetId is not null && string.Equals(newDefaultId, ownTargetId, StringComparison.OrdinalIgnoreCase))
             return DefaultChange.Ours;
         if (record is null)
             return DefaultChange.Unrelated;
-        if (cableId is null)
+        if (cableIds.Count == 0)
             return DefaultChange.CableLost;
-        return string.Equals(newDefaultId, cableId, StringComparison.OrdinalIgnoreCase)
-            ? DefaultChange.Ours
-            : DefaultChange.UserOverride;
+        return IsCableId(newDefaultId, cableIds) ? DefaultChange.Ours : DefaultChange.UserOverride;
     }
 
     [ComImport, Guid("870AF99C-171D-4F9E-AF0D-E63DF40C2BC9")]

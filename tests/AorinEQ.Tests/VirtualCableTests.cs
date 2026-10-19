@@ -32,6 +32,10 @@ public class VirtualCableTests
 
         var found = VirtualCable.Find();
         _out.WriteLine($"Find() -> {found?.FriendlyName ?? "(none)"} {found?.Id}");
+        var all = VirtualCable.FindAll();
+        _out.WriteLine($"FindAll() -> [{string.Join(", ", all.Select(c => c.FriendlyName))}]");
+        Assert.Equal(endpoints.Where(VirtualCable.IsCable).Select(e => e.Id), all.Select(c => c.Id));
+        Assert.Equal(found?.Id, all.FirstOrDefault()?.Id);
         if (found is null)
             Assert.DoesNotContain(endpoints, VirtualCable.IsCable);
         else

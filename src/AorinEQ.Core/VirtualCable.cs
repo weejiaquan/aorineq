@@ -33,6 +33,11 @@ public static class VirtualCable
     /// <summary>The ACTIVE render endpoint backed by VB-Cable ("CABLE Input"), or null.</summary>
     public static RenderEndpoint? Find() => AudioEndpoint.GetRenderEndpoints().FirstOrDefault(IsCable);
 
+    /// <summary>EVERY active render endpoint on VB-Cable's device: a pack can expose more than one
+    /// (e.g. "CABLE In 16ch" beside "CABLE Input"). For telling whether a default IS the cable;
+    /// the endpoint a stream captures is still <see cref="Find"/>'s.</summary>
+    public static IReadOnlyList<RenderEndpoint> FindAll() => AudioEndpoint.GetRenderEndpoints().Where(IsCable).ToList();
+
     /// <summary>Whether a VB-Cable endpoint exists but is disabled in Sound settings or has its
     /// device disabled — so the page can say "turn it on" instead of offering a reinstall. An
     /// uninstalled cable's leftover not-present endpoints do NOT count: their device node is gone,

@@ -1636,7 +1636,7 @@ public partial class App : System.Windows.Application
     /// only while a record says it could matter.</summary>
     private bool IsAirPlayOnlyCable(string? endpointGuid) =>
         _settings.AirPlayRestoreDefault is { } record
-        && DefaultEndpointSwitcher.IsHeldOnCable(record, endpointGuid, VirtualCable.Find()?.Guid);
+        && DefaultEndpointSwitcher.IsHeldOnCable(record, endpointGuid, VirtualCable.FindAll().Select(c => c.Guid).ToList());
 
     // ---------------------------------------------------------------- the endpoint repair
 
@@ -2527,7 +2527,7 @@ public partial class App : System.Windows.Application
         // the cable vanishing? The cable is only looked up while a record says it matters.
         var change = DefaultEndpointSwitcher.Classify(newDefault, _airPlayOwnSwitchTarget,
             _settings.AirPlayRestoreDefault,
-            _settings.AirPlayRestoreDefault is null ? null : VirtualCable.Find()?.Id);
+            _settings.AirPlayRestoreDefault is null ? [] : VirtualCable.FindAll().Select(c => c.Id).ToList());
         if (change == DefaultChange.Ours) _airPlayOwnSwitchTarget = null;
         _deviceStates.SwitchTo(newDefault);
         RefreshActiveDeviceName();
