@@ -23,10 +23,12 @@ public static class ZipEntryName
     }
 
     /// <summary>The entry's name when it is a bare file name and nothing else — no separator of
-    /// either kind, no "..", no drive, no root — or null. A directory entry ("folder/") is not a
-    /// bare name either.</summary>
+    /// either kind, no "..", no drive, no root, no character Windows refuses in a file name (NUL,
+    /// '|', '?', ...: the output path is built from this name, so the file system must accept it) —
+    /// or null. A directory entry ("folder/") is not a bare name either.</summary>
     public static string? FlatName(string fullName) =>
         !fullName.Contains("..", StringComparison.Ordinal)
+        && fullName.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
         && Segments(fullName) is [var only]
         && only.Length == fullName.Length
             ? only

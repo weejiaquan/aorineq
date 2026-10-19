@@ -29,6 +29,9 @@ public class ZipEntryNameTests
     [InlineData("folder/", null)]
     [InlineData("./x.txt", null)]
     [InlineData("", null)]
+    [InlineData("VBCABLE_Setup_x64.exe\0.txt", null)]
+    [InlineData("setup|x.exe", null)]
+    [InlineData("setup?.exe", null)]
     public void FlatName_accepts_only_a_bare_file_name(string entry, string? expected)
     {
         var actual = ZipEntryName.FlatName(entry);

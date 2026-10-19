@@ -170,6 +170,7 @@ public class VirtualCableInstallerTests
     [InlineData("C:evil.txt")]
     [InlineData("/abs.txt")]
     [InlineData("folder/")]
+    [InlineData("evil\0.txt")]
     public void One_unsafe_entry_aborts_the_whole_extraction_before_anything_is_written(string hostile)
     {
         var work = VirtualCableInstaller.NewWorkFolder();
@@ -207,17 +208,19 @@ public class VirtualCableInstallerTests
         }
     }
 
-    [Fact]
-    public void An_archive_with_an_unsafe_entry_prepares_no_setup()
+    [Theory]
+    [InlineData("..\\evil.txt")]
+    [InlineData("evil\0.txt")] // a name the file system refuses must not surface as an exception
+    public void An_archive_with_an_unsafe_entry_prepares_no_setup(string hostile)
     {
         var work = VirtualCableInstaller.NewWorkFolder();
         var source = VirtualCableInstaller.NewWorkFolder();
         try
         {
-            var zip = ZipWith(source, "VBCABLE_Setup_x64.exe", "..\\evil.txt");
+            var zip = ZipWith(source, "VBCABLE_Setup_x64.exe", hostile);
             using var setup = VirtualCableInstaller.PrepareSetup(zip, work, is64BitOperatingSystem: true);
             var written = Directory.GetFiles(work);
-            _out.WriteLine($"package with '..\\evil.txt' -> {setup?.Name ?? "(null)"}; files written: {written.Length}");
+            _out.WriteLine($"package with '{hostile.Replace("\0", "\\0")}' -> {setup?.Name ?? "(null)"}; files written: {written.Length}");
             Assert.Null(setup);
             Assert.Empty(written);
         }
@@ -297,29 +300,6 @@ public class VirtualCableInstallerTests
         Assert.Null(setup);
     }
 
-    [Fact]
-    public void A_setup_someone_else_holds_open_for_writing_is_not_trusted()
-    {
-        // The guarantee is "the bytes verified are the bytes run". A file another handle can still
-        // write cannot be given that guarantee, so it is refused rather than verified.
-        var work = VirtualCableInstaller.NewWorkFolder();
-        try
-        {
-            var copy = Path.Combine(work, "held.exe");
-            File.Copy(CoreLib, copy);
-            using (var writer = new FileStream(copy, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
-            {
-                using var setup = VirtualCableInstaller.OpenTrustedSetup(copy);
-                _out.WriteLine($"held for writing elsewhere -> {setup?.Name ?? "(not trusted)"}");
-                Assert.Null(setup);
-            }
-        }
-        finally
-        {
-            VirtualCableInstaller.DeleteWorkFolder(work);
-        }
-    }
-
     // ---------------------------------------------------------------- the real package
 
     [Fact]
@@ -352,11 +332,22 @@ public class VirtualCableInstallerTests
                 bytes = File.ReadAllBytes(setup64.Name);
             }
 
-            using (var setup32 = VirtualCableInstaller.OpenTrustedSetup(
-                Path.Combine(work, VirtualCableInstaller.SetupFileName(false))))
+            // The guarantee is "the bytes verified are the bytes run". A genuine VB-Audio setup that
+            // another handle can still write cannot be given it, so it is refused — and the same
+            // file is trusted the moment that handle is gone.
+            var path32 = Path.Combine(work, VirtualCableInstaller.SetupFileName(false));
+            using (var writer = new FileStream(path32, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+            using (var held = VirtualCableInstaller.OpenTrustedSetup(path32))
             {
-                _out.WriteLine($"x86 setup -> {setup32?.Name ?? "(not trusted)"}");
+                _out.WriteLine($"x86 setup while another handle can write it -> {held?.Name ?? "(not trusted)"}");
+                Assert.Null(held);
+            }
+            using (var setup32 = VirtualCableInstaller.OpenTrustedSetup(path32))
+            {
+                var cn32 = setup32 is null ? null : Authenticode.VerifiedSignerCommonName(setup32);
+                _out.WriteLine($"x86 setup after the writer closed -> {setup32?.Name ?? "(not trusted)"}; verified signer '{cn32}'");
                 Assert.NotNull(setup32);
+                Assert.Equal("BUREL VINCENT Entrepreneur individuel", cn32);
             }
 
             var tampered = Path.Combine(work, "tampered.exe");
