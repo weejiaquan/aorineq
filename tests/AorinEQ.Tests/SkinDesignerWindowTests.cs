@@ -1488,7 +1488,7 @@ public class SkinDesignerWindowTests : IDisposable
     }
 
     /// <summary>A clicked toolbar or zoom button does not keep the keyboard: the canvas keeps it, so
-    /// Space held for a pan is not a second click of the button, and the arrows still nudge.</summary>
+    /// Space held for a pan is not a second click of the button, and the canvas still takes its keys.</summary>
     [Fact]
     public void Clicked_buttons_leave_the_keyboard_with_the_canvas()
     {
@@ -1506,23 +1506,24 @@ public class SkinDesignerWindowTests : IDisposable
             bool buttonTookFocus = d.ZoomInButton.Focus();
             var after = (OnButton: d.ZoomInButton.IsKeyboardFocused, OnCanvas: d.Overlay.IsKeyboardFocused,
                 Target: d.TargetOf(Keyboard.FocusedElement));
-            bool nudgeTaken = Press(d.Overlay, Key.Right);
-            int x = d.Document.Config.Text!.X;
+            // The canvas still gets the keys: Esc, whose effect (deselect) no Shift or Alt changes.
+            bool keyTaken = Press(d.Overlay, Key.Escape);
+            var selection = d.Selection;
             d.UpdateLayout();
             bool panned = d.BeginPan(MouseButton.Left, spaceHeld: true, new Point(100, 100));
             d.CanvasScroll.ReleaseMouseCapture();
-            return (focusable, focused, zoomed, buttonTookFocus, after, nudgeTaken, x, panned);
+            return (focusable, focused, zoomed, buttonTookFocus, after, keyTaken, selection, panned);
         });
-        _out.WriteLine($"expected no focusable buttons, the canvas focused before and after the click, zoom 1.5, nudge to 11, a pan; actual " +
+        _out.WriteLine($"expected no focusable buttons, the canvas focused before and after the click, zoom 1.5, Esc on the canvas deselects, a pan; actual " +
                        $"focusable [{string.Join(", ", r.focusable)}], {r.focused}, {r.zoomed}, button took focus {r.buttonTookFocus}, " +
-                       $"{r.after}, nudge taken {r.nudgeTaken}, x {r.x}, panned {r.panned}");
+                       $"{r.after}, Esc taken {r.keyTaken}, selection {r.selection}, panned {r.panned}");
         Assert.Empty(r.focusable);
         Assert.True(r.focused, "the test window could not take the keyboard focus (see output)");
         Assert.Equal(1.5, r.zoomed);
         Assert.False(r.buttonTookFocus);
         Assert.Equal((false, true, SkinDesignerWindow.KeyboardTarget.Canvas), r.after);
-        Assert.True(r.nudgeTaken);
-        Assert.Equal(11, r.x);
+        Assert.True(r.keyTaken);
+        Assert.Equal(SkinLayer.SkinInfo, r.selection);
         Assert.True(r.panned);
     }
 
@@ -1555,8 +1556,12 @@ public class SkinDesignerWindowTests : IDisposable
 
     /// <summary>Keys through the real window: a number box's Up steps the box and not the canvas,
     /// Esc during a scrub cancels the scrub (the selection stays), a text box keeps its arrows and
-    /// Esc, and an arrow with the canvas focused nudges. (Ctrl+Z in a text box cannot be raised
-    /// here: modifiers are read from the real keyboard, which a raised event cannot hold down.)</summary>
+    /// Esc, and Esc with the canvas focused deselects. Raised key events carry the REAL keyboard's
+    /// modifiers, so nothing here asserts a modifier-dependent amount: the field's step is checked
+    /// as "it stepped" (1, or 10 with Shift held, are both routing to the field), the scrub and the
+    /// Esc revert are relative to that, and the canvas is checked with Esc, which no modifier but
+    /// Ctrl changes. Shift steps and nudges are covered with explicit modifiers by the HandleKey and
+    /// HandleShortcut tests.</summary>
     [Fact]
     public void Keys_reach_the_field_that_has_them_and_the_canvas_otherwise()
     {
@@ -1582,22 +1587,24 @@ public class SkinDesignerWindowTests : IDisposable
             Press(d.PreviewDevice, Key.Escape);
             var inText = (X: d.Document.Config.Text!.X, d.Selection, d.History.CanUndo);
             bool canvasFocused = TakeKeyboardFocus(d, d.Overlay);
-            bool rightTaken = Press(d.Overlay, Key.Right);
+            bool escOnCanvas = Press(d.Overlay, Key.Escape);
             return (boxFocused, upTaken, afterUp, labelFocused, scrubbing, scrubbed, escTaken, afterEsc,
-                textFocused, inText, canvasFocused, rightTaken, NudgedX: d.Document.Config.Text!.X);
+                textFocused, inText, canvasFocused, escOnCanvas, Deselected: d.Selection);
         });
-        _out.WriteLine($"expected box focused, Up taken, box/Y 6 with x 10; label focused, scrub to 16, Esc taken, back to 6 with " +
-                       $"PercentText still selected; in a text box Left and Esc are the box's (x 10, PercentText); canvas focused, Right nudges x to 11; actual {r}");
+        _out.WriteLine($"expected box focused, Up taken, Y stepped up from 5 with the box showing it and x still 10; label focused, " +
+                       $"scrub 10 steps past that, Esc taken, back to the stepped Y with PercentText still selected; in a text box Left " +
+                       $"and Esc are the box's (x 10, PercentText); canvas focused, Esc taken and SkinInfo selected; actual {r}");
         Assert.True(r.boxFocused && r.labelFocused && r.textFocused && r.canvasFocused, "the test window could not take the keyboard focus (see output)");
         Assert.True(r.upTaken);
-        Assert.Equal(("6", 6, 10), r.afterUp);      // the field stepped; the canvas did not nudge the text
+        Assert.True(r.afterUp.Y > 5, "Up in the box did not step the field");    // 6, or 15 with Shift held: both the field's
+        Assert.Equal((r.afterUp.Y.ToString(System.Globalization.CultureInfo.CurrentCulture), 10), (r.afterUp.Box, r.afterUp.X)); // the canvas did not nudge the text
         Assert.True(r.scrubbing);
-        Assert.Equal(16, r.scrubbed);
+        Assert.Equal(r.afterUp.Y + 10, r.scrubbed);
         Assert.True(r.escTaken);
-        Assert.Equal((6, SkinLayer.PercentText, false), r.afterEsc);
+        Assert.Equal((r.afterUp.Y, SkinLayer.PercentText, false), r.afterEsc);
         Assert.Equal((10, SkinLayer.PercentText), (r.inText.X, r.inText.Selection));
-        Assert.True(r.rightTaken);
-        Assert.Equal(11, r.NudgedX);
+        Assert.True(r.escOnCanvas);
+        Assert.Equal(SkinLayer.SkinInfo, r.Deselected);
     }
 
     /// <summary>The picker's eyedropper samples the canvas into the field the picker is open on,
