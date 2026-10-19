@@ -1,5 +1,6 @@
 ﻿using AorinEQ.Core;
 using Xunit.Abstractions;
+using System.Text;
 
 namespace AorinEQ.Tests;
 
@@ -233,48 +234,103 @@ public class SkinAirPlayTests : IDisposable
         Assert.Equal(300, skin.Width);
     }
 
-    /// <summary>Saving a skin in the designer must not quietly delete its AirPlay bar.
-    ///
-    /// SkinWriter rewrites skin.json wholesale from a SkinConfig, and the designer does not know
-    /// about the airplay block. The artwork files would survive that - they are never deleted -
-    /// so the bar would still LOAD, but stripped of its fill range, its text anchors and its hit
-    /// region, and the author would have no idea which save did it. Preserving what the writer
-    /// does not understand is the only honest option while the designer cannot edit it.</summary>
+    /// <summary>Every field of the strip the writer can author, at a non-default value, read back
+    /// by the real loader. The designer edits the strip now, so the writer writes it from the
+    /// config rather than copying whatever block happened to be on disk.</summary>
     [Fact]
-    public void Resaving_a_skin_preserves_an_airplay_block_the_designer_cannot_edit()
+    public void Saving_writes_every_airplay_field_and_loading_reads_it_back()
     {
-        var json = """
+        var source = MakeSkin("source", airPlayArt: true, airPlayWidth: 300, airPlayHeight: 80);
+        var strip = new SkinAirPlay(
+            Path.Combine(source, "airplay-empty.png"), Path.Combine(source, "airplay-full.png"),
+            300, 40, false, false, 2, 2, 8, 292,
+            new SkinText(true, 30, 6, Color: "#FF102030", FontSize: 12),
+            new SkinText(true, 290, 6, Align: "right", OutlineColor: "#FF000000", OutlineWidth: 2,
+                ShadowColor: "#80000000"),
+            new SkinHitRect(260, 4, 30, 30), new SkinHitRect(226, 4, 30, 30), "#FF4CC2FF");
+
+        var folder = SkinWriter.Save(_dir, "authored",
+            Path.Combine(source, "empty.png"), Path.Combine(source, "full.png"),
+            new SkinConfig(null, 1.0, AirPlay: strip));
+        var loaded = SkinLoader.Load(folder);
+        var expected = strip with
         {
-          "percentText": { "show": true, "x": 5, "y": 6 },
-          "airplay": {
-            "fillStartX": 8,
-            "fillEndX": 292,
-            "nameText": { "show": true, "x": 30, "y": 6 },
-            "dropdownHit": { "x": 260, "y": 4, "w": 30, "h": 30 }
-          }
-        }
-        """;
-        var folder = MakeSkin("resaved", airPlayArt: true, airPlayJson: json);
+            EmptyPath = Path.Combine(folder, "airplay-empty.png"),
+            FullPath = Path.Combine(folder, "airplay-full.png"),
+        };
 
-        var before = SkinLoader.Load(folder);
-        Assert.NotNull(before.AirPlay);
+        _out.WriteLine("skin.json: " + File.ReadAllText(Path.Combine(folder, "skin.json")));
+        _out.WriteLine($"expected {expected}");
+        _out.WriteLine($"loaded   {loaded.AirPlay?.ToString() ?? "(none)"} error={loaded.AirPlayError ?? "(none)"}");
+        Assert.Equal(expected, loaded.AirPlay);
+    }
 
-        // What the designer does: same folder, same layers, its own idea of the config.
-        SkinWriter.Save(_dir, "resaved",
+    /// <summary>A strip whose fields are all at the loader's defaults is declared by its art alone,
+    /// exactly as the loader reads it, so the writer adds no "airplay" key: a skin.json that is
+    /// there for other reasons gains nothing, and the strip loads back as the same strip.</summary>
+    [Fact]
+    public void An_art_only_strip_writes_no_airplay_block_and_loads_back_the_same()
+    {
+        var folder = MakeSkin("art-only", airPlayArt: true, airPlayJson: """{"percentText":{"show":true,"x":5,"y":6}}""");
+        var loaded = SkinLoader.Load(folder);
+        Assert.NotNull(loaded.AirPlay);
+
+        SkinWriter.Save(_dir, "art-only", loaded.EmptyPath, loaded.FullPath,
+            new SkinConfig(loaded.Text, 1.0, AirPlay: loaded.AirPlay));
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        var reloaded = SkinLoader.Load(folder);
+
+        _out.WriteLine("skin.json: " + json);
+        _out.WriteLine($"expected {loaded.AirPlay}");
+        _out.WriteLine($"actual   {reloaded.AirPlay?.ToString() ?? "(none)"} error={reloaded.AirPlayError ?? "(none)"}");
+        Assert.DoesNotContain("airplay", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(loaded.AirPlay, reloaded.AirPlay);
+        Assert.Equal(2, Directory.GetFiles(folder, "airplay-*").Length);
+    }
+
+    /// <summary>An art-only strip on a skin with every other field at its default is the skin the
+    /// writer has always written without a skin.json: none is created, the art stays, and a
+    /// skin.json the writer wrote earlier for such a skin is gone exactly as it always was.</summary>
+    [Fact]
+    public void An_art_only_strip_on_an_all_default_skin_writes_no_skin_json()
+    {
+        var folder = MakeSkin("art-only-plain", airPlayArt: true);
+        var loaded = SkinLoader.Load(folder);
+        Assert.NotNull(loaded.AirPlay);
+
+        SkinWriter.Save(_dir, "art-only-plain", loaded.EmptyPath, loaded.FullPath,
+            new SkinConfig(null, 1.0, AirPlay: loaded.AirPlay));
+        var reloaded = SkinLoader.Load(folder);
+
+        _out.WriteLine($"skin.json exists: {File.Exists(Path.Combine(folder, "skin.json"))}; " +
+                       $"airplay files: [{string.Join(", ", Directory.GetFiles(folder, "airplay-*").Select(Path.GetFileName))}]");
+        _out.WriteLine($"expected {loaded.AirPlay}");
+        _out.WriteLine($"actual   {reloaded.AirPlay?.ToString() ?? "(none)"} error={reloaded.AirPlayError ?? "(none)"}");
+        Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.Equal(loaded.AirPlay, reloaded.AirPlay);
+        Assert.Equal(2, Directory.GetFiles(folder, "airplay-*").Length);
+    }
+
+    /// <summary>No strip in the config is no strip on disk: the block AND both layers go, in both
+    /// extensions, so a removed strip cannot come back on the next load.</summary>
+    [Fact]
+    public void A_config_without_a_strip_removes_its_files_and_block()
+    {
+        var folder = MakeSkin("had-strip", airPlayArt: true, airPlayJson: """{"airplay":{"fillStartX":8}}""");
+        TestPngs.WriteGif(Path.Combine(folder, "airplay-full.gif"), 300, 40);
+
+        SkinWriter.Save(_dir, "had-strip",
             Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
-            new SkinConfig(new SkinText(true, 5, 6), Scale: 1.0));
+            new SkinConfig(null, 1.0));
+        var left = Directory.GetFiles(folder, "airplay-*");
+        var loaded = SkinLoader.Load(folder);
 
-        var after = SkinLoader.Load(folder);
-
-        _out.WriteLine("skin.json after resave:");
-        _out.WriteLine(File.ReadAllText(Path.Combine(folder, "skin.json")));
-
-        Assert.NotNull(after.AirPlay);
-        Assert.Equal(8, after.AirPlay!.FillStartX);
-        Assert.Equal(292, after.AirPlay.FillEndX);
-        Assert.Equal(30, after.AirPlay.Name!.X);
-        Assert.Equal(260, after.AirPlay.DropdownHit.X);
-        Assert.Equal(30, after.AirPlay.DropdownHit.Width);
+        _out.WriteLine($"left behind: [{string.Join(", ", left.Select(Path.GetFileName))}]; skin.json exists: " +
+                       File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.Empty(left);
+        Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.Null(loaded.AirPlay);
+        Assert.Null(loaded.AirPlayError);
     }
 
     /// <summary>And a skin that never had one still resaves without growing an empty block - the
@@ -294,75 +350,39 @@ public class SkinAirPlayTests : IDisposable
         Assert.DoesNotContain("airplay", text, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Saving a skin under a NEW name must carry its AirPlay bar with it.
-    ///
-    /// The writer preserved the airplay block from the DESTINATION folder, which is right for an
-    /// in-place save and wrong for every other kind: a save-as landed in an empty folder, found no
-    /// block to keep, and produced a copy with the artwork but none of the geometry - and a plain
-    /// skin saved OVER an existing AirPlay skin inherited that skin's block, hybridising the two.
-    /// The source is the only folder that can answer "what is this skin".</summary>
+    /// <summary>The loss the carry-through documented and could not fix: a save-as whose volume art
+    /// was swapped for loose files first. No folder knew what the strip was then; the config does
+    /// now, so the copy keeps every field and both layers.</summary>
     [Fact]
-    public void Saving_a_skin_under_a_new_name_carries_its_airplay_bar()
+    public void Saving_under_a_new_name_with_loose_volume_art_keeps_the_strip()
     {
         var json = """
-        {
-          "airplay": { "fillStartX": 8, "fillEndX": 292,
-                       "dropdownHit": { "x": 260, "y": 4, "w": 30, "h": 30 } }
-        }
+        { "airplay": { "fillStartX": 8, "fillEndX": 292,
+                       "nameText": { "show": true, "x": 30, "y": 6 },
+                       "dropdownHit": { "x": 260, "y": 4, "w": 30, "h": 30 } } }
         """;
-        var source = MakeSkin("original", airPlayArt: true, airPlayJson: json);
-
-        SkinWriter.Save(_dir, "copied",
-            Path.Combine(source, "empty.png"), Path.Combine(source, "full.png"),
-            new SkinConfig(null, Scale: 1.0));
-
-        var copy = SkinLoader.Load(Path.Combine(_dir, "copied"));
-
-        _out.WriteLine($"copy valid={copy.IsValid} airplay={(copy.AirPlay is null ? "(none)" : "present")}");
-        _out.WriteLine($"airplayError={copy.AirPlayError ?? "(none)"}");
-
-        Assert.True(copy.IsValid, copy.Error);
-        Assert.NotNull(copy.AirPlay);
-        Assert.Equal(8, copy.AirPlay!.FillStartX);
-        Assert.Equal(260, copy.AirPlay.DropdownHit.X);
-    }
-
-    /// <summary>Which folder describes the skin being saved.
-    ///
-    /// The designer lets you swap in loose PNGs from anywhere and then save, so the source folder
-    /// is often not a skin at all. When it is not, the DESTINATION is the only folder that knows
-    /// what this skin is, and its block is kept - that is an in-place edit with new artwork, which
-    /// is the commonest thing the designer does. When the source IS a skin, it wins, because that
-    /// is a save-as and the block belongs to the skin being copied.
-    ///
-    /// Both halves matter: preferring the destination always loses the bar on save-as, and
-    /// preferring the source always loses it on an in-place edit with swapped art.</summary>
-    [Fact]
-    public void An_in_place_save_with_loose_artwork_keeps_the_skins_own_block()
-    {
-        var json = """{ "airplay": { "fillStartX": 8, "fillEndX": 292 } }""";
-        MakeSkin("target", airPlayArt: true, airPlayJson: json);
-
-        // Loose files from somewhere that is not a skin folder - what "Choose empty.png..." gives.
+        var original = SkinLoader.Load(MakeSkin("original", airPlayArt: true, airPlayJson: json));
         var loose = MakeSkin("loose-art");
 
-        SkinWriter.Save(_dir, "target",
+        var copyFolder = SkinWriter.Save(_dir, "copied",
             Path.Combine(loose, "empty.png"), Path.Combine(loose, "full.png"),
-            new SkinConfig(null, Scale: 1.0));
+            new SkinConfig(null, 1.0, AirPlay: original.AirPlay));
+        var copy = SkinLoader.Load(copyFolder);
+        var expected = original.AirPlay! with
+        {
+            EmptyPath = Path.Combine(copyFolder, "airplay-empty.png"),
+            FullPath = Path.Combine(copyFolder, "airplay-full.png"),
+        };
 
-        var reloaded = SkinLoader.Load(Path.Combine(_dir, "target"));
-        _out.WriteLine($"reloaded airplay = " +
-                       (reloaded.AirPlay is null ? "(none)" : $"{reloaded.AirPlay.FillStartX}..{reloaded.AirPlay.FillEndX}"));
-
-        Assert.True(reloaded.IsValid, reloaded.Error);
-        Assert.NotNull(reloaded.AirPlay);
-        Assert.Equal(8, reloaded.AirPlay!.FillStartX);
-        Assert.Equal(292, reloaded.AirPlay.FillEndX);
+        _out.WriteLine($"original {original.AirPlay}");
+        _out.WriteLine($"copy     {copy.AirPlay?.ToString() ?? "(none)"} error={copy.AirPlayError ?? "(none)"}");
+        Assert.True(copy.IsValid, copy.Error);
+        Assert.Equal(expected, copy.AirPlay);
     }
 
-    /// <summary>Saving a GIF-backed strip over a folder that still holds the PNG one must remove
-    /// the PNG. The loader prefers .png, so leaving it would keep the OLD artwork winning and the
-    /// save would appear to have done nothing at all.</summary>
+    /// <summary>Saving a GIF strip over a folder that still holds the PNG one must remove the PNG.
+    /// The loader prefers .png, so leaving it would keep the OLD artwork winning and the save would
+    /// appear to have done nothing at all.</summary>
     [Fact]
     public void Replacing_a_png_strip_with_a_gif_one_removes_the_stale_png()
     {
@@ -370,17 +390,22 @@ public class SkinAirPlayTests : IDisposable
         var source = MakeSkin("gif-source");
         TestPngs.WriteGif(Path.Combine(source, "airplay-empty.gif"), 300, 32);
         TestPngs.WriteGif(Path.Combine(source, "airplay-full.gif"), 300, 32);
+        var strip = new SkinAirPlay(
+            Path.Combine(source, "airplay-empty.gif"), Path.Combine(source, "airplay-full.gif"),
+            300, 32, true, true, 1, 1, 0, 300, null, null, new SkinHitRect(0, 0, 300, 32));
 
         SkinWriter.Save(_dir, "gif-target",
             Path.Combine(source, "empty.png"), Path.Combine(source, "full.png"),
-            new SkinConfig(null, Scale: 1.0));
+            new SkinConfig(null, 1.0, AirPlay: strip));
 
         bool png = File.Exists(Path.Combine(target, "airplay-empty.png"));
         bool gif = File.Exists(Path.Combine(target, "airplay-empty.gif"));
-        _out.WriteLine($"after save: airplay-empty.png={png} airplay-empty.gif={gif}");
+        var loaded = SkinLoader.Load(target).AirPlay;
+        _out.WriteLine($"after save: airplay-empty.png={png} airplay-empty.gif={gif} loaded={loaded}");
 
         Assert.False(png, "the stale PNG survived, so the loader would keep showing it");
         Assert.True(gif);
+        Assert.True(loaded is { EmptyIsGif: true, FullIsGif: true });
     }
 
     // ---- the optional power button ----------------------------------------------------
@@ -488,5 +513,65 @@ public class SkinAirPlayTests : IDisposable
 
         Assert.True(skin.IsValid);
         Assert.Null(skin.AirPlay.ConnectHit);
+    }
+
+    /// <summary>A pre-AirPlay skin resaved gains neither a block nor files, and its second save
+    /// writes the same bytes as its first.</summary>
+    [Fact]
+    public void A_legacy_skin_gains_no_strip_files_on_resave()
+    {
+        var folder = MakeSkin("legacy", airPlayJson: """{"percentText":{"show":true,"x":5,"y":6}}""");
+        SkinWriter.Save(_dir, "legacy", Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
+            new SkinConfig(new SkinText(true, 5, 6), 1.0));
+        var once = File.ReadAllBytes(Path.Combine(folder, "skin.json"));
+        SkinWriter.Save(_dir, "legacy", Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
+            new SkinConfig(new SkinText(true, 5, 6), 1.0));
+        var twice = File.ReadAllBytes(Path.Combine(folder, "skin.json"));
+
+        _out.WriteLine($"first save : {Encoding.UTF8.GetString(once)}");
+        _out.WriteLine($"second save: {Encoding.UTF8.GetString(twice)}");
+        Assert.Empty(Directory.GetFiles(folder, "airplay-*"));
+        Assert.Equal(once, twice);
+        Assert.DoesNotContain("airplay", Encoding.UTF8.GetString(once), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Every shipped skin, loaded and saved in place, is the same skin; and the file that
+    /// save wrote resaves to the same bytes. The FIRST save re-serializes the shipped,
+    /// hand-indented skin.json compactly - as it always has - so byte identity is pinned from the
+    /// writer's own output, and sameness of the skin from the shipped one.</summary>
+    [Fact]
+    public void Every_shipped_skin_resaves_to_the_same_skin_and_then_byte_identically()
+    {
+        var root = Path.Combine(_dir, "shipped");
+        DefaultSkins.EnsureInstalled(root);
+
+        foreach (var style in SkinArt.All)
+        {
+            var folder = Path.Combine(root, style);
+            var original = SkinLoader.Load(folder);
+            Assert.True(original.IsValid, original.Error);
+            Assert.NotNull(original.AirPlay);
+
+            SaveInPlace(root, original);
+            var resaved = SkinLoader.Load(folder);
+            var first = File.ReadAllBytes(Path.Combine(folder, "skin.json"));
+            SaveInPlace(root, resaved);
+            var second = File.ReadAllBytes(Path.Combine(folder, "skin.json"));
+
+            _out.WriteLine($"{style}: {Encoding.UTF8.GetString(first)}");
+            Assert.Equal(original, resaved);
+            Assert.Equal(first, second);
+        }
+    }
+
+    private static void SaveInPlace(string root, SkinInfo info) =>
+        SkinWriter.Save(root, info.Name, info.EmptyPath, info.FullPath, ConfigOf(info), info.MutedPath);
+
+    private static SkinConfig ConfigOf(SkinInfo i)
+    {
+        bool whole = i.FillStartX == 0 && i.FillEndX == i.Width;
+        return new SkinConfig(i.Text, i.Scale, i.Fps, i.EmptyFrames, i.FullFrames,
+            whole ? null : i.FillStartX, whole ? null : i.FillEndX,
+            i.MutedFrames, i.MutedDim, i.Meta, i.Notice, i.AirPlay);
     }
 }

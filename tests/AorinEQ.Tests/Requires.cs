@@ -57,4 +57,12 @@ public static class Requires
     /// A non-elevated run cannot, and raising a UAC prompt from inside the suite would hang it
     /// unattended; so the test fails up front saying so, like every other trait here.</summary>
     public const string Administrator = "Administrator";
+
+    /// <summary>An interactive desktop that lets the test's window be activated and take the real
+    /// keyboard focus, and whose real keyboard has no modifier held. Keyboard focus only lands in
+    /// the foreground window, so in a service session (a CI runner, a locked or remote-minimised
+    /// desktop) Activate and Keyboard.Focus are refused and these tests would assert on a focus
+    /// change that never happened. Raised key events carry the real keyboard's modifiers, so the
+    /// routing tests also need nobody holding Ctrl or Shift at the machine.</summary>
+    public const string InteractiveDesktop = "InteractiveDesktop";
 }

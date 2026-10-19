@@ -5,7 +5,6 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using AorinEQ.Core;
 
-using ColorConverter = System.Windows.Media.ColorConverter;
 // WPF and WinForms are both referenced by this project, so the names below are
 // ambiguous without an explicit alias. Every one of these is the WPF type.
 using Color = System.Windows.Media.Color;
@@ -201,16 +200,8 @@ internal sealed class HudSpectrumView : Canvas, IHudWidgetView
         _lastGeneration++;
     }
 
-    internal static Color ParseColor(string? value, Color fallback)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return fallback;
-        try
-        {
-            return ColorConverter.ConvertFromString(value) is Color c ? c : fallback;
-        }
-        catch (FormatException) { return fallback; }
-        catch (NotSupportedException) { return fallback; }
-    }
+    internal static Color ParseColor(string? value, Color fallback) =>
+        SkinColor.Parse(value) is { } c ? PercentTextRenderer.ToMedia(c) : fallback;
 }
 
 /// <summary>Per-channel peak + RMS in dBFS with a latching clip indicator and a clipped count.

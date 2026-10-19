@@ -19,8 +19,6 @@ using Border = System.Windows.Controls.Border;
 // VerticalAlignment are PROPERTIES - so the bare enum names resolve to those instead.
 using HAlign = System.Windows.HorizontalAlignment;
 using VAlign = System.Windows.VerticalAlignment;
-using Size = System.Windows.Size;
-using ColorConverter = System.Windows.Media.ColorConverter;
 
 namespace AorinEQ.UI;
 
@@ -83,8 +81,17 @@ public sealed class AirPlayBarView : UserControl
     private readonly Image _emptyImage = new() { Stretch = Stretch.Fill, SnapsToDevicePixels = true };
     private readonly Image _fullImage = new() { Stretch = Stretch.Fill, SnapsToDevicePixels = true };
     private readonly RectangleGeometry _fillClip = new();
-    private readonly TextBlock _skinName = new();
-    private readonly TextBlock _skinPercent = new();
+    // The labels are glyph geometry drawn by PercentTextRenderer, exactly like the volume bar's
+    // number, so the outline and shadow a skin declares for them are drawn too.
+    private readonly System.Windows.Shapes.Path _skinName = new();
+    private readonly System.Windows.Shapes.Path _skinPercent = new();
+
+    /// <summary>What the skinned layers were decoded from; SetSkin decodes again only when this
+    /// changes, because the designer calls it on every edit.</summary>
+    private readonly record struct ArtKey(string EmptyPath, int EmptyFrames, DateTime EmptyWritten,
+        string FullPath, int FullFrames, DateTime FullWritten);
+
+    private ArtKey? _decoded;
 
     /// <summary>The power button over a SKIN's artwork. Drawn by the app rather than by the skin
     /// for the same reason the name and the level are: it changes with the session, and a PNG
@@ -127,6 +134,10 @@ public sealed class AirPlayBarView : UserControl
     /// second copy, so there is one answer to "what is on screen".</summary>
     public AirPlayBarState State => _state;
 
+    internal System.Windows.Shapes.Path SkinNameText => _skinName;
+    internal System.Windows.Shapes.Path SkinLevelText => _skinPercent;
+    internal ImageSource? EmptyArt => _emptyImage.Source;
+
     /// <summary>Switches between the skinned and native looks. Null means native, which is both
     /// the fallback for a skin with no AirPlay artwork and the only option for the Fluent,
     /// dark-pill and minimal OSD styles.</summary>
@@ -141,13 +152,25 @@ public sealed class AirPlayBarView : UserControl
             // as it does there. Only the first frame is shown: an animated AirPlay strip is not
             // something anybody has asked for, and holding a second animation timer open for a
             // transient OSD would cost more than it is worth.
-            _emptyImage.Source = SkinFrames.Load(skin.EmptyPath, skin.EmptyFrames, 10).Frames[0];
-            _fullImage.Source = SkinFrames.Load(skin.FullPath, skin.FullFrames, 10).Frames[0];
+            var key = new ArtKey(skin.EmptyPath, skin.EmptyFrames, System.IO.File.GetLastWriteTimeUtc(skin.EmptyPath),
+                skin.FullPath, skin.FullFrames, System.IO.File.GetLastWriteTimeUtc(skin.FullPath));
+            if (_decoded != key)
+            {
+                var empty = SkinFrames.Load(skin.EmptyPath, skin.EmptyFrames, 10).Frames[0];
+                var full = SkinFrames.Load(skin.FullPath, skin.FullFrames, 10).Frames[0];
+                _emptyImage.Source = empty;
+                _fullImage.Source = full;
+                _decoded = key;
+            }
             Width = skin.Width * _scale;
             Height = skin.Height * _scale;
         }
         else
         {
+            // Let the skin's bitmaps go: a native strip has no use for them.
+            _decoded = null;
+            _emptyImage.Source = null;
+            _fullImage.Source = null;
             Height = NativeHeight;
             Width = double.NaN;   // the host decides the width of a native strip
         }
@@ -264,14 +287,13 @@ public sealed class AirPlayBarView : UserControl
 
     private void RenderSkinned(SkinAirPlay skin)
     {
-        double w = skin.Width * _scale;
         double h = skin.Height * _scale;
 
         double fill = SkinMath.FillWidth(skin.Width, _state.VolumePercent, skin.FillStartX, skin.FillEndX) * _scale;
         _fillClip.Rect = new Rect(0, 0, fill, h);
 
-        ApplySkinText(_skinName, skin.Name, DisplayName, w);
-        ApplySkinText(_skinPercent, skin.Percent, _state.VolumePercent.ToString(), w);
+        ApplySkinText(_skinName, skin.Name, DisplayName);
+        ApplySkinText(_skinPercent, skin.Percent, _state.VolumePercent.ToString());
         ApplySkinPower(skin);
     }
 
@@ -298,9 +320,8 @@ public sealed class AirPlayBarView : UserControl
         _skinPower.Height = hit.Height * _scale;
 
         bool live = _state.Power == AirPlayPower.Disconnect;
-        _skinPower.Foreground = live
-            ? ParseBrush(skin.ConnectColor ?? skin.Name?.Color)
-            : ParseBrush(skin.Name?.Color);
+        _skinPower.Foreground = PercentTextRenderer.Brush(live ? skin.ConnectColor ?? skin.Name?.Color : skin.Name?.Color)
+            ?? Brushes.White;
         _skinPower.Opacity = live ? 1.0 : PowerDimOpacity;
 
         // Centred vertically inside its own box: the glyph's line box is taller than its ink, so
@@ -309,7 +330,10 @@ public sealed class AirPlayBarView : UserControl
         _skinPower.Margin = new Thickness(hit.X * _scale, Math.Max(0, top), 0, 0);
     }
 
-    private void ApplySkinText(TextBlock block, SkinText? spec, string value, double width)
+    /// <summary>One label, drawn by <see cref="PercentTextRenderer"/> so it gets the skin's font,
+    /// outline and shadow exactly as the volume bar's number does, placed by its anchor under its
+    /// alignment.</summary>
+    private void ApplySkinText(System.Windows.Shapes.Path block, SkinText? spec, string value)
     {
         if (spec is not { Show: true })
         {
@@ -318,20 +342,8 @@ public sealed class AirPlayBarView : UserControl
         }
 
         block.Visibility = Visibility.Visible;
-        block.Text = value;
-        block.FontFamily = new FontFamily(spec.FontFamily);
-        block.FontSize = spec.FontSize * _scale;
-        block.FontWeight = spec.Bold ? FontWeights.Bold : FontWeights.Normal;
-        block.Foreground = ParseBrush(spec.Color);
-
-        // Zeroed BEFORE measuring. DesiredSize INCLUDES the margin, so measuring with the
-        // previous placement still applied feeds the offset back into itself - the right-aligned
-        // level walked further left on every render until it fell off the front of the bar.
-        block.Margin = new Thickness(0);
-        block.Measure(new Size(width, double.PositiveInfinity));
-        block.Margin = new Thickness(
-            SkinMath.AlignedTextX(spec.X * _scale, block.DesiredSize.Width, spec.Align),
-            spec.Y * _scale, 0, 0);
+        double width = PercentTextRenderer.Update(block, spec, value, _scale, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        block.Margin = new Thickness(SkinMath.AlignedTextX(spec.X * _scale, width, spec.Align), spec.Y * _scale, 0, 0);
     }
 
     private void RenderNative()
@@ -359,7 +371,7 @@ public sealed class AirPlayBarView : UserControl
 
     /// <summary>What the bar calls the receiver. A chosen device shows its name; nothing chosen
     /// says so, because an empty strip with a chevron gives the user nothing to aim at.</summary>
-    private string DisplayName => _state.HasDevice ? _state.DeviceName : Loc.T("osd.airplay.no-device");
+    internal string DisplayName => _state.HasDevice ? _state.DeviceName : Loc.T("osd.airplay.no-device");
 
     protected override void OnRenderSizeChanged(SizeChangedInfo info)
     {
@@ -462,23 +474,5 @@ public sealed class AirPlayBarView : UserControl
             : SkinMath.PercentFromX(p.X, 0, Math.Max(1, ActualWidth));
 
         VolumeSetByUser?.Invoke(percent);
-    }
-
-    private static Brush ParseBrush(string? color)
-    {
-        // Null is not a malformed colour, it is an absent one: the power button falls back through
-        // connectColor to the name's colour to white, and any of those may simply not be set.
-        if (string.IsNullOrWhiteSpace(color)) return Brushes.White;
-
-        try
-        {
-            return new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-        }
-        catch (FormatException)
-        {
-            // Same posture as the rest of the skin pipeline: a malformed colour is an authoring
-            // mistake that degrades to something readable rather than crashing the render path.
-            return Brushes.White;
-        }
     }
 }

@@ -102,4 +102,23 @@ public class SkinMathTests
         Assert.False(atDefault);
         Assert.True(aboveDefault);
     }
+
+    /// <summary>Letter spacing goes between these, so none of them may split a character a
+    /// reader sees as one: a surrogate pair, an emoji ZWJ sequence, a letter and its combining
+    /// marks, a flag.</summary>
+    [Theory]
+    [InlineData("88", new[] { "8", "8" })]
+    [InlineData("a\U0001D11Eb", new[] { "a", "\U0001D11E", "b" })]                                 // musical G clef: a surrogate pair
+    [InlineData("ẹ́x", new[] { "ẹ́", "x" })]                                  // e with two combining marks
+    [InlineData("\U0001F469‍\U0001F4BB!", new[] { "\U0001F469‍\U0001F4BB", "!" })]        // woman technologist (ZWJ)
+    [InlineData("\U0001F1EF\U0001F1F5", new[] { "\U0001F1EF\U0001F1F5" })]                           // the flag of Japan
+    [InlineData("", new string[0])]
+    public void TextElements_keep_every_character_whole(string text, string[] expected)
+    {
+        var elements = SkinMath.TextElements(text);
+        string Show(IEnumerable<string> parts) => string.Join(" | ", parts.Select(p => string.Join(" ", p.Select(c => $"U+{(int)c:X4}"))));
+        _out.WriteLine($"expected [{Show(expected)}]");
+        _out.WriteLine($"actual   [{Show(elements)}]");
+        Assert.Equal(expected, elements);
+    }
 }

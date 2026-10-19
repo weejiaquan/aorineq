@@ -15,9 +15,10 @@ namespace AorinEQ.Core;
 /// Drawing is GDI+ rather than WPF because this is <see cref="AorinEQ.Core"/> — the same reason
 /// <see cref="TrayGlyph"/> is — and because it must run without a Dispatcher. Two consequences are
 /// deliberate and worth knowing when comparing a preview against the live OSD:
-/// the unbold percent number is drawn Regular where WPF's is SemiBold (GDI+ has no SemiBold), and
-/// a text shadow is drawn as an offset copy because GDI+ has no gaussian blur. Everything else —
-/// position, alignment, size, fill geometry, outline stroke, colours, transparency — matches.
+/// GDI+ has two weights, so the number is Bold from weight 700 up and Regular below (the default
+/// SemiBold number previews Regular, as it always has), and a text shadow is drawn as an offset
+/// copy because GDI+ has no gaussian blur. Everything else — position, alignment, size, italic,
+/// letter spacing, fill geometry, outline stroke, colours, transparency — matches.
 ///
 /// Nothing here holds a handle on the skin folder after it returns: each layer is read into memory
 /// and decoded from there, because the caller zips that very folder immediately afterwards.</summary>
@@ -34,6 +35,9 @@ public static class SkinPreview
     /// <summary>WPF's DropShadowEffect Direction=315 in screen coordinates: down and to the
     /// right, at 45°. cos/sin of 45° are the same number.</summary>
     private const double ShadowDirectionComponent = 0.70710678118654752;
+
+    /// <summary>The lightest weight GDI+ draws Bold: the legacy "bold": true, so a skin previews as it always has.</summary>
+    private const int BoldFromWeight = 700;
 
     /// <summary>Composes <paramref name="info"/> at <paramref name="percent"/> and writes it as a
     /// PNG to <paramref name="destinationPath"/>, replacing whatever was there.</summary>
@@ -168,19 +172,32 @@ public static class SkinPreview
     {
         string text = percent.ToString(CultureInfo.InvariantCulture);
         using var family = ResolveFamily(style.FontFamily);
-        var fontStyle = PickStyle(family, style.Bold);
+        var fontStyle = PickStyle(family.IsStyleAvailable, style.Weight, style.Italic);
         float emSize = (float)Math.Max(1.0, style.FontSize);
 
         // GenericTypographic measures the glyph advance without GDI's extra padding, which is
-        // what WPF's FormattedText width means and so what the alignment math expects. The
-        // property hands back a NEW StringFormat every call, so it is ours to dispose.
+        // what WPF's FormattedText width means and so what the alignment math expects; trailing
+        // spaces count, as they do in WPF's width. The property hands back a NEW StringFormat
+        // every call, so it is ours to dispose.
         using var format = StringFormat.GenericTypographic;
+        format.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
         using var font = new Font(family, emSize, fontStyle, GraphicsUnit.Pixel);
-        float textWidth = g.MeasureString(text, font, PointF.Empty, format).Width;
+
+        // Letter spacing goes between text elements, as the WPF renderer puts it; without any the
+        // text is one piece.
+        IReadOnlyList<string> pieces = style.LetterSpacing == 0 ? [text] : SkinMath.TextElements(text);
+        float spacing = (float)style.LetterSpacing;
+        var widths = pieces.Select(piece => g.MeasureString(piece, font, PointF.Empty, format).Width).ToList();
+        float textWidth = widths.Sum() + spacing * (pieces.Count - 1);
         float left = (float)SkinMath.AlignedTextX(style.X, textWidth, style.Align);
 
         using var path = new GraphicsPath();
-        path.AddString(text, family, (int)fontStyle, emSize, new PointF(left, style.Y), format);
+        float x = left;
+        for (int i = 0; i < pieces.Count; i++)
+        {
+            path.AddString(pieces[i], family, (int)fontStyle, emSize, new PointF(x, style.Y), format);
+            x += widths[i] + spacing;
+        }
 
         if (ParseColor(style.ShadowColor) is { } shadowColor)
         {
@@ -220,51 +237,20 @@ public static class SkinPreview
         return FontFamily.GenericSansSerif;
     }
 
-    /// <summary>Bold when asked and available, otherwise whatever the family does have. WPF's
-    /// unbold baseline is SemiBold, which GDI+ cannot express, so unbold lands on Regular.</summary>
-    private static FontStyle PickStyle(FontFamily family, bool bold)
+    /// <summary>The weight as GDI+'s two can say it - Bold from <see cref="BoldFromWeight"/> up,
+    /// Regular below - italic when asked, when the family has that style. A family without it
+    /// keeps what it can of it: bold alone, then italic alone, before anything else it has.
+    /// <paramref name="available"/> is the family's <see cref="FontFamily.IsStyleAvailable"/>.</summary>
+    internal static FontStyle PickStyle(Func<FontStyle, bool> available, int weight, bool italic)
     {
-        var wanted = bold ? FontStyle.Bold : FontStyle.Regular;
-        if (family.IsStyleAvailable(wanted)) return wanted;
-        foreach (var candidate in new[] { FontStyle.Regular, FontStyle.Bold, FontStyle.Italic })
-            if (family.IsStyleAvailable(candidate)) return candidate;
+        var wanted = (weight >= BoldFromWeight ? FontStyle.Bold : FontStyle.Regular) | (italic ? FontStyle.Italic : FontStyle.Regular);
+        foreach (var candidate in new[] { wanted, wanted & ~FontStyle.Italic, wanted & ~FontStyle.Bold, FontStyle.Regular, FontStyle.Bold, FontStyle.Italic })
+            if (available(candidate)) return candidate;
         return FontStyle.Regular;
     }
 
-    /// <summary>Parses the same colour spellings the UI layer accepts — #RGB, #ARGB, #RRGGBB,
-    /// #AARRGGBB and the named colours — returning null on anything else so the caller falls back
-    /// instead of throwing on an author-supplied string.</summary>
-    private static Color? ParseColor(string? value)
-    {
-        var text = value?.Trim();
-        if (string.IsNullOrEmpty(text)) return null;
-
-        if (text[0] == '#')
-        {
-            var hex = text[1..];
-            if (!uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var raw))
-                return null;
-            return hex.Length switch
-            {
-                // Shorthand digits double, exactly like the WPF converter: #F0C -> #FFFF00CC.
-                3 => FromArgb(0xF, (raw >> 8) & 0xF, (raw >> 4) & 0xF, raw & 0xF, doubled: true),
-                4 => FromArgb((raw >> 12) & 0xF, (raw >> 8) & 0xF, (raw >> 4) & 0xF, raw & 0xF, doubled: true),
-                6 => FromArgb(0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF, doubled: false),
-                8 => FromArgb((raw >> 24) & 0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF, doubled: false),
-                _ => null,
-            };
-        }
-
-        var named = Color.FromName(text);
-        return named.IsKnownColor ? named : null;
-    }
-
-    private static Color FromArgb(uint a, uint r, uint g, uint b, bool doubled)
-    {
-        if (doubled)
-        {
-            a = a * 17; r = r * 17; g = g * 17; b = b * 17; // 0xF -> 0xFF
-        }
-        return Color.FromArgb((int)a, (int)r, (int)g, (int)b);
-    }
+    /// <summary>A skin colour as a GDI+ colour, through <see cref="SkinColor"/> - the parser the
+    /// WPF renderers use, so the preview cannot accept a spelling the OSD rejects.</summary>
+    private static Color? ParseColor(string? value) =>
+        SkinColor.Parse(value) is { } c ? Color.FromArgb(c.A, c.R, c.G, c.B) : null;
 }

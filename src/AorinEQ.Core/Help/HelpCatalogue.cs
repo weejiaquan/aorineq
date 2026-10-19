@@ -42,7 +42,7 @@ public static class HelpCatalogue
         new("settings.skin-credit", SettingsSections.Skins,
             "settings.skin-credit.title", "settings.skin-credit.subtitle", "#skins"),
         new("settings.skin-designer", SettingsSections.Skins,
-            "settings.skin-designer.title", "settings.skin-designer.subtitle", "#skins"),
+            "settings.skin-designer.title", "settings.skin-designer.subtitle", "#skin-designer"),
         // ---- equalizer ----
         new("settings.open-equalizer", SettingsSections.Equalizer,
             "settings.open-equalizer.title", "settings.open-equalizer.subtitle", "#equalizer"),

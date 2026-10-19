@@ -420,8 +420,35 @@ public partial class OsdWindow : Window
         return brush;
     }
 
+    private bool _closingForGood;
+
+    /// <summary>Really closes this window, its hide timer stopped. Only for an OsdWindow that is
+    /// not App's own OSD - the Skin Designer's notice preview, at its Dispose.</summary>
+    internal void CloseForGood()
+    {
+        _closingForGood = true;
+        HideNow();
+        Close();
+    }
+
+    /// <summary>Hides at once - no fade - with the hide timer stopped, so nothing ticks for a
+    /// window already down. The Skin Designer's notice preview, between uses.</summary>
+    internal void HideNow()
+    {
+        _hideTimer.Stop();
+        CancelFade();
+        Hide();
+    }
+
+    internal bool HideTimerRunning => _hideTimer.IsEnabled;
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
+        if (_closingForGood)
+        {
+            base.OnClosing(e);
+            return;
+        }
         e.Cancel = true; // never destroy; App owns lifetime
         Hide();
     }

@@ -43,7 +43,8 @@ public class LocCompletenessTests
         "designer.text.x", "designer.text.y", "settings.text.x", "settings.text.y",
 
         // Glyphs, dashes and strings that are only formatting.
-        "designer.empty-path.text", "designer.full-path.text", "designer.muted-path.text",
+        "designer.empty-path.text",
+        "designer.status.cursor",
         "osd.glyph.text", "osd.fluent-glyph.text",
         "eq.hz-db-q", "settings.search.result", "app.tray.tooltip.level",
         // A build tag for whoever is testing, not the user: "dev" is the same word in every log and bug report.

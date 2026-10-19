@@ -69,9 +69,23 @@ public sealed record Settings(
     // VB-Audio's setup ran but no cable appeared within ten seconds: Windows needs a restart. The
     // count is starts since then; VirtualCableInstaller.NextPendingState gives up at the limit.
     bool VirtualCablePendingReboot = false,
-    int VirtualCablePendingStarts = 0)
+    int VirtualCablePendingStarts = 0,
+    // The colour picker's recent colours, shared by the Skin Designer and the HUD widget menu,
+    // newest first. Null for everyone upgrading into this, which reads as "none yet".
+    IReadOnlyList<string>? RecentColors = null,
+    // The Skin Designer's Layers and Properties panel widths, as the user last dragged them.
+    double DesignerLayersWidth = Settings.DefaultDesignerLayersWidth,
+    double DesignerPropertiesWidth = Settings.DefaultDesignerPropertiesWidth)
 {
     public static Settings Default { get; } = new(50, false);
+
+    public const double DefaultDesignerLayersWidth = 220;
+    public const double DefaultDesignerPropertiesWidth = 320;
+    public const double MinDesignerPanelWidth = 160;
+    public const double MaxDesignerPanelWidth = 520;
+
+    private static double PanelWidth(double width, double fallback) =>
+        double.IsFinite(width) ? Math.Clamp(width, MinDesignerPanelWidth, MaxDesignerPanelWidth) : fallback;
 
     private static EqScopeSetting NormalizeScope(EqScopeSetting scope) => scope with
     {
@@ -131,6 +145,9 @@ public sealed record Settings(
                 : s.AirPlayRestoreDefault,
             VirtualCablePendingStarts =
                 Math.Clamp(s.VirtualCablePendingStarts, 0, VirtualCableInstaller.PendingStartLimit),
+            RecentColors = s.RecentColors is null ? null : SkinColor.NormalizeRecents(s.RecentColors),
+            DesignerLayersWidth = PanelWidth(s.DesignerLayersWidth, DefaultDesignerLayersWidth),
+            DesignerPropertiesWidth = PanelWidth(s.DesignerPropertiesWidth, DefaultDesignerPropertiesWidth),
         };
     }
 

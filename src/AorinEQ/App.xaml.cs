@@ -188,6 +188,11 @@ public partial class App : System.Windows.Application
             // matters; showing it is best effort.
         }
 
+        // Disposed first, so Shutdown closes the designer instead of it asking about unsaved edits
+        // in a box nobody can answer during a crash. Best effort too: it may be what broke.
+        try { CloseSkinDesigner(); }
+        catch (Exception) { }
+
         try { Shutdown(1); }
         catch (InvalidOperationException) { } // already shutting down
     }
@@ -350,6 +355,11 @@ public partial class App : System.Windows.Application
         // the OSD. Clicking a link during the app's own startup is rare enough to accept that.)
         _protocolSpool.TakeAll();
 
+        // Likewise the Skin Designer's temp folders: only the instance gets here and no designer
+        // exists yet, so every one left is a killed or crashed session's.
+        DesignerTempFolders.DeleteStale(DesignerTempFolders.ScratchRoot);
+        DesignerTempFolders.DeleteStale(DesignerTempFolders.PreviewRoot);
+
         // The second-instance listener starts as soon as the named event exists: a second launch
         // during first-run onboarding must activate the wizard (not vanish into a signal nobody
         // hears). The dispatch target is dynamic — wizard while one is up, the OSD once built.
@@ -464,7 +474,7 @@ public partial class App : System.Windows.Application
             _tray.HudModeToggled += OnHudModeToggled;
             _tray.HudWidgetToggled += OnHudWidgetToggled;
             _tray.HudWidgetAdded += OnHudWidgetAdded;
-            _tray.ExitRequested += BeginShutdown;
+            _tray.ExitRequested += OnTrayExit;
 
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
 
@@ -680,7 +690,38 @@ public partial class App : System.Windows.Application
     private void BeginShutdown()
     {
         _showEvent?.Dispose();
+        // Disposed before Shutdown() closes every window, so the designer really closes then
+        // instead of asking in a box that a shutting-down app can never show.
+        CloseSkinDesigner();
         Shutdown();
+    }
+
+    private async void OnTrayExit()
+    {
+        if (await ConfirmQuitAsync()) BeginShutdown();
+    }
+
+    /// <summary>Every exit the app starts itself asks about the skin designer's unsaved edits
+    /// first (Save / Don't save / Cancel). False when the user stays: Cancel, or a Save that failed.</summary>
+    private async Task<bool> ConfirmQuitAsync() => _skinDesigner is null || await _skinDesigner.ConfirmLeaveAsync();
+
+    /// <summary>The designer outlives its hidden window: its scratch sprite sheets, test OSD folder
+    /// and static language subscription go with it, and after Dispose, Close really closes it.</summary>
+    private void CloseSkinDesigner()
+    {
+        // Let go first, and closed even if Dispose throws, so no path leaves a half-closed designer behind.
+        var designer = _skinDesigner;
+        _skinDesigner = null;
+        try { designer?.Dispose(); }
+        finally { designer?.Close(); }
+    }
+
+    /// <summary>Windows is logging off or shutting down: there is no asking then, and WPF closes
+    /// every window next, so the designer is let go first (its unsaved edits with it).</summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        CloseSkinDesigner();
+        base.OnSessionEnding(e);
     }
 
     /// <summary>Shown when a named single-instance object (mutex/event) already exists but is
@@ -836,7 +877,7 @@ public partial class App : System.Windows.Application
                 {
                     var choice = System.Windows.MessageBox.Show(
                         Loc.T("app.restart-aorineq-elevated-now"), "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                    if (choice == MessageBoxResult.Yes && TryRelaunchElevatedAndShutdown())
+                    if (choice == MessageBoxResult.Yes && await ConfirmQuitAsync() && TryRelaunchElevatedAndShutdown())
                         return;
                 }
 
@@ -1165,11 +1206,20 @@ public partial class App : System.Windows.Application
     {
         if (_skinDesigner is null)
         {
-            _skinDesigner = new SkinDesignerWindow(() => _settings);
+            _skinDesigner = new SkinDesignerWindow(() => _settings, ApoPaths.GetSkinsRoot());
             _skinDesigner.SkinSaved += OnSkinSaved;
+            _skinDesigner.RecentColorsChanged += OnRecentColorsChanged;
+            _skinDesigner.PanelWidthsChanged += OnDesignerPanelsResized;
         }
         _skinDesigner.Show();
         _skinDesigner.Activate();
+    }
+
+    /// <summary>The designer's side panels were resized; their widths outlive the session.</summary>
+    private void OnDesignerPanelsResized(double layers, double properties)
+    {
+        _settings = _settings with { DesignerLayersWidth = layers, DesignerPropertiesWidth = properties };
+        SaveSettings();
     }
 
     /// <summary>A designer save refreshes the Settings picker, and — when the saved skin is the
@@ -2256,7 +2306,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
-        _settingsWindow?.SetUpdateStatus($"{release.TagName} is ready — restarting…");
+        _settingsWindow?.SetUpdateStatus(Loc.T("app.is-ready-restarting", release.TagName));
         RestartForUpdate();
     }
 
@@ -2283,9 +2333,19 @@ public partial class App : System.Windows.Application
     /// <summary>Ends this session so the staged update can be applied on the way out, and marks
     /// the successor as wanted. Everything else is <see cref="ApplyPendingUpdateOnExit"/>'s job:
     /// the swap cannot happen before the process is finished with its own image.</summary>
-    private void RestartForUpdate()
+    private async void RestartForUpdate()
     {
-        if (_pendingUpdate is null) return;
+        if (_pendingUpdate is not { } pending) return;
+        if (!await ConfirmQuitAsync())
+        {
+            // The user stayed in the skin designer: no "restarting…" left behind. The staged
+            // build still applies on the way out, whenever that is - unless auto-update was
+            // switched off while the box was up, which threw it away and leaves nothing to say.
+            _settingsWindow?.SetUpdateStatus(ReferenceEquals(_pendingUpdate, pending)
+                ? Loc.T("app.is-ready-applies-when-aorineq-restarts", pending.TagName)
+                : "");
+            return;
+        }
         _relaunchAfterUpdate = true;
         BeginShutdown();
     }
@@ -2887,6 +2947,8 @@ public partial class App : System.Windows.Application
             var store = new HudStore(HudLayout.DefaultPath);
             _hud = new HudManager(store, _audioPipeline, SnapshotHudState);
             _hud.LayoutChanged += layout => _settingsWindow?.ApplyHud(layout);
+            _hud.RecentColors = () => _settings.RecentColors ?? [];
+            _hud.RecentColorsChanged += OnRecentColorsChanged;
             _hud.MovedToPrimary += () => _tray?.ShowInfo(
                 Loc.T("app.a-hud-widget-s-screen-is"));
             _hud.SetSkin(_useSkinOsd ? CurrentSkinInfo() : null);
@@ -3213,6 +3275,14 @@ public partial class App : System.Windows.Application
         }
     }
 
+    /// <summary>The colour picker's recent colours changed - in the HUD menu or the Skin Designer,
+    /// which share one list. Persisted with everything else.</summary>
+    private void OnRecentColorsChanged(IReadOnlyList<string> colours)
+    {
+        _settings = _settings with { RecentColors = colours };
+        SaveSettings();
+    }
+
     /// <summary>Merges the live volume state into <see cref="_settings"/> and (coalesced) persists
     /// the full, up-to-date Settings — every field, not just Percent/Muted/RunAsAdmin, so an OSD
     /// settings change followed shortly by a volume change (or vice versa) never loses the other.</summary>
@@ -3422,6 +3492,7 @@ public partial class App : System.Windows.Application
         // which raises on a system thread, and a theme change arriving mid-teardown must not find
         // a dispatcher that has begun shutting down.
         _appTheme?.Dispose();
+        CloseSkinDesigner();
         // Before the pipeline for the same ordering reason the HUD is: this owns a WASAPI client
         // and a live network session, and a TEARDOWN sent while the dispatcher drains is better
         // than leaving the receiver holding a session nobody is feeding.

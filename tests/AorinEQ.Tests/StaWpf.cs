@@ -57,7 +57,8 @@ public sealed class StaWpf : IDisposable
     /// loop for its duration - so without this nothing queued ever runs: Loaded never fires, the
     /// controls stay unloaded, and WPF refuses to open a Popup whose placement target is not
     /// loaded. IsOpen then reads back false however it is set, including when assigned directly,
-    /// which looks exactly like a broken feature and is not.</summary>
+    /// which looks exactly like a broken feature and is not. Likewise a Popup creates its window on
+    /// a later turn, so one closed in the same turn it opened never raises Closed.</summary>
     public static void Pump()
     {
         var frame = new System.Windows.Threading.DispatcherFrame();

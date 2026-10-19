@@ -26,14 +26,23 @@ internal sealed class SkinFrames
         Delays = delays;
     }
 
-    /// <summary>Decode failures throw the imaging exception family callers already contain
-    /// (NotSupportedException/FileFormatException/IOException/ArgumentException).</summary>
+    /// <summary>Decode failures throw what <see cref="IsImagingFailure"/> recognises.</summary>
     public static SkinFrames Load(string path, int declaredFrames, double fps)
     {
         return Path.GetExtension(path).Equals(".gif", StringComparison.OrdinalIgnoreCase)
             ? LoadGif(path)
             : LoadSheet(path, declaredFrames, fps);
     }
+
+    /// <summary>What decoding user-supplied art can throw, and so what every caller that decodes a
+    /// skin's art contains: WIC's NotSupported/FileFormat for formats it rejects, COM and Overflow
+    /// errors for corrupt headers, IO/UnauthorizedAccess for the file itself, Argument for
+    /// nonsense sizes, OutOfMemory for absurd dimensions. One list, so a type found in the wild
+    /// is fixed for the notice, the HUD widget and the designer at once.</summary>
+    internal static bool IsImagingFailure(Exception ex) =>
+        ex is NotSupportedException or FileFormatException or IOException or ArgumentException
+            or UnauthorizedAccessException or System.Runtime.InteropServices.COMException
+            or OverflowException or OutOfMemoryException;
 
     private static SkinFrames LoadSheet(string path, int declaredFrames, double fps)
     {

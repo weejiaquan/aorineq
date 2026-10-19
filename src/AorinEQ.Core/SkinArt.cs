@@ -566,7 +566,7 @@ public static class SkinArt
             "dropdownHit": { "x": {{hit.X}}, "y": {{hit.Y}}, "w": {{hit.W}}, "h": {{hit.H}} }
           },
           "notice": {
-            "text": { "x": {{nt.X}}, "y": {{nt.Y}}, "color": "{{ink}}", "fontFamily": "{{p.Font}}", "fontSize": {{l.NoticeSize}}, "bold": true },
+            "text": { "x": {{nt.X}}, "y": {{nt.Y}}, "color": "{{ink}}", "fontFamily": "{{p.Font}}", "fontSize": {{l.NoticeSize}}, "weight": 700 },
             "textWidth": {{nt.W}},
             "glyph": { "x": {{ng.X}}, "y": {{ng.Y}}, "size": {{ng.H}}, "color": "{{ink}}" }
           }

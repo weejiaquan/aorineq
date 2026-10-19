@@ -173,20 +173,111 @@ public class SkinPreviewTests : IDisposable
 
         using var textImage = Open(a);
         using var plainImage = Open(b);
-        // Count pixels that are neither of the two layer colours: those can only be glyph pixels.
-        int glyphPixels = 0, plainGlyphPixels = 0;
-        for (int x = 0; x < 300; x++)
-            for (int y = 0; y < 100; y++)
-            {
-                if (!IsLayerColour(textImage.GetPixel(x, y))) glyphPixels++;
-                if (!IsLayerColour(plainImage.GetPixel(x, y))) plainGlyphPixels++;
-            }
+        int glyphPixels = Ink(textImage).Pixels, plainGlyphPixels = Ink(plainImage).Pixels;
         _out.WriteLine($"non-layer pixels: with text {glyphPixels}, without text {plainGlyphPixels}");
         Assert.Equal(0, plainGlyphPixels);
         Assert.True(glyphPixels > 100, $"expected the number '60' to be drawn, found {glyphPixels} glyph pixels");
+    }
 
-        static bool IsLayerColour(Color c) =>
-            c.ToArgb() == Color.Red.ToArgb() || c.ToArgb() == Color.Lime.ToArgb();
+    /// <summary>The pixels that are neither of the two layer colours - those can only be glyph
+    /// pixels - counted, with the leftmost and rightmost column they reach.</summary>
+    private static (int Pixels, int MinX, int MaxX) Ink(Bitmap image)
+    {
+        int pixels = 0, minX = int.MaxValue, maxX = int.MinValue;
+        for (int x = 0; x < image.Width; x++)
+            for (int y = 0; y < image.Height; y++)
+            {
+                var c = image.GetPixel(x, y);
+                if (c.ToArgb() == Color.Red.ToArgb() || c.ToArgb() == Color.Lime.ToArgb()) continue;
+                pixels++;
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+            }
+        return (pixels, minX, maxX);
+    }
+
+    /// <summary>The preview of a skin whose number has the extra percentText members in
+    /// <paramref name="style"/>, as pixels.</summary>
+    private Bitmap PreviewWith(string name, string style)
+    {
+        var folder = MakeSkin(name, 300, 100,
+            "{ \"percentText\": { \"show\": true, \"x\": 20, \"y\": 20, \"fontSize\": 40, \"color\": \"#FF0000FF\"" + style + " } }");
+        var preview = Path.Combine(_dir, name + ".png");
+        SkinPreview.Write(SkinLoader.Load(folder), preview);
+        return Open(preview);
+    }
+
+    [Fact]
+    public void Preview_letter_spacing_widens_the_number_by_the_gap_between_its_digits()
+    {
+        using var plain = PreviewWith("unspaced", "");
+        using var spaced = PreviewWith("spaced", ", \"letterSpacing\": 20");
+        var (_, plainMin, plainMax) = Ink(plain);
+        var (_, spacedMin, spacedMax) = Ink(spaced);
+        int widened = (spacedMax - spacedMin) - (plainMax - plainMin);
+        _out.WriteLine($"'60' ink: unspaced x {plainMin}..{plainMax}, spaced 20 x {spacedMin}..{spacedMax}; widened by {widened}, expected 20 (one gap)");
+        Assert.Equal(plainMin, spacedMin); // left-aligned: it still starts at its anchor
+        Assert.InRange(widened, 19, 21);
+    }
+
+    [Fact]
+    public void Preview_italic_slants_the_number()
+    {
+        using var upright = PreviewWith("upright", "");
+        using var italic = PreviewWith("italic", ", \"italic\": true");
+        int differing = 0;
+        for (int x = 0; x < 300; x++)
+            for (int y = 0; y < 100; y++)
+                if (upright.GetPixel(x, y).ToArgb() != italic.GetPixel(x, y).ToArgb()) differing++;
+        _out.WriteLine($"pixels that differ between upright and italic: {differing}; ink upright {Ink(upright)}, italic {Ink(italic)}");
+        Assert.True(differing > 100, $"italic drew the same number as upright ({differing} pixels differ)");
+    }
+
+    /// <summary>GDI+ has two weights: 700 and up is Bold, lighter is Regular. So 300 and 600
+    /// look the same, and 700 and 900 do, and the two pairs differ.</summary>
+    [Fact]
+    public void Preview_weight_is_bold_from_700_and_regular_below()
+    {
+        int InkOf(int weight)
+        {
+            using var image = PreviewWith("weight-" + weight, $", \"weight\": {weight}");
+            return Ink(image).Pixels;
+        }
+        var r = (W300: InkOf(300), W600: InkOf(600), W700: InkOf(700), W900: InkOf(900));
+        _out.WriteLine($"glyph pixels by weight: {r}");
+        Assert.Equal(r.W300, r.W600);
+        Assert.Equal(r.W700, r.W900);
+        Assert.True(r.W700 > r.W600, "weight 700 was not drawn heavier than 600");
+    }
+
+    /// <summary>Skins written before weights preview exactly as they did: the old unbold number
+    /// was Regular and the old "bold": true was Bold. Weight 600 (today's default, and what
+    /// "bold": false reads as) must give the same file as Regular did, and 700 the same as Bold.
+    /// The preview is byte-for-byte deterministic, so the files are compared whole.</summary>
+    [Fact]
+    public void Preview_of_a_skin_from_before_weights_is_unchanged()
+    {
+        byte[] Bytes(string name, string style)
+        {
+            var folder = MakeSkin(name, 300, 100,
+                "{ \"percentText\": { \"show\": true, \"x\": 20, \"y\": 20, \"fontSize\": 40, \"color\": \"#FF0000FF\"" + style + " } }");
+            var preview = Path.Combine(_dir, name + ".png");
+            SkinPreview.Write(SkinLoader.Load(folder), preview);
+            return File.ReadAllBytes(preview);
+        }
+        var regular = Bytes("old-unbold", ", \"bold\": false");
+        var plain = Bytes("old-plain", "");
+        var at600 = Bytes("weight-600", ", \"weight\": 600");
+        var at400 = Bytes("weight-400", ", \"weight\": 400");
+        var bold = Bytes("old-bold", ", \"bold\": true");
+        var at700 = Bytes("weight-700", ", \"weight\": 700");
+        _out.WriteLine($"preview sizes: bold:false {regular.Length}, no key {plain.Length}, weight 600 {at600.Length}, " +
+                       $"weight 400 {at400.Length}; bold:true {bold.Length}, weight 700 {at700.Length}");
+        Assert.Equal(regular, plain);
+        Assert.Equal(regular, at600);
+        Assert.Equal(regular, at400);   // Regular is Regular: 600 is not drawn any heavier
+        Assert.Equal(bold, at700);
+        Assert.NotEqual(regular, bold); // the two are distinguishable, so the equalities mean something
     }
 
     [Fact]
@@ -321,13 +412,7 @@ public class SkinPreviewTests : IDisposable
         SkinPreview.Write(SkinLoader.Load(folder), preview);
 
         using var image = Open(preview);
-        int glyphPixels = 0;
-        for (int x = 0; x < 300; x++)
-            for (int y = 0; y < 100; y++)
-            {
-                var c = image.GetPixel(x, y);
-                if (c.ToArgb() != Color.Red.ToArgb() && c.ToArgb() != Color.Lime.ToArgb()) glyphPixels++;
-            }
+        int glyphPixels = Ink(image).Pixels;
         _out.WriteLine($"glyph pixels with a missing font: {glyphPixels}");
         Assert.True(glyphPixels > 100, "a missing font must fall back, not silently drop the number");
     }
@@ -346,15 +431,7 @@ public class SkinPreviewTests : IDisposable
         SkinPreview.Write(SkinLoader.Load(folder), preview);
 
         using var image = Open(preview);
-        int minX = int.MaxValue, maxX = int.MinValue;
-        for (int x = 0; x < 300; x++)
-            for (int y = 0; y < 100; y++)
-            {
-                var c = image.GetPixel(x, y);
-                if (c.ToArgb() == Color.Red.ToArgb() || c.ToArgb() == Color.Lime.ToArgb()) continue;
-                minX = Math.Min(minX, x);
-                maxX = Math.Max(maxX, x);
-            }
+        var (_, minX, maxX) = Ink(image);
         _out.WriteLine($"align={align}: glyph ink spans x {minX}..{maxX} around the anchor x=150");
         Assert.True(minX < maxX, "the number must actually be drawn");
         switch (align)
@@ -363,5 +440,38 @@ public class SkinPreviewTests : IDisposable
             case "right": Assert.True(maxX <= 152, $"right-aligned ink should end at the anchor, ended at {maxX}"); break;
             default: Assert.InRange((minX + maxX) / 2, 135, 165); break;
         }
+    }
+
+    /// <summary>The style the preview draws in, for families that lack some styles. Every family
+    /// tried on Windows - installed ones, and Tahoma loaded on its own (Regular and Bold files
+    /// only) - reports every style available, because GDI+ simulates the rest; so the families
+    /// here are their availability, written out, and a real one is checked alongside.
+    /// R = Regular, B = Bold, I = Italic, BI = Bold Italic.</summary>
+    [Theory]
+    [InlineData("R B I BI", 700, true, "Bold, Italic")]
+    [InlineData("R B", 700, true, "Bold")]          // no bold italic: keep the bold rather than drop both
+    [InlineData("R I", 700, true, "Italic")]        // no bold at all: keep the italic
+    [InlineData("R", 700, true, "Regular")]
+    [InlineData("B", 300, false, "Bold")]           // a bold-only family: what it has
+    [InlineData("R B I BI", 600, true, "Italic")]   // 600 is Regular in GDI+, italic still asked
+    public void Preview_style_keeps_what_the_family_can_of_the_weight_and_slant(string has, int weight, bool italic, string expected)
+    {
+        var styles = has.Split(' ').Select(s => s switch
+        {
+            "R" => FontStyle.Regular, "B" => FontStyle.Bold, "I" => FontStyle.Italic, _ => FontStyle.Bold | FontStyle.Italic,
+        }).ToHashSet();
+        var picked = SkinPreview.PickStyle(styles.Contains, weight, italic);
+        _out.WriteLine($"family with [{has}], weight {weight}, italic {italic}: expected {expected}, picked {picked}");
+        Assert.Equal(Enum.Parse<FontStyle>(expected), picked);
+    }
+
+    [Fact]
+    public void Preview_style_of_a_real_family_with_every_style_is_exactly_what_was_asked()
+    {
+        using var family = new FontFamily("Segoe UI");
+        var r = (BoldItalic: SkinPreview.PickStyle(family.IsStyleAvailable, 700, true),
+            Regular: SkinPreview.PickStyle(family.IsStyleAvailable, 400, false));
+        _out.WriteLine($"Segoe UI: 700 italic -> {r.BoldItalic}, 400 upright -> {r.Regular}");
+        Assert.Equal((FontStyle.Bold | FontStyle.Italic, FontStyle.Regular), r);
     }
 }

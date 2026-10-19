@@ -68,7 +68,7 @@ public class SkinNoticeTests : IDisposable
         Assert.Equal("#FF00FF00", n.Text.Color);
         Assert.Equal("Tahoma", n.Text.FontFamily);
         Assert.Equal(13, n.Text.FontSize);
-        Assert.True(n.Text.Bold); // the default is not bold, so this is the block's value
+        Assert.Equal(700, n.Text.Weight); // the legacy "bold": true, with no weight, is 700
         Assert.Equal(16, n.Glyph.Size);
         Assert.Equal("#FFFF0000", n.Glyph.Color);
     }
@@ -189,7 +189,11 @@ public class SkinNoticeTests : IDisposable
         var want = d with
         {
             Background = "#FF112233", CornerRadius = 3, Border = "#FF445566", PadX = 9, PadY = 5,
-            Text = d.Text with { Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Bold = true, Align = "center" },
+            Text = d.Text with
+            {
+                Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Weight = 300, Italic = true, LetterSpacing = 1.5,
+                OutlineColor = "#FF000000", OutlineWidth = 2, ShadowColor = "#80000000", ShadowBlur = 3, ShadowDepth = 1, Align = "center",
+            },
             Glyph = d.Glyph with { Show = false, Size = 20, Color = "#FFFF0000" },
         };
 
@@ -313,5 +317,30 @@ public class SkinNoticeTests : IDisposable
         Assert.Null(imported.NoticeError);
         Assert.NotNull(imported.Notice);
         Assert.True(imported.Notice.HasArt);
+    }
+
+    /// <summary>A plate is read with its text position and glyph X (SkinLoader.LoadNotice reads
+    /// text.x/text.y and glyph.x for plates too), so the writer has to write them back: a loaded
+    /// plate saved unchanged loads as the same notice. Defaults (0, 0, 16) stay omitted, so every
+    /// plate the writer wrote before still resaves byte-identically.</summary>
+    [Fact]
+    public void A_plate_with_positions_round_trips_through_save_and_load()
+    {
+        var folder = MakeSkin("plate-positions",
+            """{"notice":{"background":"#FF102030","text":{"x":60,"y":4},"glyph":{"x":20}}}""");
+        var loaded = LoadLogged(folder).Notice;
+        Assert.NotNull(loaded);
+        Assert.False(loaded.HasArt);
+
+        SkinWriter.Save(_root, "plate-positions", Path.Combine(folder, "empty.png"), Path.Combine(folder, "full.png"),
+            new SkinConfig(null, 1.0, Notice: loaded));
+        var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        var reloaded = LoadLogged(folder).Notice;
+
+        _out.WriteLine("skin.json after save: " + json);
+        _out.WriteLine($"expected text=({loaded.Text.X},{loaded.Text.Y}) glyph.x={loaded.Glyph.X}; " +
+                       $"actual text=({reloaded?.Text.X},{reloaded?.Text.Y}) glyph.x={reloaded?.Glyph.X}");
+        Assert.Equal((60, 4, 20), (loaded.Text.X, loaded.Text.Y, loaded.Glyph.X));
+        Assert.Equal(loaded, reloaded);
     }
 }

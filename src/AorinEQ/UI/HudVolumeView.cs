@@ -96,8 +96,7 @@ internal sealed class HudVolumeView : Grid, IHudWidgetView
             _fallback.Visibility = Visibility.Collapsed;
             _lastPercent = -1; // force a compose on the next frame
         }
-        catch (Exception ex) when (ex is NotSupportedException or System.IO.FileFormatException
-            or System.IO.IOException or ArgumentException or OutOfMemoryException)
+        catch (Exception ex) when (SkinFrames.IsImagingFailure(ex))
         {
             Detach();
         }

@@ -122,19 +122,20 @@ public class OsdWindowNoticeTests
             osd.ShowNotice(name);
             osd.UpdateLayout();
             var plate = Part(osd, "NoticeRoot");
-            var text = Notice(osd).NoticeText;
-            double right = text.TranslatePoint(new System.Windows.Point(text.ActualWidth, 0), plate).X;
+            // The ink, not the text's box: the box is the star column whatever is drawn in it.
+            var glyphs = Notice(osd).NoticeText.Glyphs;
+            double right = glyphs.TranslatePoint(new System.Windows.Point(glyphs.Data.Bounds.Right, 0), plate).X;
             return (narrow, osd.Width, right, plate.ActualWidth, SystemParameters.WorkArea,
                 new Rect(osd.Left, osd.Top, osd.Width, osd.Height));
         });
 
         _out.WriteLine($"short name: {shortWidth} wide; {name.Length} full-width characters: {wideWidth} wide, " +
-                       $"text ends at {textRight:0.#} of a {plateWidth:0.#} plate; window {window} in {workArea}");
+                       $"ink ends at {textRight:0.#} of a {plateWidth:0.#} plate; window {window} in {workArea}");
         Assert.Equal(300, shortWidth); // a short name gets the volume bar's own width, not a sliver
         Assert.True(wideWidth > shortWidth, "A long name did not widen the plate at all.");
         Assert.True(wideWidth <= 480, $"The plate grew to {wideWidth}, past its 480 cap.");
         Assert.True(textRight <= plateWidth - 16 + 0.5,
-            $"The name runs to {textRight:0.#}, past the plate's padding at {plateWidth - 16:0.#}.");
+            $"The name's ink runs to {textRight:0.#}, past the plate's padding at {plateWidth - 16:0.#}.");
         Assert.True(workArea.Contains(window), $"The notice {window} is not inside the work area {workArea}.");
     }
 
@@ -149,12 +150,12 @@ public class OsdWindowNoticeTests
             osd.ShowNotice("Speakers", light: true);
             osd.UpdateLayout();
             var l = (Back: ColorOf(view.PlateBorder.Background), Border: ColorOf(view.PlateBorder.BorderBrush),
-                Text: ColorOf(view.NoticeText.Foreground));
+                Text: ColorOf(view.NoticeText.Glyphs.Fill));
 
             osd.ShowNotice("Speakers", light: false);
             osd.UpdateLayout();
             var d = (Back: ColorOf(view.PlateBorder.Background), Border: ColorOf(view.PlateBorder.BorderBrush),
-                Text: ColorOf(view.NoticeText.Foreground));
+                Text: ColorOf(view.NoticeText.Glyphs.Fill));
             return (l, d);
         });
 
@@ -171,18 +172,23 @@ public class OsdWindowNoticeTests
     [Fact]
     public void Minimal_bar_notice_uses_its_own_plate()
     {
-        var (corner, fontSize, glyphSize) = With(osd =>
+        var (corner, drawn, at12, at14, glyphSize) = With(osd =>
         {
             osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.MinimalBar });
             osd.ShowNotice("Speakers");
             osd.UpdateLayout();
             var view = Notice(osd);
-            return (view.PlateBorder.CornerRadius.TopLeft, view.NoticeText.FontSize, view.NoticeGlyph.FontSize);
+            double dip = System.Windows.Media.VisualTreeHelper.GetDpi(view).PixelsPerDip;
+            string family = view.NoticeText.FontFamily.Source;
+            return (view.PlateBorder.CornerRadius.TopLeft, view.NoticeText.Glyphs.Data.Bounds.Width,
+                TextInk.Width(family, 12, FontWeights.SemiBold, FontStyles.Normal, "Speakers", dip),
+                TextInk.Width(family, 14, FontWeights.SemiBold, FontStyles.Normal, "Speakers", dip),
+                view.NoticeGlyph.FontSize);
         });
 
-        _out.WriteLine($"minimal-bar notice: corner {corner}, text {fontSize}, glyph {glyphSize}");
+        _out.WriteLine($"minimal-bar notice: corner {corner}, text ink {drawn:0.###} (12 px would be {at12:0.###}, 14 px {at14:0.###}), glyph {glyphSize}");
         Assert.Equal(8, corner);
-        Assert.Equal(12, fontSize);
+        Assert.Equal(at12, drawn, 3);
         Assert.Equal(OsdPlates.MinimalBar.Glyph.Size, glyphSize);
     }
 
@@ -252,6 +258,127 @@ public class OsdWindowNoticeTests
         finally { Directory.Delete(folder, recursive: true); }
     }
 
+    /// <summary>Where a short name's ink sits in the view: its box's left and right, and the ink's.</summary>
+    private static (double BoxLeft, double BoxRight, double InkLeft, double InkRight) InkInBox(OsdWindow osd)
+    {
+        var view = Notice(osd);
+        var text = view.NoticeText;
+        var ink = text.Glyphs.Data.Bounds;
+        double boxLeft = text.TranslatePoint(new System.Windows.Point(0, 0), view).X;
+        return (boxLeft, boxLeft + text.ActualWidth,
+            text.Glyphs.TranslatePoint(new System.Windows.Point(ink.Left, 0), view).X,
+            text.Glyphs.TranslatePoint(new System.Windows.Point(ink.Right, 0), view).X);
+    }
+
+    /// <summary>On art the name is aligned inside its textWidth box by its align, as the
+    /// TextBlock's TextAlignment did. A glyph's side bearing keeps ink a pixel or two off the
+    /// advance edge, hence the tolerance.</summary>
+    [Theory]
+    [InlineData("left")]
+    [InlineData("center")]
+    [InlineData("right")]
+    public void A_name_on_art_is_aligned_inside_its_box(string align)
+    {
+        var folder = TempFolder();
+        try
+        {
+            var art = LoadArtSkin(folder, 320, 56).Notice!;
+            var look = art with { Text = art.Text with { Align = align } };
+            var r = With(osd =>
+            {
+                osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+                osd.SetSkinNotice(look, 1.0);
+                osd.ShowNotice("Hi");
+                osd.UpdateLayout();
+                return InkInBox(osd);
+            });
+            double centre = (r.BoxLeft + r.BoxRight) / 2, inkCentre = (r.InkLeft + r.InkRight) / 2;
+            _out.WriteLine($"align {align}: box {r.BoxLeft:0.##}..{r.BoxRight:0.##} (centre {centre:0.##}), ink {r.InkLeft:0.##}..{r.InkRight:0.##} (centre {inkCentre:0.##})");
+            Assert.True(r.BoxRight - r.BoxLeft > 100, "the box is too narrow for the test to tell the aligns apart");
+            switch (align)
+            {
+                case "left": Assert.InRange(r.InkLeft, r.BoxLeft, r.BoxLeft + 3); break;
+                case "right": Assert.InRange(r.InkRight, r.BoxRight - 3, r.BoxRight); break;
+                default: Assert.InRange(inkCentre, centre - 2, centre + 2); break;
+            }
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>A plate lays the name out by its padding, so a skin's align has no effect there:
+    /// the name starts at the left of its column, as it always has.</summary>
+    [Fact]
+    public void A_plate_name_starts_at_the_left_whatever_its_align()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var r = With(osd =>
+        {
+            osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+            osd.SetSkinNotice(d with { Text = d.Text with { Align = "right" } }, 1.0);
+            osd.ShowNotice("Hi");
+            osd.UpdateLayout();
+            return InkInBox(osd);
+        });
+        _out.WriteLine($"plate, align right: column {r.BoxLeft:0.##}..{r.BoxRight:0.##}, ink {r.InkLeft:0.##}..{r.InkRight:0.##}");
+        Assert.True(r.BoxRight - r.BoxLeft > 100, "the column is too narrow for the test to tell left from right");
+        Assert.InRange(r.InkLeft, r.BoxLeft, r.BoxLeft + 3);
+    }
+
+    /// <summary>An outline is part of what a trimmed name may fill: a name trimmed to its box keeps
+    /// one outline width (scaled) clear at each end, so the stroke never runs past the box - and
+    /// off art whose box ends at its edge.</summary>
+    [Fact]
+    public void A_trimmed_outlined_name_keeps_its_stroke_inside_the_box()
+    {
+        const double scale = 2.0;
+        var folder = TempFolder();
+        try
+        {
+            var art = LoadArtSkin(folder, 320, 56).Notice!;
+            var look = art with { Text = art.Text with { OutlineColor = "#FF000000", OutlineWidth = 6 } };
+            var r = With(osd =>
+            {
+                osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+                osd.SetSkinNotice(look, scale);
+                osd.ShowNotice(new string('W', DeviceNotice.MaxNameLength));
+                osd.UpdateLayout();
+                return (Ink: InkInBox(osd), Stroke: Notice(osd).NoticeText.Glyphs.StrokeThickness);
+            });
+            _out.WriteLine($"outline 6 at scale {scale}: stroke {r.Stroke}; box {r.Ink.BoxLeft:0.##}..{r.Ink.BoxRight:0.##}, " +
+                           $"glyph geometry {r.Ink.InkLeft:0.##}..{r.Ink.InkRight:0.##}; the reserve is one stroke at each end");
+            Assert.Equal(12, r.Stroke);
+            Assert.True(r.Ink.InkRight + r.Stroke <= r.Ink.BoxRight + 0.5,
+                $"the stroke reaches {r.Ink.InkRight + r.Stroke:0.##}, past the box at {r.Ink.BoxRight:0.##}");
+            Assert.True(r.Ink.InkLeft - r.Stroke >= r.Ink.BoxLeft - 0.5,
+                $"the stroke starts at {r.Ink.InkLeft - r.Stroke:0.##}, before the box at {r.Ink.BoxLeft:0.##}");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>A plate sizes itself from the inked name, outline included: an outline of 5 makes
+    /// the plate exactly 2 x 5 wider than the same name without one.</summary>
+    [Fact]
+    public void A_plate_grows_by_its_names_outline()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var r = _sta.Run(() =>
+        {
+            double Width(SkinNotice look)
+            {
+                var view = new NoticeView();
+                view.Apply(look, 1.0);
+                view.SetText("Speakers");
+                view.PlateBorder.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                return view.PlateBorder.DesiredSize.Width;
+            }
+            return (Plain: Width(d), Outlined: Width(d with { Text = d.Text with { OutlineColor = "#FF000000", OutlineWidth = 5 } }),
+                Unparseable: Width(d with { Text = d.Text with { OutlineColor = "nope", OutlineWidth = 5 } }));
+        });
+        _out.WriteLine($"plate width: plain {r.Plain:0.###}, outline 5 {r.Outlined:0.###} (expected +10), unparseable outline colour {r.Unparseable:0.###} (no stroke, expected +0)");
+        Assert.Equal(r.Plain + 10, r.Outlined, 6);
+        Assert.Equal(r.Plain, r.Unparseable, 6);
+    }
+
     [Fact]
     public void A_long_name_on_art_is_trimmed_inside_its_text_box()
     {
@@ -262,7 +389,7 @@ public class OsdWindowNoticeTests
             var notice = LoadArtSkin(folder, 320, 56).Notice!;
             var name = new string('W', DeviceNotice.MaxNameLength);
 
-            var (trimming, width, right) = With(osd =>
+            var (width, boxRight, inkRight, ink, untrimmed) = With(osd =>
             {
                 osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
                 osd.SetSkinNotice(notice, scale);
@@ -270,39 +397,143 @@ public class OsdWindowNoticeTests
                 osd.UpdateLayout();
                 var view = Notice(osd);
                 var text = view.NoticeText;
-                double r = text.TranslatePoint(new System.Windows.Point(text.ActualWidth, 0), view).X;
-                return (text.TextTrimming, text.Width, r);
+                var bounds = text.Glyphs.Data.Bounds;
+                double dip = System.Windows.Media.VisualTreeHelper.GetDpi(view).PixelsPerDip;
+                return (text.Width, text.TranslatePoint(new System.Windows.Point(text.ActualWidth, 0), view).X,
+                    text.Glyphs.TranslatePoint(new System.Windows.Point(bounds.Right, 0), view).X, bounds.Width,
+                    TextInk.Width(notice.Text.FontFamily, notice.Text.FontSize * scale, FontWeight.FromOpenTypeWeight(notice.Text.Weight),
+                        FontStyles.Normal, name, dip));
             });
 
-            _out.WriteLine($"{name.Length}-char name: trimming {trimming}, text box {width} " +
-                           $"(TextWidth {notice.TextWidth} x {scale}), right edge {right:0.#} of {notice.Width * scale}");
-            Assert.Equal(TextTrimming.CharacterEllipsis, trimming);
+            _out.WriteLine($"{name.Length}-char name: text box {width} (TextWidth {notice.TextWidth} x {scale}) ending at {boxRight:0.#}; " +
+                           $"ink {ink:0.#} wide (untrimmed {untrimmed:0.#}) ending at {inkRight:0.#}; art {notice.Width * scale} wide");
             Assert.Equal(notice.TextWidth * scale, width);
-            Assert.True(right <= notice.Width * scale + 0.5,
-                $"The name runs to {right:0.#}, past the art's right edge at {notice.Width * scale}.");
+            Assert.True(untrimmed > width, "the name is not long enough to need trimming");
+            Assert.True(inkRight <= boxRight + 0.5, $"The name's ink runs to {inkRight:0.#}, past its box at {boxRight:0.#}.");
+            Assert.True(inkRight <= notice.Width * scale + 0.5,
+                $"The name runs to {inkRight:0.#}, past the art's right edge at {notice.Width * scale}.");
+            // Trimmed, not cut short: what is left (with its ellipsis) fills the box to within two characters.
+            Assert.True(inkRight > boxRight - 2 * notice.Text.FontSize * scale,
+                $"The trimmed name ends at {inkRight:0.#}, far short of its box at {boxRight:0.#}.");
         }
         finally { Directory.Delete(folder, recursive: true); }
     }
 
     [Fact]
-    public void The_dark_pill_notice_is_semibold_and_a_bold_skin_notice_is_bold()
+    public void The_dark_pill_notice_is_semibold_and_a_skin_notice_takes_its_weight_and_slant()
     {
-        var bold = SkinLoader.DefaultNotice with { Text = SkinLoader.DefaultNotice.Text with { Bold = true } };
+        var d = SkinLoader.DefaultNotice;
+        var bold = d with { Text = d.Text with { Weight = 700 } };
+        var lightItalic = d with { Text = d.Text with { Weight = 300, Italic = true } };
 
-        var (pill, skin) = With(osd =>
+        var r = With(osd =>
         {
+            double Drawn() { osd.UpdateLayout(); return Notice(osd).NoticeText.Glyphs.Data.Bounds.Width; }
             osd.ShowNotice("Speakers");
-            var p = Notice(osd).NoticeText.FontWeight;
+            double pill = Drawn();
 
             osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
             osd.SetSkinNotice(bold, 1.0);
             osd.ShowNotice("Speakers");
-            return (p, Notice(osd).NoticeText.FontWeight);
+            double skinBold = Drawn();
+            osd.SetSkinNotice(lightItalic, 1.0);
+            osd.ShowNotice("Speakers");
+            double skinLightItalic = Drawn();
+
+            double dip = System.Windows.Media.VisualTreeHelper.GetDpi(Notice(osd)).PixelsPerDip;
+            string family = Notice(osd).NoticeText.FontFamily.Source;
+            double Ink(FontWeight weight, FontStyle style) => TextInk.Width(family, d.Text.FontSize, weight, style, "Speakers", dip);
+            return (pill, skinBold, skinLightItalic, SemiBold: Ink(FontWeights.SemiBold, FontStyles.Normal),
+                Bold: Ink(FontWeights.Bold, FontStyles.Normal), LightItalic: Ink(FontWeights.Light, FontStyles.Italic),
+                Light: Ink(FontWeights.Light, FontStyles.Normal));
         });
 
-        _out.WriteLine($"dark-pill weight {pill}; bold skin weight {skin}");
-        Assert.Equal(FontWeights.SemiBold, pill);
-        Assert.Equal(FontWeights.Bold, skin);
+        _out.WriteLine($"dark pill: drawn {r.pill:0.###}, SemiBold ink {r.SemiBold:0.###}; weight 700: drawn {r.skinBold:0.###}, " +
+                       $"Bold ink {r.Bold:0.###}; 300 italic: drawn {r.skinLightItalic:0.###}, Light italic ink {r.LightItalic:0.###} " +
+                       $"(upright Light {r.Light:0.###})");
+        Assert.Equal(r.SemiBold, r.pill, 3);
+        Assert.Equal(r.Bold, r.skinBold, 3);
+        Assert.Equal(r.LightItalic, r.skinLightItalic, 3);
+        Assert.True(Math.Abs(r.LightItalic - r.Light) > 0.01, "italic and upright ink are the same width: the test cannot tell them apart");
+    }
+
+    [Fact]
+    public void A_skin_notice_draws_its_outline_and_shadow_on_a_plate_and_on_art()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var styled = d.Text with { OutlineColor = "#FFFF0000", OutlineWidth = 2, ShadowColor = "#80000000", ShadowBlur = 6, ShadowDepth = 3 };
+        var folder = TempFolder();
+        try
+        {
+            var art = LoadArtSkin(folder, 320, 56).Notice!;
+            var r = With(osd =>
+            {
+                osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+                (System.Windows.Media.Color Stroke, double Thickness, double Blur, double Depth) Look(SkinNotice look, double scale)
+                {
+                    osd.SetSkinNotice(look, scale);
+                    osd.ShowNotice("Speakers");
+                    osd.UpdateLayout();
+                    var glyphs = Notice(osd).NoticeText.Glyphs;
+                    var shadow = Assert.IsType<System.Windows.Media.Effects.DropShadowEffect>(glyphs.Effect);
+                    return (ColorOf(glyphs.Stroke), glyphs.StrokeThickness, shadow.BlurRadius, shadow.ShadowDepth);
+                }
+                var plate = Look(d with { Text = styled }, 1.0);
+                var onArt = Look(art with { Text = styled with { X = art.Text.X, Y = art.Text.Y } }, 2.0);
+                osd.SetSkinNotice(d, 1.0);
+                osd.ShowNotice("Speakers");
+                osd.UpdateLayout();
+                var plain = Notice(osd).NoticeText.Glyphs;
+                return (plate, onArt, PlainStroke: plain.Stroke, PlainEffect: plain.Effect);
+            });
+
+            _out.WriteLine($"plate: {r.plate}; art at scale 2: {r.onArt}; plain: stroke {r.PlainStroke?.ToString() ?? "none"}, effect {r.PlainEffect?.ToString() ?? "none"}");
+            Assert.Equal((Parse("#FFFF0000"), 2.0, 6.0, 3.0), r.plate);
+            Assert.Equal((Parse("#FFFF0000"), 4.0, 12.0, 6.0), r.onArt); // art sizes scale with the skin
+            Assert.Null(r.PlainStroke);
+            Assert.Null(r.PlainEffect);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [Fact]
+    public void A_cjk_name_draws_through_the_app_font_chain_and_spacing_widens_it()
+    {
+        const string name = "扬声器 (USB)";
+        var d = SkinLoader.DefaultNotice;
+        var r = _sta.Run(() =>
+        {
+            // The chain App.xaml ships: Segoe UI has no Han glyphs, so only the fallbacks after it can draw them.
+            var chain = new System.Windows.Media.FontFamily("Segoe UI, Microsoft YaHei UI, Microsoft JhengHei UI, Yu Gothic UI, Malgun Gothic, Segoe UI Symbol");
+            Application.Current.Resources["AppFontFamily"] = chain;
+            var osd = new OsdWindow();
+            osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+            try
+            {
+                double Drawn(SkinNotice look)
+                {
+                    osd.SetSkinNotice(look, 1.0);
+                    osd.ShowNotice(name);
+                    osd.UpdateLayout();
+                    return Notice(osd).NoticeText.Glyphs.Data.Bounds.Width;
+                }
+                double plain = Drawn(d);
+                var family = Notice(osd).NoticeText.FontFamily;
+                double spaced = Drawn(d with { Text = d.Text with { LetterSpacing = 3 } });
+                double dip = System.Windows.Media.VisualTreeHelper.GetDpi(Notice(osd)).PixelsPerDip;
+                return (plain, spaced, SameChain: ReferenceEquals(chain, family),
+                    ChainInk: TextInk.Width(chain.Source, d.Text.FontSize, FontWeights.SemiBold, FontStyles.Normal, name, dip),
+                    Elements: SkinMath.TextElements(name).Count);
+            }
+            finally { osd.Hide(); }
+        });
+
+        _out.WriteLine($"'{name}': drawn {r.plain:0.###} through the chain (ink {r.ChainInk:0.###}, same family object {r.SameChain}); " +
+                       $"spaced 3: {r.spaced:0.###} over {r.Elements} elements (expected about {r.plain + 3 * (r.Elements - 1):0.###})");
+        Assert.True(r.SameChain, "the notice name did not inherit the app's font chain");
+        Assert.Equal(r.ChainInk, r.plain, 3);
+        // Laid out element by element the kerning between them is gone, so allow a pixel.
+        Assert.InRange(r.spaced, r.plain + 3 * (r.Elements - 1) - 1, r.plain + 3 * (r.Elements - 1) + 1);
     }
 
     [Fact]
@@ -351,7 +582,7 @@ public class OsdWindowNoticeTests
             osd.SetSkinNotice(look, 1.0);
             osd.ShowNotice("Speakers");
             var view = Notice(osd);
-            return (ColorOf(view.NoticeText.Foreground), ColorOf(view.NoticeGlyph.Foreground));
+            return (ColorOf(view.NoticeText.Glyphs.Fill), ColorOf(view.NoticeGlyph.Foreground));
         });
 
         _out.WriteLine($"text {text}, glyph {glyph}");
@@ -379,7 +610,7 @@ public class OsdWindowNoticeTests
             osd.UpdateLayout();
             var view = Notice(osd);
             return (osd.IsVisible, ColorOf(view.PlateBorder.Background), view.PlateBorder.BorderThickness.Left,
-                ColorOf(view.NoticeText.Foreground), ColorOf(view.NoticeGlyph.Foreground));
+                ColorOf(view.NoticeText.Glyphs.Fill), ColorOf(view.NoticeGlyph.Foreground));
         });
 
         _out.WriteLine($"visible {visible}, back {back}, border {borderThickness}, text {text}, glyph {glyph}");
@@ -418,6 +649,48 @@ public class OsdWindowNoticeTests
             Assert.Equal(64, height);
         }
         finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>App owns its OSD's lifetime, so Close only hides it and the window can be shown
+    /// again; CloseForGood (the designer's notice preview, at its Dispose) really closes it, its
+    /// hide timer stopped.</summary>
+    [Fact]
+    public void Close_only_hides_the_osd_and_close_for_good_really_closes_it()
+    {
+        var r = With(osd =>
+        {
+            int closed = 0;
+            osd.Closed += (_, _) => closed++;
+            osd.ShowNotice("Speakers", light: false);
+            osd.Close();
+            var afterClose = (osd.IsVisible, Closed: closed);
+            osd.ShowNotice("Speakers", light: false);
+            var reshown = (osd.IsVisible, Timer: osd.HideTimerRunning);
+            osd.CloseForGood();
+            return (afterClose, reshown, AfterCloseForGood: (osd.IsVisible, Closed: closed, Timer: osd.HideTimerRunning));
+        });
+        _out.WriteLine("expected: Close hides without closing; the notice shows again with its hide timer running; " +
+                       $"CloseForGood closes once with the timer stopped; actual {r}");
+        Assert.Equal((false, 0), r.afterClose);
+        Assert.Equal((true, true), r.reshown);
+        Assert.Equal((false, 1, false), r.AfterCloseForGood);
+    }
+
+    /// <summary>HideNow takes a shown notice down at once and stops its hide timer, so nothing
+    /// ticks for a window that is already hidden (the designer's notice preview between uses).</summary>
+    [Fact]
+    public void Hide_now_hides_the_notice_and_stops_its_timer()
+    {
+        var r = With(osd =>
+        {
+            osd.ShowNotice("Speakers", light: false);
+            var shown = (osd.IsVisible, Timer: osd.HideTimerRunning);
+            osd.HideNow();
+            return (shown, Hidden: (osd.IsVisible, Timer: osd.HideTimerRunning));
+        });
+        _out.WriteLine($"expected shown with the timer running, then hidden with it stopped; actual {r}");
+        Assert.Equal((true, true), r.shown);
+        Assert.Equal((false, false), r.Hidden);
     }
 }
 

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using AorinEQ.Core;
+using Xunit.Abstractions;
 
 namespace AorinEQ.Tests;
 
@@ -15,6 +16,10 @@ namespace AorinEQ.Tests;
 [Collection("Loc")]
 public class LocKeyUsageTests
 {
+    private readonly ITestOutputHelper _out;
+
+    public LocKeyUsageTests(ITestOutputHelper output) => _out = output;
+
     private static readonly Regex XamlReference =
         new(@"\{loc:T\s+(?<key>[A-Za-z0-9_.\-]+)\s*\}", RegexOptions.Compiled);
 
@@ -29,9 +34,10 @@ public class LocKeyUsageTests
     /// Excluding a prefix from the orphan check would normally be a hole, so each family has a
     /// test that enumerates its real members instead: the two below are covered by
     /// Every_hud_widget_tray_action_and_language_has_a_name here, and help./feature. by
-    /// HelpCatalogueTests and FeatureCatalogueTests walking their catalogues.</summary>
+    /// HelpCatalogueTests and FeatureCatalogueTests walking their catalogues, and designer.issue.
+    /// by Every_skin_issue_kind_has_a_message_and_no_message_lacks_a_kind.</summary>
     private static readonly string[] ComposedPrefixes =
-        ["help.", "feature.", "surface.", "hud.widget.", "tray.action.", "language."];
+        ["help.", "feature.", "surface.", "hud.widget.", "tray.action.", "language.", "designer.issue."];
 
     private static IReadOnlyList<string> ReferencedKeys()
     {
@@ -125,5 +131,24 @@ public class LocKeyUsageTests
         Assert.True(malformed.Count == 0,
             $"Keys must be dot-separated lower-kebab segments:{Environment.NewLine}  " +
             string.Join($"{Environment.NewLine}  ", malformed));
+    }
+
+    /// <summary>The Skin Designer's problem messages are keyed by <see cref="SkinIssueKind"/> in
+    /// Core and composed at runtime, so neither direction of the contract is visible to the
+    /// literal scan above: enumerate the real kinds instead.</summary>
+    [Fact]
+    public void Every_skin_issue_kind_has_a_message_and_no_message_lacks_a_kind()
+    {
+        var table = Loc.Keys(Languages.En).ToHashSet(StringComparer.Ordinal);
+        var keys = Enum.GetValues<SkinIssueKind>().Select(SkinIssue.MessageKeyFor).ToList();
+        var missing = keys.Where(k => !table.Contains(k)).ToList();
+        var stray = table.Where(k => k.StartsWith("designer.issue.", StringComparison.Ordinal))
+            .Except(keys).OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+        _out.WriteLine($"issue kinds -> keys: {string.Join(", ", keys)}");
+        _out.WriteLine($"expected none missing and none stray; missing [{string.Join(", ", missing)}], stray [{string.Join(", ", stray)}]");
+        Assert.True(missing.Count == 0 && stray.Count == 0,
+            $"Issue kinds without a message: {string.Join(", ", missing)}{Environment.NewLine}" +
+            $"Messages without an issue kind: {string.Join(", ", stray)}");
     }
 }
