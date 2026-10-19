@@ -195,4 +195,64 @@ public class DefaultEndpointSwitcherTests
         Assert.Equal(DefaultChange.CableLost, disabled);
         Assert.Equal(DefaultChange.CableLost, nothingLeft);
     }
+
+    // ---------------------------------------------------------------- our own switch is silent
+
+    private const string CableGuid = "{aaaaaaaa-0000-0000-0000-000000000000}";
+    private const string SpeakersGuid = "{bbbbbbbb-0000-0000-0000-000000000000}";
+
+    [Theory]
+    [InlineData(true, CableGuid, CableGuid, true)]                                  // our record holds the default on the cable
+    [InlineData(true, "{AAAAAAAA-0000-0000-0000-000000000000}", CableGuid, true)]   // however the GUID is cased
+    [InlineData(true, SpeakersGuid, CableGuid, false)]                              // a reading of another device is news as usual
+    [InlineData(false, CableGuid, CableGuid, false)]                                // no record: the user chose the cable themselves
+    [InlineData(true, CableGuid, null, false)]                                      // the cable is gone
+    [InlineData(true, null, CableGuid, false)]                                      // no default device at all
+    public void Only_a_reading_of_the_cable_while_our_record_holds_it_there_is_ours(
+        bool recordHeld, string? readingGuid, string? cableGuid, bool expected)
+    {
+        var record = recordHeld ? Recorded : null;
+        bool ours = DefaultEndpointSwitcher.IsHeldOnCable(record, readingGuid, cableGuid);
+        _out.WriteLine($"record={(recordHeld ? "held" : "none")} reading={readingGuid ?? "(none)"} cable={cableGuid ?? "(none)"} -> ours={ours}");
+        Assert.Equal(expected, ours);
+    }
+
+    [Fact]
+    public void Keeping_our_cable_readings_from_the_health_tracker_silences_the_warning_the_repair_and_the_recovered_balloon()
+    {
+        // The real tracker and the real balloon/auto-repair rules, fed the three readings one
+        // AirPlay-only stream produces: the user's speakers (healthy), the cable AorinEQ switched to
+        // (Equalizer APO not on it), the speakers again after the restore.
+        var t0 = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        var speakers = new EapoHealthSnapshot(Installed: true, ActiveOnDevice: true, IncludeLinePresent: true, SpeakersGuid, t0);
+        var cable = new EapoHealthSnapshot(Installed: true, ActiveOnDevice: false, IncludeLinePresent: true, CableGuid, t0.AddSeconds(5));
+        var back = speakers with { CheckedAt = t0.AddSeconds(60) };
+
+        // CheckEapoHealth's gate: a reading IsHeldOnCable claims never reaches the tracker.
+        var gated = new EapoHealthTracker();
+        EapoHealthUpdate? Feed(EapoHealthSnapshot reading, DefaultRenderRecord? held) =>
+            DefaultEndpointSwitcher.IsHeldOnCable(held, reading.EndpointGuid, CableGuid) ? null : gated.Update(reading);
+        var start = Feed(speakers, held: null);
+        var onCable = Feed(cable, held: Recorded);   // stream running: record held, default on the cable
+        var restored = Feed(back, held: null);       // stream ended: record cleared, default back
+        _out.WriteLine($"gated: start={start?.Event} cable={(onCable is null ? "kept from the tracker" : onCable.Event.ToString())} restored={restored?.Event} notify={restored?.Notify}");
+        Assert.Null(onCable);
+        Assert.Equal(EapoHealthEvent.None, restored!.Event);
+        Assert.False(restored.Notify);
+        Assert.Null(EapoHealthCopy.Balloon(restored, VolumeModes.Eapo));
+
+        // The same three readings WITHOUT the gate: the cable raises a warning AND an automatic
+        // repair prompt, and the restore then announces "working again" — exactly what is suppressed.
+        var open = new EapoHealthTracker();
+        open.Update(speakers);
+        var warned = open.Update(cable);
+        var recovered = open.Update(back);
+        _out.WriteLine($"ungated: cable={warned.Event} notify={warned.Notify} autoRepair={EapoAutoRepair.ShouldStart(warned, null)}; "
+            + $"restored={recovered.Event} notify={recovered.Notify}");
+        Assert.True(warned.Notify);
+        Assert.NotNull(EapoHealthCopy.Balloon(warned, VolumeModes.Eapo));
+        Assert.True(EapoAutoRepair.ShouldStart(warned, declined: null));
+        Assert.Equal(EapoHealthEvent.Recovered, recovered.Event);
+        Assert.NotNull(EapoHealthCopy.Balloon(recovered, VolumeModes.Eapo));
+    }
 }

@@ -17,6 +17,11 @@ public partial class App
 {
     private AirPlayController? _airPlay;
 
+    /// <summary>The endpoint AorinEQ's own last default switch moved Windows to, until that
+    /// notification arrives — so <see cref="OnDefaultDeviceChanged"/> can tell it from the user's.
+    /// Null when no switch of ours is in flight.</summary>
+    private string? _airPlayOwnSwitchTarget;
+
     /// <summary>Discovery is slow (a few seconds of listening) and the result is reused by both
     /// the Settings page and the tray menu, so the last scan is kept.</summary>
     private IReadOnlyList<AirPlayDevice> _airPlayDevices = [];
@@ -68,7 +73,11 @@ public partial class App
     private bool ConnectAirPlay(AirPlayDevice device)
     {
         var setting = _settings.AirPlay ?? AirPlaySetting.Default;
-        bool started = AirPlay.Start(device, setting);
+        // AirPlay only needs a cable to route through; switched on without one it does nothing,
+        // and the stream is exactly what the user set. AirPlayStreamSetting is the one place that
+        // decides it, so the volume-key rule asks about the same endpoint this captures.
+        var (stream, cable) = AirPlayStreamSetting();
+        bool started = AirPlay.Start(device, stream);
 
         // What connecting does to settings is AirPlaySetting.Connecting's rule, not this method's:
         // three entry points reach here, and writing it out at each is how one of them ended up
@@ -78,7 +87,52 @@ public partial class App
             AirPlay = setting.Connecting(device.Id, device.DisplayName),
         };
         SaveSettings();
+        // Only once the stream is really running: a failed connect must not move anybody's sound.
+        if (started && cable is not null) BeginAirPlayOnly(cable.Id);
         return started;
+    }
+
+    /// <summary>Makes VB-Cable Windows' default output for all three roles, so nothing plays on the
+    /// speakers while the stream captures the cable. The defaults it displaces are written to disk
+    /// FIRST — flushed, not merely posted — so a process killed one instruction later still knows
+    /// what to put back on its next start. A record already held (reconnecting mid-stream) is kept:
+    /// it describes the user's devices; re-capturing now would record the cable. A cable that is
+    /// already the default with no record held is the user's own choice: nothing to record or move.
+    ///
+    /// If Windows refuses the switch, the record is dropped at once (anything that did move is put
+    /// back) and the stream still captures the cable: the user hears it locally this time, rather
+    /// than AorinEQ's notice and health suppression applying to a default it never moved.</summary>
+    private void BeginAirPlayOnly(string cableId)
+    {
+        if (string.Equals(AudioEndpoint.GetDefaultRenderEndpointId(), cableId, StringComparison.OrdinalIgnoreCase))
+            return;
+        if (_settings.AirPlayRestoreDefault is null)
+        {
+            _settings = _settings with { AirPlayRestoreDefault = DefaultEndpointSwitcher.Capture() };
+            SaveSettings();
+            _settingsSaver.Flush();
+        }
+        _airPlayOwnSwitchTarget = cableId;
+        if (DefaultEndpointSwitcher.SetDefaultForAllRoles(cableId))
+            return;
+        // AorinEQ has no log file; a trace line is what a debugger or DebugView sees.
+        System.Diagnostics.Trace.TraceWarning(
+            $"AirPlay only: Windows refused to make {cableId} the default output; streaming from it without switching.");
+        EndAirPlayOnly();
+    }
+
+    /// <summary>Puts back the defaults AirPlay only displaced, then forgets them — through
+    /// <see cref="DefaultEndpointSwitcher.RestoreRecorded"/>, the method the recovery test drives.
+    /// Every way a stream ends comes here (Disconnect, the receiver going away, an idle hang-up, a
+    /// session error, the app exiting, VB-Cable vanishing, a refused switch), and so does the next
+    /// start after a crash. The Multimedia endpoint it moved to is flagged as our own, so that
+    /// notification raises no notice.</summary>
+    private void EndAirPlayOnly()
+    {
+        if (_settings.AirPlayRestoreDefault is null) return;
+        (_settings, _airPlayOwnSwitchTarget) = DefaultEndpointSwitcher.RestoreRecorded(_settings);
+        SaveSettings();
+        _settingsSaver.Flush();
     }
 
     private void DisconnectAirPlay() => _airPlay?.Stop();
@@ -132,9 +186,17 @@ public partial class App
         // Raised from a background thread — see AirPlayController.StateChanged.
         Dispatcher.BeginInvoke(() =>
         {
+            // Whatever ended the stream — stop, failure, idle, a receiver that vanished — this is
+            // where AirPlay only gives the user their output back.
+            if (!AirPlay.IsStreaming) EndAirPlayOnly();
             _tray?.SetAirPlayStreaming(AirPlay.IsStreaming, AirPlay.Current?.Id);
             if (_settingsWindow is { IsVisible: true } window)
+            {
                 window.SetAirPlayState(AirPlay.Snapshot(), AirPlay.IsStreaming);
+                // Starting or ending a stream changes the endpoint the keys answer to (the cable
+                // under AirPlay only), so the volume-key note is re-judged with it.
+                window.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
+            }
         });
     }
 

@@ -420,6 +420,10 @@ public partial class App : System.Windows.Application
             // eapo mode for default-device tracking (per-device state switching) and the
             // mute-handover reads.
             SetupEndpointVolume();
+            // A restore record still on disk means the last session died mid-stream with Windows'
+            // default on VB-Cable. Nothing can be streaming yet, so it is put back now — after the
+            // endpoint backend exists, so the switch it causes is followed like any other.
+            EndAirPlayOnly();
             if (systemMode)
             {
                 // Quiet best-effort pipeline: system mode still renders per-device EQ through
@@ -1571,6 +1575,17 @@ public partial class App : System.Windows.Application
         if (snapshot.IncludeLinePresent == false && _writer is not null && TryEnsureInclude())
             snapshot = EapoHealthSnapshot.Read(now);
 
+        // AorinEQ's own AirPlay-only switch put the default on VB-Cable, so what this reading says
+        // about the cable is AorinEQ's doing, not news. The banner still shows the truth, but the
+        // tracker never sees it — so no balloon, no automatic-repair prompt, and no "working again"
+        // balloon when the default comes back (the tracker's last reading is still the device the
+        // user had). The cable's Equalizer APO is the "EQ the AirPlay stream" switch's business.
+        if (IsAirPlayOnlyCable(snapshot.EndpointGuid))
+        {
+            _settingsWindow?.SetEapoHealth(snapshot, _settings.VolumeMode, applies: true);
+            return;
+        }
+
         var update = _eapoHealth.Update(snapshot);
         _settingsWindow?.SetEapoHealth(update.Snapshot, _settings.VolumeMode, applies: true);
 
@@ -1606,6 +1621,13 @@ public partial class App : System.Windows.Application
             return false; // locked or not ours to write: the row reports the truth either way
         }
     }
+
+    /// <summary>Whether <paramref name="endpointGuid"/> is VB-Cable while AirPlay only holds the
+    /// default there — <see cref="DefaultEndpointSwitcher.IsHeldOnCable"/>, with the cable looked up
+    /// only while a record says it could matter.</summary>
+    private bool IsAirPlayOnlyCable(string? endpointGuid) =>
+        _settings.AirPlayRestoreDefault is { } record
+        && DefaultEndpointSwitcher.IsHeldOnCable(record, endpointGuid, VirtualCable.Find()?.Guid);
 
     // ---------------------------------------------------------------- the endpoint repair
 
@@ -2491,11 +2513,28 @@ public partial class App : System.Windows.Application
     /// actual volume into the freshly-switched state.</summary>
     private void OnDefaultDeviceChanged()
     {
-        _deviceStates.SwitchTo(AudioEndpoint.GetDefaultRenderEndpointId());
+        var newDefault = AudioEndpoint.GetDefaultRenderEndpointId();
+        // Is this AorinEQ's own AirPlay-only switch landing, the user overriding it mid-stream, or
+        // the cable vanishing? The cable is only looked up while a record says it matters.
+        var change = DefaultEndpointSwitcher.Classify(newDefault, _airPlayOwnSwitchTarget,
+            _settings.AirPlayRestoreDefault,
+            _settings.AirPlayRestoreDefault is null ? null : VirtualCable.Find()?.Id);
+        if (change == DefaultChange.Ours) _airPlayOwnSwitchTarget = null;
+        _deviceStates.SwitchTo(newDefault);
         RefreshActiveDeviceName();
-        if (_deviceNotice.Next(_settings.DeviceNoticeEnabled, _deviceStates.ActiveId, _activeDeviceName,
+        // Our own switch is not news. DeviceNotice still SEES it (enabled: false), so the next real
+        // switch is compared against the device the app is actually on.
+        if (_deviceNotice.Next(_settings.DeviceNoticeEnabled && change != DefaultChange.Ours,
+                _deviceStates.ActiveId, _activeDeviceName,
                 Loc.T("osd.device.none"), Loc.T("osd.device.changed")) is { } notice)
             ShowDeviceNotice(notice);
+        // The user picked another output mid-stream: theirs from now on, and the stream keeps
+        // capturing the cable. SaveSettings below persists the cleared record — and with it gone,
+        // the health check at the end of this method judges the user's device as usual.
+        if (change == DefaultChange.UserOverride)
+            _settings = _settings with { AirPlayRestoreDefault = null };
+        else if (change == DefaultChange.CableLost)
+            EndAirPlayOnly();
         RenderEqConfig();
         _tray?.Update(ActiveState.Percent, ActiveState.Muted);
         SaveSettings();
@@ -3317,6 +3356,9 @@ public partial class App : System.Windows.Application
         // and a live network session, and a TEARDOWN sent while the dispatcher drains is better
         // than leaving the receiver holding a session nobody is feeding.
         DisposeAirPlay();
+        // Disposing the controller raises nothing, so the default is put back explicitly; the
+        // saver is still alive here (it is disposed far below).
+        EndAirPlayOnly();
         // The HUD before the pipeline: its windows hold the audio registration, and the pipeline
         // must not be torn down while a registration is still outstanding.
         _hud?.Dispose();

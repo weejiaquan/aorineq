@@ -96,6 +96,31 @@ public static class DefaultEndpointSwitcher
             : null;
     }
 
+    /// <summary>The one restore every end of AirPlay only goes through — Disconnect, a dropped
+    /// receiver, the app exiting, the cable vanishing, a refused switch, and the NEXT START after a
+    /// crash (a record still in settings.json means the last session died with the default on the
+    /// cable). Puts each role back (see <see cref="Restore"/>) and returns the settings without the
+    /// record, for the caller to save, plus the endpoint the Multimedia default moved to. Settings
+    /// with no record come back as the same instance and nothing moves. The restore happens BEFORE
+    /// the caller persists the cleared record: dying between the two restores twice, which is
+    /// harmless, instead of not at all.</summary>
+    public static (Settings Settings, string? MovedTo) RestoreRecorded(Settings settings)
+    {
+        if (settings.AirPlayRestoreDefault is not { } record)
+            return (settings, null);
+        var movedTo = Restore(record);
+        return (settings with { AirPlayRestoreDefault = null }, movedTo);
+    }
+
+    /// <summary>Whether a reading of <paramref name="endpointGuid"/> describes VB-Cable while
+    /// AorinEQ's own AirPlay-only switch holds the default there (<paramref name="record"/> set).
+    /// Such a reading is AorinEQ's doing, not news: the health monitor keeps it from its tracker, so
+    /// there is no "Equalizer APO isn't running" balloon on every stream, no automatic-repair prompt
+    /// for the cable, and no "working again" balloon when the default comes back.</summary>
+    public static bool IsHeldOnCable(DefaultRenderRecord? record, string? endpointGuid, string? cableGuid) =>
+        record is not null && cableGuid is not null
+        && string.Equals(endpointGuid, cableGuid, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Reads one default-device notification. <paramref name="ownTargetId"/> is the
     /// endpoint AorinEQ's last switch moved to and has not yet seen land; <paramref name="record"/>
     /// is non-null while AirPlay only is managing the default; <paramref name="cableId"/> is the
