@@ -90,10 +90,13 @@ public static class VirtualCableInstaller
         GatedDownload.DownloadAsync(url, destinationPath, MaxPackageBytes, GatedDownload.ZipMagic,
             sha256: null, cancellationToken: cancellationToken);
 
+    /// <summary><c>%TEMP%\aorineq-vbcable</c>: every install's work folder is one guid below it.</summary>
+    public static string WorkRoot => Path.Combine(Path.GetTempPath(), "aorineq-vbcable");
+
     /// <summary>A fresh <c>%TEMP%\aorineq-vbcable\&lt;guid&gt;</c>, created.</summary>
     public static string NewWorkFolder()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "aorineq-vbcable", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(WorkRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         return folder;
     }
@@ -110,6 +113,29 @@ public static class VirtualCableInstaller
         {
             Trace.TraceWarning($"VirtualCableInstaller: couldn't delete '{folder}': {ex.Message}");
         }
+    }
+
+    /// <summary>Deletes every work folder under <paramref name="root"/> — the ones an install left
+    /// behind when AorinEQ was quit or killed mid-flow, before its own cleanup ran. Only for a
+    /// moment no install can be running (the single instance's startup). Best effort: a folder that
+    /// cannot go stays for the next start, and nothing here throws.</summary>
+    public static void DeleteStaleWorkFolders(string root)
+    {
+        string[] folders;
+        try
+        {
+            if (!Directory.Exists(root)) return;
+            folders = Directory.GetDirectories(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Trace.TraceWarning($"VirtualCableInstaller: couldn't list '{root}': {ex.Message}");
+            return;
+        }
+        foreach (var folder in folders)
+            DeleteWorkFolder(folder);
+        if (folders.Length > 0)
+            Trace.TraceInformation($"VirtualCableInstaller: swept {folders.Length} stale work folder(s) under '{root}'.");
     }
 
     /// <summary>Extracts every entry of the package into one folder, by name. EVERY name is checked
@@ -211,6 +237,12 @@ public static class VirtualCableInstaller
         int counted = starts + 1;
         return counted >= PendingStartLimit ? new(false, 0, false) : new(true, counted, false);
     }
+
+    /// <summary>The setup ran but the cable has not appeared: Windows needs a restart. The state
+    /// <see cref="ResolvePendingAtStart"/> then moves on each start, counted from zero; nothing else
+    /// in <paramref name="settings"/> is touched.</summary>
+    public static Settings EnterPendingReboot(Settings settings) =>
+        settings with { VirtualCablePendingReboot = true, VirtualCablePendingStarts = 0 };
 
     /// <summary>One app start's step, as the settings to keep: <see cref="NextPendingState"/>
     /// applied to <paramref name="settings"/>' pending fields, nothing else touched, and whether to

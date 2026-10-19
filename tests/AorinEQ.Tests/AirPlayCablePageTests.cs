@@ -294,17 +294,20 @@ public class AirPlayCablePageTests
             return (Card: w.AirPlayCableCard.Visibility, Title: w.AirPlayCableTitle.Text,
                 Subtitle: w.AirPlayCableSubtitle.Text, Button: w.AirPlayCableButton.Content as string,
                 Enabled: w.AirPlayCableButton.IsEnabled, Donation: w.AirPlayCableDonationText.Visibility,
-                Link: w.AirPlayCableVendorLink.Visibility, Only: w.AirPlayOnlyCard.Visibility);
+                Link: w.AirPlayCableVendorLink.Visibility, Only: w.AirPlayOnlyCard.Visibility,
+                Icon: (w.AirPlayCableButton.Icon as Wpf.Ui.Controls.SymbolIcon)?.Symbol);
         });
         // Spec §5's table, row by row.
-        var (title, subtitle, button) = state switch
+        var (title, subtitle, button, icon) = state switch
         {
             VirtualCableState.Inactive => (Loc.T("settings.airplay.cable.inactive-title"),
-                Loc.T("settings.airplay.cable.inactive-subtitle"), Loc.T("settings.airplay.cable.open-sound-settings")),
+                Loc.T("settings.airplay.cable.inactive-subtitle"), Loc.T("settings.airplay.cable.open-sound-settings"),
+                Wpf.Ui.Controls.SymbolRegular.Settings24),
             VirtualCableState.PendingReboot => (Loc.T("settings.airplay.cable.pending-title"),
-                Loc.T("settings.airplay.cable.pending-subtitle"), Loc.T("settings.airplay.cable.restart-now")),
+                Loc.T("settings.airplay.cable.pending-subtitle"), Loc.T("settings.airplay.cable.restart-now"),
+                Wpf.Ui.Controls.SymbolRegular.ArrowReset24),
             _ => (Loc.T("settings.air-play-cable.title"), Loc.T("settings.air-play-cable.subtitle"),
-                Loc.T("settings.air-play-cable.install")),
+                Loc.T("settings.air-play-cable.install"), Wpf.Ui.Controls.SymbolRegular.ArrowDownload24),
         };
         var donation = state == VirtualCableState.Missing ? Visibility.Visible : Visibility.Collapsed;
         _out.WriteLine($"{state}: {r}");
@@ -312,6 +315,7 @@ public class AirPlayCablePageTests
         Assert.Equal(title, r.Title);
         Assert.Equal(subtitle, r.Subtitle);
         Assert.Equal(button, r.Button);
+        Assert.Equal(icon, r.Icon);         // the icon says what the button does, like its words
         Assert.True(r.Enabled);
         Assert.Equal(donation, r.Donation); // only the Missing state talks about donations
         Assert.Equal(donation, r.Link);
@@ -372,6 +376,59 @@ public class AirPlayCablePageTests
         Assert.Equal((progress, false), r.During);
         Assert.Equal((verdict, true), r.After);   // retry is possible straight away
         Assert.Equal((Loc.T("settings.air-play-cable.subtitle"), true), r.Idle);
+    }
+
+    [Fact]
+    public void A_verdict_outlives_the_activation_that_follows_it_but_not_a_state_change_or_a_click()
+    {
+        // The browser (download failed) or the UAC prompt (cancelled) re-activates the window, and
+        // every activation pushes the cable state again: that push must not erase the verdict.
+        var verdict = Loc.T("app.vbcable.download-failed");
+        var r = With(Settings.Default, w =>
+        {
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            w.SetVirtualCableVerdict(verdict);
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            var afterPush = (w.AirPlayCableSubtitle.Text, w.AirPlayCableButton.IsEnabled);
+            w.SetVirtualCable(VirtualCableState.PendingReboot, null);
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            var afterStateChange = w.AirPlayCableSubtitle.Text;
+            w.SetVirtualCableVerdict(verdict);
+            Click(w.AirPlayCableButton);
+            var afterClick = w.AirPlayCableSubtitle.Text;
+            return (AfterPush: afterPush, AfterStateChange: afterStateChange, AfterClick: afterClick);
+        });
+        _out.WriteLine($"same-state push {r.AfterPush}; after a state change '{r.AfterStateChange}'; after a click '{r.AfterClick}'");
+        Assert.Equal((verdict, true), r.AfterPush);
+        Assert.Equal(Loc.T("settings.air-play-cable.subtitle"), r.AfterStateChange);
+        Assert.Equal(Loc.T("settings.air-play-cable.subtitle"), r.AfterClick);
+    }
+
+    [Fact]
+    public void An_install_in_progress_survives_state_pushes_and_shows_on_a_window_opened_mid_install()
+    {
+        var progress = Loc.T("app.vbcable.installing");
+        // A window that was open: the UAC prompt's re-activation pushes the state mid-install.
+        var open = With(Settings.Default, w =>
+        {
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            w.SetVirtualCableProgress(progress);
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            return (w.AirPlayCableSubtitle.Text, w.AirPlayCableButton.IsEnabled);
+        });
+        // A window opened mid-install: App pushes the state and then the step it is on, in either
+        // order, and the button must not offer an install that would be dropped.
+        var fresh = With(Settings.Default, w =>
+        {
+            var asked = 0;
+            w.VirtualCableInstallRequested += () => asked++;
+            w.SetVirtualCableProgress(progress);
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            return (w.AirPlayCableSubtitle.Text, w.AirPlayCableButton.IsEnabled, Asked: asked);
+        });
+        _out.WriteLine($"open window after a push {open}; window opened mid-install {fresh}");
+        Assert.Equal((progress, false), open);
+        Assert.Equal((progress, false, 0), fresh);
     }
 
     [Fact]

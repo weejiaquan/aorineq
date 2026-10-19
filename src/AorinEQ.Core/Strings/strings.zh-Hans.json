@@ -456,6 +456,7 @@
   "app.vbcable.download-failed": "无法下载 VB-Cable，已改为在浏览器中打开 VB-Audio 的页面。",
   "app.vbcable.setup-failed": "无法启动 VB-Audio 的安装程序，已改为在浏览器中打开 VB-Audio 的页面。",
   "app.vbcable.restart-confirm": "现在重启 Windows 以完成 VB-Cable 的安装吗？请先保存手头的工作。",
+  "app.vbcable.restart-failed": "Windows 没有开始重启（可能被策略禁止，或者已经在关机）。请从“开始”菜单重启，以完成 VB-Cable 的安装。",
   "app.updated-to-aorineq": "已更新到 AorinEQ {0}。",
   "app.aorineq-appears-to-be-running-under": "本次会话中，AorinEQ 似乎在另一个账户或安全上下文下运行。",
   "app.restart-aorineq-elevated-now": "现在就以管理员权限重启 AorinEQ 吗？",

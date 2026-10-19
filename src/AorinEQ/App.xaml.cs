@@ -578,6 +578,9 @@ public partial class App : System.Windows.Application
         SetupAutoUpdate();
         NudgeToDiscoverOnce();
         ResolveVirtualCablePending();
+        // Only the single instance gets here, and nothing has been clicked yet, so every work folder
+        // under the root is one a VB-Cable install left when AorinEQ was quit mid-flow.
+        VirtualCableInstaller.DeleteStaleWorkFolders(VirtualCableInstaller.WorkRoot);
         if (e.Args.Contains("--updated"))
             _tray!.ShowInfo(Loc.T("app.updated-to-aorineq", GetVersionString()));
 

@@ -28,6 +28,16 @@ public partial class SettingsWindow
     private bool _airPlayStreaming;
     private VirtualCableState _cableState = VirtualCableState.Missing;
 
+    /// <summary>The install's current step while App runs one, else null. Kept so the state pushes
+    /// that keep arriving meanwhile (every activation, a device change) cannot wipe it or re-enable
+    /// the button.</summary>
+    private string? _cableProgress;
+
+    /// <summary>The last attempt's verdict, kept for as long as the card's state is the one it was
+    /// given in — the browser or UAC prompt that came with it re-activates the window, and that
+    /// push must not erase the sentence before it is read. Cleared by a state change or a click.</summary>
+    private string? _cableVerdict;
+
     /// <summary>"Install VB-Cable" on the card.</summary>
     public event Action? VirtualCableInstallRequested;
 
@@ -107,6 +117,7 @@ public partial class SettingsWindow
     /// only and EQ rows appear; without one they are hidden.</summary>
     public void SetVirtualCable(VirtualCableState state, string? cableEndpointId)
     {
+        if (state != _cableState) _cableVerdict = null;
         _cableState = state;
         _cableEndpointId = state == VirtualCableState.Present ? cableEndpointId : null;
         var present = _cableEndpointId is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -117,9 +128,10 @@ public partial class SettingsWindow
         ApplyAirPlayOnly();
     }
 
-    /// <summary>The card's words and its one button, by state (spec §5). Every arm names its keys
-    /// literally, so the string-table usage check can see them. Only the Missing state talks about
-    /// donations: the other two already have VB-Cable.</summary>
+    /// <summary>The card's words and its one button, by state (spec §5), then any install step or
+    /// verdict in place of the subtitle. Every arm names its keys literally, so the string-table
+    /// usage check can see them. Only the Missing state talks about donations: the other two
+    /// already have VB-Cable.</summary>
     private void ApplyCableCard()
     {
         switch (_cableState)
@@ -128,43 +140,45 @@ public partial class SettingsWindow
                 AirPlayCableTitle.Text = Loc.T("settings.airplay.cable.inactive-title");
                 AirPlayCableSubtitle.Text = Loc.T("settings.airplay.cable.inactive-subtitle");
                 AirPlayCableButton.Content = Loc.T("settings.airplay.cable.open-sound-settings");
+                AirPlayCableButton.Icon = new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.Settings24);
                 break;
             case VirtualCableState.PendingReboot:
                 AirPlayCableTitle.Text = Loc.T("settings.airplay.cable.pending-title");
                 AirPlayCableSubtitle.Text = Loc.T("settings.airplay.cable.pending-subtitle");
                 AirPlayCableButton.Content = Loc.T("settings.airplay.cable.restart-now");
+                AirPlayCableButton.Icon = new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.ArrowReset24);
                 break;
             default:
                 AirPlayCableTitle.Text = Loc.T("settings.air-play-cable.title");
                 AirPlayCableSubtitle.Text = Loc.T("settings.air-play-cable.subtitle");
                 AirPlayCableButton.Content = Loc.T("settings.air-play-cable.install");
+                AirPlayCableButton.Icon = new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.ArrowDownload24);
                 break;
         }
-        AirPlayCableButton.IsEnabled = true;
         var donation = _cableState == VirtualCableState.Missing ? Visibility.Visible : Visibility.Collapsed;
         AirPlayCableDonationText.Visibility = donation;
         AirPlayCableVendorLink.Visibility = donation;
+        AirPlayCableButton.IsEnabled = _cableProgress is null;
+        if ((_cableProgress ?? _cableVerdict) is { } line) AirPlayCableSubtitle.Text = line;
     }
 
     /// <summary>A progress line under the card's title while App installs, with the button
-    /// disabled. Null puts the card back to describing its state.</summary>
+    /// disabled; it survives later state pushes until replaced. Null puts the card back to
+    /// describing its state, dropping any verdict too.</summary>
     public void SetVirtualCableProgress(string? text)
     {
-        if (text is null)
-        {
-            ApplyCableCard();
-            return;
-        }
-        AirPlayCableSubtitle.Text = text;
-        AirPlayCableButton.IsEnabled = false;
+        _cableProgress = text;
+        if (text is null) _cableVerdict = null;
+        ApplyCableCard();
     }
 
     /// <summary>A finished attempt's verdict ("Install cancelled."), left under the title with the
-    /// button usable again so the user can retry.</summary>
+    /// button usable again so the user can retry. Ends any progress line.</summary>
     public void SetVirtualCableVerdict(string text)
     {
+        _cableProgress = null;
+        _cableVerdict = text;
         ApplyCableCard();
-        AirPlayCableSubtitle.Text = text;
     }
 
     /// <summary>App changed the AirPlay block itself (the post-install "turn on AirPlay only?"), so
@@ -177,6 +191,9 @@ public partial class SettingsWindow
 
     private void OnAirPlayCableButton(object sender, RoutedEventArgs e)
     {
+        // A new attempt: the last one's verdict has been read.
+        _cableVerdict = null;
+        ApplyCableCard();
         switch (_cableState)
         {
             case VirtualCableState.Inactive:

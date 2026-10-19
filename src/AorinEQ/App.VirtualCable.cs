@@ -25,17 +25,17 @@ public partial class App
                 () => _ = OpenSettingsAsync(SettingsSections.AirPlay));
     }
 
-    /// <summary>Everything the AirPlay page shows about VB-Cable, read from the machine now. Stands
-    /// down while an install runs: the activation that follows VB-Audio's UAC prompt must not wipe
-    /// the install's progress line or re-enable its button; the install pushes once it ends.</summary>
+    /// <summary>Everything the AirPlay page shows about VB-Cable, read from the machine now — and,
+    /// while an install runs, the step it is on, so a window opened mid-install shows it busy
+    /// rather than offering an install that would be dropped.</summary>
     private void PushVirtualCableState(UI.SettingsWindow window)
     {
-        if (_virtualCableInstalling) return;
         var cable = VirtualCable.Find();
         window.SetVirtualCable(
             VirtualCable.StateFor(cable is not null, VirtualCable.IsInstalledButInactive(),
                 _settings.VirtualCablePendingReboot),
             cable?.Id);
+        if (_virtualCableInstallProgress is { } progress) window.SetVirtualCableProgress(progress);
         // While the cable's own repair runs, the toggle is showing the user's request, not the
         // machine: the UAC prompt deactivates and reactivates the window, and that activation must
         // not flip it back. Any other run (the default device's) leaves it showing the machine, so a
@@ -73,13 +73,24 @@ public partial class App
     /// window can be closed and reopened mid-flow.</summary>
     private bool _virtualCableInstalling;
 
+    /// <summary>The install step on screen, for a window opened mid-install; null when none runs.</summary>
+    private string? _virtualCableInstallProgress;
+
+    private void ShowVirtualCableProgress(string text)
+    {
+        _virtualCableInstallProgress = text;
+        _settingsWindow?.SetVirtualCableProgress(text);
+    }
+
     /// <summary>The guided install: find VB-Audio's newest package, download it through every gate,
     /// extract it flat, verify the setup is VB-Audio's, run VB-Audio's own installer elevated, then
     /// look for the cable for ten seconds. Every failure finding or fetching the package — no temp
-    /// folder, no network, a 404, a gate — sends the user to VB-Audio's page instead. The work folder
-    /// is created INSIDE the try, so the running flag always resets and the folder is deleted
-    /// whatever happens. The follow-up question (AirPlay only, or restart) is asked only after the
-    /// folder is gone, so VB-Audio's files do not sit in %TEMP% for as long as a dialog stays open.</summary>
+    /// folder, no network, a 404, a gate — sends the user to VB-Audio's page instead. Anything else
+    /// that goes wrong is written to the crash log and also ends on VB-Audio's page, never in a
+    /// faulted task behind an idle card. The work folder is created INSIDE the try, so the running
+    /// flag always resets and the folder is deleted whatever happens. The follow-up question
+    /// (AirPlay only, or restart) is asked only after the folder is gone, so VB-Audio's files do
+    /// not sit in %TEMP% for as long as a dialog stays open.</summary>
     private async Task InstallVirtualCableAsync()
     {
         if (_virtualCableInstalling) return;
@@ -95,9 +106,9 @@ public partial class App
             {
                 work = VirtualCableInstaller.NewWorkFolder();
                 zip = Path.Combine(work, "pack.zip");
-                _settingsWindow?.SetVirtualCableProgress(Loc.T("app.vbcable.finding"));
+                ShowVirtualCableProgress(Loc.T("app.vbcable.finding"));
                 var url = await VirtualCableInstaller.ResolvePackageUrlAsync();
-                _settingsWindow?.SetVirtualCableProgress(Loc.T("app.vbcable.downloading"));
+                ShowVirtualCableProgress(Loc.T("app.vbcable.downloading"));
                 await VirtualCableInstaller.DownloadPackageAsync(url, zip);
             }
             catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException
@@ -112,14 +123,14 @@ public partial class App
                 return;
             }
 
-            _settingsWindow?.SetVirtualCableProgress(Loc.T("app.vbcable.verifying"));
+            ShowVirtualCableProgress(Loc.T("app.vbcable.verifying"));
             if (VirtualCableInstaller.PrepareSetup(zip, work, Environment.Is64BitOperatingSystem) is not { } setup)
             {
                 verdict = Loc.T("app.vbcable.not-verified");
                 return;
             }
 
-            _settingsWindow?.SetVirtualCableProgress(Loc.T("app.vbcable.installing"));
+            ShowVirtualCableProgress(Loc.T("app.vbcable.installing"));
             switch (await RunVirtualCableSetupAsync(setup, work))
             {
                 case VirtualCableLaunch.Cancelled:
@@ -132,7 +143,7 @@ public partial class App
             }
             setupRan = true;
 
-            _settingsWindow?.SetVirtualCableProgress(Loc.T("app.vbcable.detecting"));
+            ShowVirtualCableProgress(Loc.T("app.vbcable.detecting"));
             cableFound = await VirtualCableInstaller.WaitForCableAsync(VirtualCableInstaller.DetectTimeout) is not null;
             if (cableFound)
             {
@@ -141,16 +152,29 @@ public partial class App
             else
             {
                 // The card turns to "Restart Windows to finish"; the next starts resolve it.
-                _settings = _settings with { VirtualCablePendingReboot = true, VirtualCablePendingStarts = 0 };
+                _settings = VirtualCableInstaller.EnterPendingReboot(_settings);
                 SaveSettings();
             }
+        }
+        catch (Exception ex)
+        {
+            // Not one of the expected failures (a COM error reading the devices, a signature API
+            // gone wrong, ...): it is recorded where crashes are, and the user is sent to VB-Audio's
+            // page with the same words as a setup that could not start. No follow-up question: what
+            // happened is unknown, so neither "installed" nor "restart" can be claimed.
+            TryWriteCrashLog(ex, "VirtualCableInstall");
+            OpenUrl(VirtualCable.VendorPage);
+            verdict = Loc.T("app.vbcable.setup-failed");
+            setupRan = false;
         }
         finally
         {
             if (work is not null) VirtualCableInstaller.DeleteWorkFolder(work);
             _virtualCableInstalling = false;
+            _virtualCableInstallProgress = null;
             if (_settingsWindow is { } window)
             {
+                window.SetVirtualCableProgress(null);
                 PushVirtualCableState(window);
                 if (verdict is not null) window.SetVirtualCableVerdict(verdict);
             }
@@ -158,7 +182,7 @@ public partial class App
 
         if (!setupRan) return;
         if (cableFound) OfferAirPlayOnly();
-        else ConfirmRestartForVirtualCable();
+        else await ConfirmRestartForVirtualCableAsync();
     }
 
     /// <summary>Runs VB-Audio's setup elevated from the extract folder (it installs the .inf/.sys/
@@ -206,25 +230,39 @@ public partial class App
         _settingsWindow?.SetAirPlaySetting(updated);
     }
 
-    /// <summary>Restart now / Later. "Later" leaves the pending card up; the next start resolves it.</summary>
-    private void ConfirmRestartForVirtualCable()
+    /// <summary>Restart now / Later. "Later" leaves the pending card up; the next start resolves it.
+    /// A restart Windows refuses — shutdown.exe not starting, or exiting non-zero because policy
+    /// forbids it or a shutdown is already under way — is said, not swallowed.</summary>
+    private async Task ConfirmRestartForVirtualCableAsync()
     {
         if (System.Windows.MessageBox.Show(Loc.T("app.vbcable.restart-confirm"), "AorinEQ",
                 System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question)
             != System.Windows.MessageBoxResult.Yes)
             return;
         _settingsSaver.Flush();
+        bool accepted = false;
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            using var shutdown = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
                 Path.Combine(Environment.SystemDirectory, "shutdown.exe"), "/r /t 0")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
-            })?.Dispose();
+            });
+            if (shutdown is not null)
+            {
+                await shutdown.WaitForExitAsync();
+                accepted = shutdown.ExitCode == 0;
+                if (!accepted)
+                    System.Diagnostics.Trace.TraceWarning($"VB-Cable restart: shutdown.exe exited {shutdown.ExitCode}.");
+            }
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (System.ComponentModel.Win32Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"VB-Cable restart: shutdown.exe didn't start: {ex.Message}");
         }
+        if (!accepted)
+            System.Windows.MessageBox.Show(Loc.T("app.vbcable.restart-failed"), "AorinEQ",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
     }
 }

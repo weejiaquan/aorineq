@@ -496,4 +496,83 @@ public class VirtualCableInstallerTests
         Assert.False(Directory.Exists(a));
         Assert.False(Directory.Exists(b));
     }
+
+    [Fact]
+    public void Entering_the_pending_reboot_state_starts_the_count_at_zero_and_touches_nothing_else()
+    {
+        // Left over from an earlier install that gave up halfway through its count: a new install
+        // that needs a restart starts the count again.
+        var before = Settings.Default with
+        {
+            Percent = 37,
+            VirtualCablePendingReboot = false,
+            VirtualCablePendingStarts = 2,
+            AirPlay = AirPlaySetting.Default with { AirPlayOnly = true },
+        };
+        var after = VirtualCableInstaller.EnterPendingReboot(before);
+        _out.WriteLine($"pending={after.VirtualCablePendingReboot} starts={after.VirtualCablePendingStarts}");
+        Assert.Equal(before with { VirtualCablePendingReboot = true, VirtualCablePendingStarts = 0 }, after);
+        // And the next start, still without the cable, counts one: the two halves agree.
+        var (next, announce) = VirtualCableInstaller.ResolvePendingAtStart(after, cableFound: false);
+        _out.WriteLine($"next start without the cable -> pending={next.VirtualCablePendingReboot} starts={next.VirtualCablePendingStarts}");
+        Assert.True(next.VirtualCablePendingReboot);
+        Assert.Equal(1, next.VirtualCablePendingStarts);
+        Assert.False(announce);
+    }
+
+    [Fact]
+    public void The_startup_sweep_deletes_every_left_over_work_folder_and_survives_one_it_cannot_delete()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aorineq-sweep-test-" + Guid.NewGuid().ToString("N"));
+        var gone1 = Directory.CreateDirectory(Path.Combine(root, Guid.NewGuid().ToString("N"))).FullName;
+        var gone2 = Directory.CreateDirectory(Path.Combine(root, Guid.NewGuid().ToString("N"))).FullName;
+        var held = Directory.CreateDirectory(Path.Combine(root, Guid.NewGuid().ToString("N"))).FullName;
+        File.WriteAllText(Path.Combine(gone1, "pack.zip"), "x");
+        File.WriteAllText(Path.Combine(gone2, "VBCABLE_Setup_x64.exe"), "x");
+        var heldFile = Path.Combine(held, "vbMmeCable64_win7.sys");
+        try
+        {
+            using (new FileStream(heldFile, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                VirtualCableInstaller.DeleteStaleWorkFolders(root); // must not throw on the held one
+                _out.WriteLine($"after the sweep: gone1={Directory.Exists(gone1)} gone2={Directory.Exists(gone2)} held={File.Exists(heldFile)}");
+                Assert.False(Directory.Exists(gone1));
+                Assert.False(Directory.Exists(gone2));
+                Assert.True(File.Exists(heldFile)); // a file in use stays for the next start
+            }
+            VirtualCableInstaller.DeleteStaleWorkFolders(root); // the next start gets it
+            _out.WriteLine($"second sweep: held={Directory.Exists(held)} root={Directory.Exists(root)}");
+            Assert.False(Directory.Exists(held));
+            Assert.True(Directory.Exists(root)); // the root itself is left for the next install
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Sweeping_a_root_that_does_not_exist_does_nothing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "aorineq-sweep-test-" + Guid.NewGuid().ToString("N"));
+        VirtualCableInstaller.DeleteStaleWorkFolders(root);
+        _out.WriteLine($"{root} exists after the sweep: {Directory.Exists(root)}");
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public void Work_folders_live_directly_under_the_root_the_startup_sweep_is_given()
+    {
+        var folder = VirtualCableInstaller.NewWorkFolder();
+        try
+        {
+            _out.WriteLine($"root {VirtualCableInstaller.WorkRoot}; folder {folder}");
+            Assert.Equal(Path.GetFullPath(VirtualCableInstaller.WorkRoot),
+                Path.GetDirectoryName(Path.GetFullPath(folder)), ignoreCase: true);
+        }
+        finally
+        {
+            VirtualCableInstaller.DeleteWorkFolder(folder);
+        }
+    }
 }

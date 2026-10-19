@@ -456,6 +456,7 @@
   "app.vbcable.download-failed": "VB-Cable을 내려받을 수 없어 대신 브라우저에서 VB-Audio 페이지를 열었습니다.",
   "app.vbcable.setup-failed": "VB-Audio 설치 프로그램을 시작할 수 없어 대신 브라우저에서 VB-Audio 페이지를 열었습니다.",
   "app.vbcable.restart-confirm": "VB-Cable 설치를 마치기 위해 지금 Windows를 다시 시작할까요? 열려 있는 작업을 먼저 저장하세요.",
+  "app.vbcable.restart-failed": "Windows가 다시 시작을 시작하지 않았습니다(정책으로 막혀 있거나 이미 종료 중일 수 있습니다). VB-Cable 설치를 마치려면 시작 메뉴에서 다시 시작하세요.",
   "app.updated-to-aorineq": "AorinEQ {0}(으)로 업데이트했습니다.",
   "app.aorineq-appears-to-be-running-under": "이번 세션에서 AorinEQ가 다른 계정이나 보안 컨텍스트로 실행되고 있는 것 같습니다.",
   "app.restart-aorineq-elevated-now": "AorinEQ를 관리자 권한으로 지금 다시 시작할까요?",

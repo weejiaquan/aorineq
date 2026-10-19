@@ -456,6 +456,7 @@
   "app.vbcable.download-failed": "無法下載 VB-Cable，已改為在瀏覽器中開啟 VB-Audio 的頁面。",
   "app.vbcable.setup-failed": "無法啟動 VB-Audio 的安裝程式，已改為在瀏覽器中開啟 VB-Audio 的頁面。",
   "app.vbcable.restart-confirm": "現在重新啟動 Windows 以完成 VB-Cable 的安裝嗎？請先儲存手邊的工作。",
+  "app.vbcable.restart-failed": "Windows 沒有開始重新啟動（可能被原則禁止，或者已經在關機）。請從「開始」功能表重新啟動，以完成 VB-Cable 的安裝。",
   "app.updated-to-aorineq": "已更新到 AorinEQ {0}。",
   "app.aorineq-appears-to-be-running-under": "本次工作階段中，AorinEQ 似乎在另一個帳戶或安全性內容下執行。",
   "app.restart-aorineq-elevated-now": "現在就以系統管理員權限重新啟動 AorinEQ 嗎？",
