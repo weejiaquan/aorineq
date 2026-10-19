@@ -1,4 +1,5 @@
-﻿using System.Security.AccessControl;
+﻿using System.Diagnostics;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 
@@ -168,15 +169,38 @@ public static class EapoRepair
     /// record that names it. Null when there is none (or the GUID is not one).</summary>
     public static EapoRepairBackup? LoadBackupFor(string endpointGuid, string? directory = null)
     {
-        if (!Guid.TryParse(endpointGuid, out _))
-            return null;
-        if (EapoRepairBackup.Load(BackupPathFor(endpointGuid, directory)) is { } own)
+        if (LoadSlotFor(endpointGuid, directory) is { } own)
             return own;
         return EapoRepairBackup.Load(Path.Combine(directory ?? StateDirectory, LegacyBackupFileName)) is { } legacy
-            && string.Equals(legacy.EndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase)
+            && SameEndpoint(legacy.EndpointGuid, endpointGuid)
                 ? legacy
                 : null;
     }
+
+    /// <summary>The record in this endpoint's OWN slot only — never the legacy one — or null. What
+    /// the elevated undo acts on, after migration has moved any legacy record into its slot. A
+    /// slot whose record names a different device reads as empty: see <see cref="LoadSlot"/>.</summary>
+    public static EapoRepairBackup? LoadSlotFor(string endpointGuid, string? directory = null) =>
+        Guid.TryParse(endpointGuid, out _) ? LoadSlot(BackupPathFor(endpointGuid, directory), endpointGuid) : null;
+
+    /// <summary>The record in one endpoint's slot, or null when there is none — or when it names a
+    /// different device than the slot is for. Undo writes to whichever device a record NAMES, so a
+    /// record sitting in somebody else's slot would aim the elevated write at a device the caller
+    /// never chose. No release writes one; it is refused rather than followed, and traced.</summary>
+    private static EapoRepairBackup? LoadSlot(string slotPath, string slotGuid)
+    {
+        if (EapoRepairBackup.Load(slotPath) is not { } backup)
+            return null;
+        if (SameEndpoint(backup.EndpointGuid, slotGuid))
+            return backup;
+        Trace.TraceWarning($"EapoRepair: ignoring '{slotPath}': it is the slot for {slotGuid} but names {backup.EndpointGuid}");
+        return null;
+    }
+
+    /// <summary>Whether two strings name the same endpoint: compared as GUIDs, so braces and case
+    /// never make one device into two. Anything that is not a GUID matches nothing.</summary>
+    private static bool SameEndpoint(string a, string b) =>
+        Guid.TryParse(a, out var ga) && Guid.TryParse(b, out var gb) && ga == gb;
 
     /// <summary>Every readable record in the state directory, legacy slot included — what the
     /// startup "an earlier repair didn't finish" check scans.</summary>
@@ -188,8 +212,8 @@ public static class EapoRepair
             if (!Directory.Exists(dir))
                 return [];
             return SlotFiles(dir)
-                .Append(Path.Combine(dir, LegacyBackupFileName))
-                .Select(EapoRepairBackup.Load)
+                .Select(file => LoadSlot(file, Path.GetFileNameWithoutExtension(file)[SlotPrefix.Length..]))
+                .Append(EapoRepairBackup.Load(Path.Combine(dir, LegacyBackupFileName)))
                 .OfType<EapoRepairBackup>()
                 .ToList();
         }
@@ -221,6 +245,29 @@ public static class EapoRepair
         {
             return false;
         }
+    }
+
+    /// <summary>Which Settings page the startup "an earlier repair didn't finish" balloon opens, or
+    /// null for no balloon. Only an interrupted record the user can actually undo is announced: the
+    /// default device's opens Volume (its Undo acts on the default), VB-Cable's opens AirPlay (its
+    /// undo is the "EQ the AirPlay stream" toggle). An interrupted record for any other device has
+    /// no control that can undo it, so announcing it would nag on every start with no way out; it
+    /// stays on disk untouched and is traced instead.</summary>
+    public static string? InterruptedRepairPage(
+        IEnumerable<EapoRepairBackup> records, string? defaultGuid, string? cableGuid)
+    {
+        string? page = null;
+        foreach (var record in records.Where(r => r.IsInterrupted))
+        {
+            if (defaultGuid is not null && SameEndpoint(record.EndpointGuid, defaultGuid))
+                page = SettingsSections.Volume;
+            else if (cableGuid is not null && SameEndpoint(record.EndpointGuid, cableGuid))
+                page ??= SettingsSections.AirPlay;
+            else
+                Trace.TraceWarning($"EapoRepair: an interrupted repair of {record.EndpointGuid} is on disk, "
+                    + "but that device is neither the default nor VB-Cable, so nothing in AorinEQ can undo it");
+        }
+        return page;
     }
 
     private static IEnumerable<string> SlotFiles(string directory) =>
@@ -408,16 +455,16 @@ public static class EapoRepair
     /// returns true when the audio services came back; <paramref name="verifyEndpointUsable"/> is
     /// the caller's independent check that the device is still enumerable and still opens for
     /// playback — the part that cannot be answered from the registry we just wrote.</summary>
-    /// <param name="backupPath">Where the undo record is kept. Defaults to this endpoint's own
-    /// <see cref="BackupPathFor"/> slot, which is what the product always uses; it is a parameter so
-    /// a test can point the slot at a file it owns.</param>
+    /// <param name="directory">The state directory holding the undo record — this endpoint's own
+    /// <see cref="BackupPathFor"/> slot in it. Defaults to <see cref="StateDirectory"/>, which is
+    /// what the product always uses; it is a parameter so a test can point it at one it owns.</param>
     public static EapoRepairResult Repair(
         string endpointGuid, Func<bool> restartAudio, Func<bool> verifyEndpointUsable,
-        string? backupPath = null)
+        string? directory = null)
     {
         if (!Guid.TryParse(endpointGuid, out _))
             return new(EapoRepairOutcome.Refused, "that isn't a playback device AorinEQ recognises.");
-        var slot = backupPath ?? BackupPathFor(endpointGuid);
+        var slot = BackupPathFor(endpointGuid, directory);
 
         if (EapoDetection.GetInstallPath() is not { } install)
             return new(EapoRepairOutcome.Refused,
@@ -437,8 +484,10 @@ public static class EapoRepair
         // only description of a device nothing has checked since, and Undo — the designed way
         // out — puts it back. A COMPLETED record of this same device is safe to replace: its
         // captured "before" state is the one being captured again. A record that cannot be written
-        // back protects nothing and must not lock the user out, so it never blocks.
-        if (EapoRepairBackup.Load(slot) is { IsRestorable: true, IsInterrupted: true })
+        // back protects nothing and must not lock the user out, so it never blocks. Looked up the
+        // way Settings finds the undo — own slot, else a not-yet-migrated legacy record of this device — so
+        // an interrupted record from before per-endpoint slots blocks exactly the same.
+        if (LoadBackupFor(endpointGuid, directory) is { IsRestorable: true, IsInterrupted: true })
             return new(EapoRepairOutcome.Refused,
                 "An earlier repair didn't finish, and AorinEQ won't start another one over it. Undo the "
                 + "earlier repair first — that puts the device back exactly as it was.");

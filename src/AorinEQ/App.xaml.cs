@@ -1492,14 +1492,13 @@ public partial class App : System.Windows.Application
         // lost power — leaves a backup still marked "applying". The endpoint is then in a state
         // nothing has checked, so the user is told, once, that the way out exists. Only ever a
         // balloon: undoing somebody's audio settings without asking is exactly the behaviour this
-        // whole feature is careful not to have. The click goes to the page that can undo THAT
-        // slot: the Volume page's Undo acts on the default device, and the only other slot the
-        // helper ever writes is VB-Cable's, whose undo is the AirPlay page's EQ toggle.
-        if (EapoRepair.LoadAllBackups().Any(b => b.IsInterrupted))
+        // whole feature is careful not to have. Only a record something can undo is announced, and
+        // the click goes to the page that can — see EapoRepair.InterruptedRepairPage.
+        if (EapoRepair.InterruptedRepairPage(
+                EapoRepair.LoadAllBackups(),
+                AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
+                VirtualCable.Find()?.Guid) is { } page)
         {
-            var page = DefaultEndpointBackup() is { IsInterrupted: true }
-                ? SettingsSections.Volume
-                : SettingsSections.AirPlay;
             _tray?.ShowActionableWarning(
                 Loc.T("app.an-equalizer-apo-repair-didn-t"),
                 () => _ = OpenSettingsAsync(page));
@@ -1681,14 +1680,16 @@ public partial class App : System.Windows.Application
                 // A backup an unelevated process could have authored is not a record of what this
                 // program did — it is somebody else's instructions for an elevated write into HKLM.
                 // Refused rather than sanitised: there is no safe subset of "arbitrary values into
-                // an arbitrary endpoint".
+                // an arbitrary endpoint". Nor is a record naming a different device than its slot
+                // is for: LoadSlotFor reads that as no record, so the write can only ever go to
+                // the device the slot belongs to.
                 var slot = EapoRepair.BackupPathFor(guid);
                 result = !EapoRepair.IsTrustworthyStateFile(slot)
                     ? new EapoRepairResult(EapoRepairOutcome.Refused,
                         File.Exists(slot)
                             ? Loc.T("app.aorineq-won-t-undo-from-a")
                             : Loc.T("app.there-s-nothing-to-undo-aorineq"))
-                    : EapoRepairBackup.Load(slot) is { } backup
+                    : EapoRepair.LoadSlotFor(guid) is { } backup
                         ? EapoRepair.Undo(backup, Restart, slot)
                         : new EapoRepairResult(EapoRepairOutcome.Refused,
                             Loc.T("app.there-s-nothing-to-undo-aorineq"));
