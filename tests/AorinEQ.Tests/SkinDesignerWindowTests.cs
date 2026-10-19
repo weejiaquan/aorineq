@@ -2252,6 +2252,140 @@ public class SkinDesignerWindowTests : IDisposable
         return (task.IsCompleted, task.IsCompleted && task.Result, answer.Asked);
     }
 
+    /// <summary>The Skin layer's Name box, focused for real with <paramref name="text"/> typed into
+    /// it and no Enter: what a user has before clicking a toolbar button, which does not take the
+    /// keyboard. False when the desktop refused the focus.</summary>
+    private bool TypeWithoutCommitting(SkinDesignerWindow d, TextBox box, string text)
+    {
+        StaWpf.Pump();
+        if (!TakeKeyboardFocus(d, box)) return false;
+        box.Text = text;
+        return true;
+    }
+
+    /// <summary>A Name typed but not committed (no Enter, the focus still in the box) is what Save
+    /// saves: the toolbar's Save does not take the keyboard, so the box would otherwise commit only
+    /// later, after "Saved" - with the old name on disk and the window dirty again.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
+    public void Save_saves_the_name_still_being_typed()
+    {
+        MakeSkin("typed", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("typed");
+            var box = Fields<TextField>(d.PropertiesHost).First().Box;
+            bool typed = TypeWithoutCommitting(d, box, "typed-renamed");
+            var before = (d.Document.Name, d.History.IsDirty);
+            d.SaveButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            var saved = (d.Document.Name, Dirty: d.History.IsDirty, BoxFocused: box.IsKeyboardFocused);
+            Keyboard.ClearFocus(); // the focus moving on later
+            StaWpf.Pump();
+            return (typed, before, saved, DirtyLater: d.History.IsDirty, d.StatusText.Text);
+        });
+        var folder = Path.Combine(_root, "typed-renamed");
+        _out.WriteLine($"expected: typed into a focused box; before Save still ('typed', clean); after Save ('typed-renamed', clean, box unfocused), " +
+                       $"clean later, status '{Loc.T("designer.status.saved", "typed-renamed")}', folder {folder} on disk");
+        _out.WriteLine($"actual  : typed {r.typed}; before {r.before}; saved {r.saved}; dirty later {r.DirtyLater}; status '{r.Text}'; " +
+                       $"folder exists {Directory.Exists(folder)}, loads as '{SkinLoader.Load(folder).Name}'");
+        Assert.True(r.typed, "the test window could not take the keyboard focus (see output)");
+        Assert.Equal(("typed", false), r.before);
+        Assert.Equal(("typed-renamed", false, false), r.saved);
+        Assert.False(r.DirtyLater);
+        Assert.Equal(Loc.T("designer.status.saved", "typed-renamed"), r.Text);
+        Assert.True(SkinLoader.Load(folder).IsValid);
+    }
+
+    /// <summary>A frame count typed but not committed when the document is let go: the leave
+    /// commits it first, so the prompt sees the window dirty; and New - asked or not - rebuilds the
+    /// panel only after the old document took the edit, so the removed box's late focus loss
+    /// cannot land the old document's edit on the new one.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
+    public void A_frame_count_still_being_typed_stays_with_its_document()
+    {
+        MakeSkin("frames-typed", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("frames-typed");
+            d.Select(SkinLayer.VolumeEmpty);
+            bool typed = TypeWithoutCommitting(d, Number(d, Loc.T("designer.prop.frames")).Box, "2");
+            var answer = new Answer(SkinDesignerWindow.UnsavedChoice.Cancel);
+            bool go = d.ConfirmLeaveAsync(answer.Ask).Result;
+            var prompted = (answer.Asked, go, d.Document.Config.EmptyFrames, Dirty: d.NeedsUnsavedPrompt);
+
+            // New straight away, with the box focused and typed into again: no prompt in between.
+            d.Select(SkinLayer.VolumeEmpty);
+            bool retyped = TypeWithoutCommitting(d, Number(d, Loc.T("designer.prop.frames")).Box, "4");
+            var oldHistory = d.History;
+            d.NewDocument();
+            Keyboard.ClearFocus();
+            StaWpf.Pump();
+            return (typed, prompted, retyped, OldFrames: oldHistory.Current.Config.EmptyFrames,
+                New: (d.Document == SkinDocument.New(Loc.T("designer.untitled")), d.History.CanUndo, Dirty: d.NeedsUnsavedPrompt));
+        });
+        _out.WriteLine("expected: typed; the prompt asked once, Cancel, frames 2 committed and dirty; retyped; the old document has 4 " +
+                       "frames; the new document untouched, nothing to undo, clean");
+        _out.WriteLine($"actual  : typed {r.typed}; prompted {r.prompted}; retyped {r.retyped}; old frames {r.OldFrames}; new {r.New}");
+        Assert.True(r.typed && r.retyped, "the test window could not take the keyboard focus (see output)");
+        Assert.Equal((1, false, 2, true), r.prompted);
+        Assert.Equal(4, r.OldFrames);
+        Assert.Equal((true, false, false), r.New);
+    }
+
+    /// <summary>A close (the title bar's ×) with a value still being typed asks about it: the
+    /// close commits the box before it judges the document.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
+    public void A_close_with_a_value_still_being_typed_asks()
+    {
+        MakeSkin("close-typed", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("close-typed");
+            d.Select(SkinLayer.PercentText);
+            bool typed = TypeWithoutCommitting(d, Number(d, "X").Box, "30");
+            var answer = new Answer(SkinDesignerWindow.UnsavedChoice.Cancel);
+            d.CloseAfterAsking(answer.Ask);
+            return (typed, answer.Asked, d.IsVisible, d.Document.Config.Text!.X, Dirty: d.NeedsUnsavedPrompt);
+        });
+        _out.WriteLine($"expected: typed, asked once, Cancel keeps the window visible with x 30 and dirty; actual {r}");
+        Assert.True(r.typed, "the test window could not take the keyboard focus (see output)");
+        Assert.Equal((1, true, 30, true), (r.Asked, r.IsVisible, r.X, r.Dirty));
+    }
+
+    /// <summary>Test on desktop and Show notice write the value still being typed, and Undo undoes
+    /// it as one step rather than committing it on top of the undo once the focus moves.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
+    public void Test_notice_and_undo_take_the_value_still_being_typed()
+    {
+        MakeSkin("tests-typed", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("tests-typed");
+            d.Select(SkinLayer.PercentText);
+            bool typed = TypeWithoutCommitting(d, Number(d, "X").Box, "30");
+            d.TestButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            int tested = SkinLoader.Load(d.TestFolder!).Text!.X;
+            typed &= TypeWithoutCommitting(d, Number(d, "X").Box, "40");
+            d.ShowNoticeButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            int noticed = SkinLoader.Load(d.TestFolder!).Text!.X;
+            typed &= TypeWithoutCommitting(d, Number(d, "X").Box, "50");
+            d.UndoButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            var undone = (d.Document.Config.Text!.X, d.History.CanRedo);
+            Keyboard.ClearFocus();
+            StaWpf.Pump();
+            return (typed, tested, noticed, undone, Later: d.Document.Config.Text!.X, Box: Number(d, "X").Box.Text);
+        });
+        _out.WriteLine($"expected: typed; the test copy has x 30, the notice copy x 40; Undo takes 50 back to 40 with a redo, " +
+                       $"still 40 once the focus moves, the box showing {N(40)}; actual {r}");
+        Assert.True(r.typed, "the test window could not take the keyboard focus (see output)");
+        Assert.Equal((30, 40), (r.tested, r.noticed));
+        Assert.Equal((40, true), r.undone);
+        Assert.Equal((40, N(40)), (r.Later, r.Box));
+    }
+
     [Fact]
     public void Leaving_goes_on_only_when_clean_saved_or_discarded()
     {

@@ -138,7 +138,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     private void Load(SkinDocument document, string? loadedName, string status)
     {
-        ClosePicker();
+        EndInteractions(); // the outgoing document takes its pending edits before it is let go
         _history.Changed -= OnDocumentChanged;
         _history = new DesignerHistory(document);
         _history.Changed += OnDocumentChanged;
@@ -213,6 +213,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     /// onto itself) or leave a half-written copy.</summary>
     internal bool Save()
     {
+        EndInteractions();
         OnDocumentChanged();
         if (_issues.Count > 0)
         {
@@ -263,13 +264,25 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _ => false,
     };
 
-    /// <summary>Ends what is mid-way before the document is judged or let go: a running drag (one
-    /// step), the picker (its typed hex committed) and with it the eyedropper - so the prompt never
-    /// comes up over a drag or a pinned picker, and a pending edit counts as unsaved.</summary>
+    /// <summary>Ends what is mid-way before the document is judged or let go: a Properties field
+    /// still being typed in (committed by taking the keyboard to the canvas, as a click there
+    /// would), a running drag (one step), the picker (its typed hex committed) and with it the
+    /// eyedropper - so a save writes what the panel shows, the prompt never comes up over a drag or
+    /// a pinned picker, and a pending edit counts as unsaved. The toolbar's buttons do not take the
+    /// keyboard, so without this a typed value would commit only later, into whatever document is
+    /// current by then.</summary>
     internal void EndInteractions()
     {
-        Overlay.FinishDrag();
+        EndEdits();
         ClosePicker();
+    }
+
+    /// <summary>The part of <see cref="EndInteractions"/> that leaves the picker open: Undo and
+    /// Redo keep it (and a waiting eyedropper), which pick from what the canvas shows after.</summary>
+    private void EndEdits()
+    {
+        if (PropertiesHost.IsKeyboardFocusWithin) Overlay.Focus(); // the focus loss commits, synchronously
+        Overlay.FinishDrag();
     }
 
     /// <summary>True when the caller - a skin switch, New, Import, a close, or the app quitting -
@@ -403,16 +416,17 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     private void OnRedo(object sender, RoutedEventArgs e) => Redo();
 
-    // A drag still running ends first, so it stays one undo step and is not resumed on top of the undo.
+    // What is mid-way ends first: a typed value or a drag is one step, undone as such, not
+    // committed or resumed on top of the undo.
     private void Undo()
     {
-        Overlay.FinishDrag();
+        EndEdits();
         _history.Undo();
     }
 
     private void Redo()
     {
-        Overlay.FinishDrag();
+        EndEdits();
         _history.Redo();
     }
 
@@ -512,6 +526,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     /// driving the preview strip's fill. The previous test window and folder go first.</summary>
     internal bool TestOnDesktop()
     {
+        EndInteractions();
         if (!_info.IsValid) return false;
         CleanupTestOsd();
         try
@@ -561,6 +576,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     /// sample device name.</summary>
     internal bool ShowTestNotice()
     {
+        EndInteractions();
         if (!_info.IsValid) return false;
         CleanupTestOsd();
         try

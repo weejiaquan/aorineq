@@ -425,7 +425,7 @@ public partial class SkinDesignerWindow
         _ => KeyboardTarget.Other,
     };
 
-    /// <summary>Ctrl+S saves (committing the field being typed in first), Ctrl+0 fits, Ctrl+1 is
+    /// <summary>Ctrl+S saves (which commits the field being typed in first), Ctrl+0 fits, Ctrl+1 is
     /// 100 %, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo and redo unless a text input has the keyboard
     /// (then they are its own). Esc cancels the eyedropper whatever has the keyboard (a text box
     /// leaves Esc to the window; a scrub label running takes it first, to revert), or else
@@ -440,7 +440,6 @@ public partial class SkinDesignerWindow
             switch (key)
             {
                 case Key.S:
-                    Keyboard.ClearFocus();
                     Save();
                     return true;
                 case Key.D0 or Key.NumPad0:
