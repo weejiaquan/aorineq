@@ -44,16 +44,7 @@ internal static class PercentTextRenderer
     public static double Update(Path path, SkinText style, string text, double scale, double pixelsPerDip,
         FontWeight unboldWeight)
     {
-        var typeface = new Typeface(
-            new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
-            FontStyles.Normal,
-            style.Bold ? FontWeights.Bold : unboldWeight,
-            FontStretches.Normal);
-
-        var formatted = new FormattedText(
-            text, CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
-            typeface, Math.Max(1.0, style.FontSize * scale),
-            System.Windows.Media.Brushes.Black, pixelsPerDip);
+        var formatted = Format(style, text, scale, pixelsPerDip, unboldWeight);
 
         // Geometry origin at (0,0); the Path is positioned by its Margin by the caller.
         path.Data = formatted.BuildGeometry(new System.Windows.Point(0, 0));
@@ -83,6 +74,29 @@ internal static class PercentTextRenderer
             : null;
 
         return formatted.WidthIncludingTrailingWhitespace;
+    }
+
+    /// <summary>The size <see cref="Update"/> draws <paramref name="text"/> at in skin pixels (scale
+    /// 1), before outline and shadow - what the designer's canvas outlines the text with.</summary>
+    internal static System.Windows.Size Measure(SkinText style, string text, double pixelsPerDip, FontWeight unboldWeight)
+    {
+        var formatted = Format(style, text, 1.0, pixelsPerDip, unboldWeight);
+        return new System.Windows.Size(formatted.WidthIncludingTrailingWhitespace, formatted.Height);
+    }
+
+    /// <summary>The text as both <see cref="Update"/> and <see cref="Measure"/> lay it out; an
+    /// unbold style takes the caller's weight.</summary>
+    private static FormattedText Format(SkinText style, string text, double scale, double pixelsPerDip, FontWeight unboldWeight)
+    {
+        var typeface = new Typeface(
+            new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
+            FontStyles.Normal,
+            style.Bold ? FontWeights.Bold : unboldWeight,
+            FontStretches.Normal);
+        return new FormattedText(
+            text, CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
+            typeface, Math.Max(1.0, style.FontSize * scale),
+            System.Windows.Media.Brushes.Black, pixelsPerDip);
     }
 
     /// <summary>A frozen brush for a user-authored colour, or null when it does not parse. Every

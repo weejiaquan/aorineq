@@ -256,6 +256,7 @@
   "designer.share.tooltip": "导出 zip 并把 aorineq:// 安装链接复制到剪贴板",
   "designer.test.label": "在桌面上测试",
   "designer.status.text": "选两张图片（或一套已有的皮肤）开始。保存前改一下名称就会另存为副本。",
+  "designer.status.cursor": "{0}, {1} px",
   "designer.new.label": "新建",
   "designer.undo.tooltip": "撤销 (Ctrl+Z)",
   "designer.redo.tooltip": "重做 (Ctrl+Y)",

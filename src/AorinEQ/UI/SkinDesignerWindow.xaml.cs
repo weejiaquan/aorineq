@@ -67,6 +67,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _history.Changed += OnDocumentChanged;
         _info = _history.Current.ToInfo(_probe);
         Loc.LanguageChanged += OnLanguageChanged;
+        WireOverlay();
         _ready = true;
         PopulateSkinList(null);
         OnDocumentChanged();
@@ -99,6 +100,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     {
         ClosePicker();
         _selection = layer;
+        Overlay.Selected = layer;
         RefreshProperties(rebuild: true);
     }
 

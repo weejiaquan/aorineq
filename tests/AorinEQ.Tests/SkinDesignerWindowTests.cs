@@ -786,4 +786,149 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.Equal(r.Actual, r.reported);
         Assert.Equal((1180.0, 900.0), (r.Width, r.MinWidth));
     }
+
+    [Fact]
+    public void A_canvas_drag_is_one_undo_step_and_lands_in_the_document()
+    {
+        MakeSkin("drag", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("drag");
+            d.BeginDrag();
+            d.ApplyDrag(SkinLayer.PercentText, SkinHandle.Move, 5, 2);
+            d.ApplyDrag(SkinLayer.PercentText, SkinHandle.Move, 30, 4);
+            d.EndDrag();
+            var dragged = d.Document.Config.Text;
+            d.History.Undo();
+            return (dragged, Undone: d.Document.Config.Text, d.History.CanUndo);
+        });
+        _out.WriteLine($"{r}");
+        Assert.Equal((40, 9), (r.dragged!.X, r.dragged.Y));
+        Assert.Equal((10, 5), (r.Undone!.X, r.Undone.Y));
+        Assert.False(r.CanUndo);
+    }
+
+    [Fact]
+    public void The_scene_outlines_what_the_renderers_draw()
+    {
+        MakeSkin("scene", """{"scale":2,"percentText":{"show":true,"x":10,"y":5}}""", strip: true);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("scene");
+            d.Select(SkinLayer.PercentText);
+            var scene = d.Overlay.Scene;
+            return (Boards: scene.Boards.Select(b => (b.Layer, b.Scale, b.Width, b.Height)).ToArray(),
+                Text: scene.Elements.Single(e => e.Layer == SkinLayer.PercentText).Bounds,
+                Dropdown: scene.Elements.Single(e => e.Layer == SkinLayer.AirPlayDropdown).Bounds,
+                d.Overlay.Selected);
+        });
+        _out.WriteLine($"{string.Join("; ", r.Boards)} text {r.Text} dropdown {r.Dropdown}");
+        Assert.Contains((SkinLayer.VolumeBar, 2.0, 200, 40), r.Boards);
+        Assert.Contains((SkinLayer.AirPlay, 2.0, 200, 24), r.Boards);
+        Assert.Equal((10.0, 5.0), (r.Text.X, r.Text.Y));
+        Assert.True(r.Text.Width > 0 && r.Text.Height > 0);
+        Assert.Equal(new Rect(0, 0, 200, 24), r.Dropdown);
+        Assert.Equal(SkinLayer.PercentText, r.Selected);
+    }
+
+    /// <summary>A layer chosen in the Layers tree is outlined on the canvas, as a canvas click
+    /// would outline it: both go through the one selection path.</summary>
+    [Fact]
+    public void Choosing_a_layer_in_the_tree_outlines_it_on_the_canvas()
+    {
+        MakeSkin("tree-pick", """{"percentText":{"show":true,"x":10,"y":5}}""", strip: true);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("tree-pick");
+            var item = d.LayersTree.Items.OfType<TreeViewItem>().SelectMany(n => n.Items.OfType<TreeViewItem>())
+                .First(i => i.Tag is SkinLayer.AirPlayDropdown);
+            item.IsSelected = true; // what a click in the tree does
+            return (d.Selection, Outlined: d.Overlay.Selected);
+        });
+        _out.WriteLine($"expected AirPlayDropdown selected and outlined; actual selection {r.Selection}, overlay {r.Outlined}");
+        Assert.Equal((SkinLayer.AirPlayDropdown, SkinLayer.AirPlayDropdown), (r.Selection, r.Outlined));
+    }
+
+    /// <summary>Text dragged past the bar's bottom-right corner stops anchored on the edge, so it
+    /// lies outside the bar - over the strip below and past the widest artboard. It must still be
+    /// on the scrollable canvas, take the mouse there, and win the click over the strip's areas.</summary>
+    [Fact]
+    public void Text_stopped_at_the_far_edge_stays_reachable_and_selectable()
+    {
+        MakeSkin("far-edge", """{"scale":2,"percentText":{"show":true,"x":10,"y":5}}""", strip: true);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("far-edge");
+            SkinLayer? PickedOnText()
+            {
+                var box = d.Overlay.Scene.BoardFor(SkinLayer.PercentText)!
+                    .ToOverlay(d.Overlay.Scene.Elements.Single(e => e.Layer == SkinLayer.PercentText).Bounds);
+                return d.Overlay.HitTest(new Point(box.X + box.Width / 2, box.Y + box.Height / 2)).Element?.Layer;
+            }
+            d.BeginDrag();
+            d.ApplyDrag(SkinLayer.PercentText, SkinHandle.Move, 0, 10000); // onto the bottom edge, over the strip
+            var bottom = (d.Document.Config.Text!.Y, Picked: PickedOnText());
+            d.ApplyDrag(SkinLayer.PercentText, SkinHandle.Move, 10000, 10000); // the far corner, past every artboard
+            d.EndDrag();
+            d.UpdateLayout();
+            var text = d.Overlay.Scene.Elements.Single(e => e.Layer == SkinLayer.PercentText);
+            var onCanvas = d.Overlay.Scene.BoardFor(SkinLayer.PercentText)!.ToOverlay(text.Bounds);
+            var centre = new Point(onCanvas.X + onCanvas.Width / 2, onCanvas.Y + onCanvas.Height / 2);
+            var farCorner = d.Overlay.TranslatePoint(onCanvas.BottomRight, d.ZoomHost);
+            var hit = System.Windows.Media.VisualTreeHelper.HitTest(d.Overlay, centre)?.VisualHit;
+            return (bottom, d.Document.Config.Text, onCanvas, OverlaySize: d.Overlay.RenderSize,
+                Picked: d.Overlay.HitTest(centre).Element?.Layer, TakesMouse: ReferenceEquals(hit, d.Overlay),
+                farCorner, Host: (d.ZoomHost.ActualWidth, d.ZoomHost.ActualHeight));
+        });
+        _out.WriteLine($"bottom edge: y {r.bottom.Y} picked {r.bottom.Picked} (expected 40, PercentText)");
+        _out.WriteLine($"text {r.Text!.X},{r.Text.Y} at {r.onCanvas} on an overlay of {r.OverlaySize}; " +
+            $"picked {r.Picked} (expected PercentText), takes the mouse {r.TakesMouse}; far corner {r.farCorner} inside host {r.Host}");
+        Assert.Equal((40, SkinLayer.PercentText), (r.bottom.Y, r.bottom.Picked));
+        Assert.Equal((200, 40), (r.Text.X, r.Text.Y));
+        Assert.True(r.onCanvas.Right > r.OverlaySize.Width, "the scenario needs text past the overlay's own width");
+        Assert.Equal(SkinLayer.PercentText, r.Picked);
+        Assert.True(r.TakesMouse);
+        // The zoom host is laid out in whole pixels (the window rounds; only the artboards do not).
+        Assert.True(r.farCorner.X <= r.Host.ActualWidth + 0.5 && r.farCorner.Y <= r.Host.ActualHeight + 0.5);
+    }
+
+    /// <summary>The dropdown covers the whole strip by default; the labels drawn on it are still
+    /// the ones a click on them picks.</summary>
+    [Fact]
+    public void The_strip_labels_are_picked_over_its_click_areas()
+    {
+        MakeSkin("labels", """{"airplay":{"nameText":{"show":true,"x":10,"y":4},"percentText":{"show":true,"x":190,"y":4,"align":"right"}}}""",
+            strip: true);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("labels");
+            var strip = d.Overlay.Scene.BoardFor(SkinLayer.AirPlay)!;
+            SkinLayer? PickedAt(SkinLayer layer)
+            {
+                var box = strip.ToOverlay(d.Overlay.Scene.Elements.Single(e => e.Layer == layer).Bounds);
+                return d.Overlay.HitTest(new Point(box.X + box.Width / 2, box.Y + box.Height / 2)).Element?.Layer;
+            }
+            return (Name: PickedAt(SkinLayer.AirPlayName), Level: PickedAt(SkinLayer.AirPlayLevel),
+                Dropdown: d.Overlay.HitTest(strip.ToOverlay(strip.Width / 2.0, 1)).Element?.Layer);
+        });
+        _out.WriteLine($"expected (AirPlayName, AirPlayLevel, AirPlayDropdown); actual {r}");
+        Assert.Equal((SkinLayer.AirPlayName, SkinLayer.AirPlayLevel, SkinLayer.AirPlayDropdown), (r.Name, r.Level, r.Dropdown));
+    }
+
+    /// <summary>The window builds its first scene before it is ever laid out; once it is shown the
+    /// overlay must know where the artboards really are.</summary>
+    [Fact]
+    public void The_scene_follows_the_first_layout()
+    {
+        var r = WithDesigner(d =>
+        {
+            StaWpf.Pump();
+            var notice = d.Overlay.Scene.BoardFor(SkinLayer.Notice)!;
+            return (Scene: (notice.Origin, notice.Width, notice.Height),
+                Laid: (d.NoticeBoard.TranslatePoint(new Point(0, 0), d.Overlay), d.NoticeBoard.ActualWidth, d.NoticeBoard.ActualHeight));
+        });
+        _out.WriteLine($"expected scene board {r.Laid}; actual {r.Scene}");
+        Assert.True(r.Laid.Item2 > 0 && r.Laid.Item3 > 0);
+        Assert.Equal((r.Laid.Item1, (int)r.Laid.Item2, (int)r.Laid.Item3), r.Scene);
+    }
 }

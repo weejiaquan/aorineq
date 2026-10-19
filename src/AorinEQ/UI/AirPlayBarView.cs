@@ -374,7 +374,7 @@ public sealed class AirPlayBarView : UserControl
 
     /// <summary>What the bar calls the receiver. A chosen device shows its name; nothing chosen
     /// says so, because an empty strip with a chevron gives the user nothing to aim at.</summary>
-    private string DisplayName => _state.HasDevice ? _state.DeviceName : Loc.T("osd.airplay.no-device");
+    internal string DisplayName => _state.HasDevice ? _state.DeviceName : Loc.T("osd.airplay.no-device");
 
     protected override void OnRenderSizeChanged(SizeChangedInfo info)
     {

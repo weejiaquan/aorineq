@@ -153,6 +153,8 @@
             <!-- Wraps: the status line carries whole sentences, and an unwrapped TextBlock CLIPS. -->
             <TextBlock x:Name="StatusText" FontSize="11" TextWrapping="Wrap"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="{loc:T designer.status.text}" />
+            <TextBlock x:Name="CursorText" Grid.Column="1" FontSize="11" Margin="12,0,0,0"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </Grid>
     </Grid>
 </ui:FluentWindow>

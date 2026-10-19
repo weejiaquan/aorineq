@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using AorinEQ.Core;
+using Point = System.Windows.Point;
 
 namespace AorinEQ.UI;
 
@@ -11,6 +14,7 @@ public partial class SkinDesignerWindow
 {
     private SkinView? _skinView;
     private (SkinNotice Look, double Scale)? _shownNotice;
+    private bool _stripSkinned;
 
     internal SkinView? VolumeView => _skinView;
 
@@ -27,6 +31,7 @@ public partial class SkinDesignerWindow
         RefreshVolumeBoard();
         RefreshAirPlayBoard();
         RefreshNoticeBoard();
+        RefreshScene();
     }
 
     private void RefreshVolumeBoard()
@@ -80,6 +85,7 @@ public partial class SkinDesignerWindow
             AirPlayPreview.SetSkin(null, 1.0);
             StatusText.Text = Loc.T("designer.image-failed-to-decode") + ex.Message;
         }
+        _stripSkinned = skinned;
         // A native strip takes its host's width: the volume bar's, as in SkinOsdWindow.
         AirPlayBoard.Width = skinned ? double.NaN
             : _info.IsValid ? _info.Width * _info.Scale : OsdWindow.DarkPillWidth;
@@ -99,6 +105,121 @@ public partial class SkinDesignerWindow
         }
         NoticePreview.SetText(PreviewDeviceName);
     }
+
+    private static readonly SkinHandle[] AreaHandles =
+        [SkinHandle.Move, SkinHandle.TopLeft, SkinHandle.TopRight, SkinHandle.BottomLeft, SkinHandle.BottomRight];
+
+    private SkinDocument? _dragStart;
+
+    private readonly DesignerOverlay _overlay = new();
+
+    internal DesignerOverlay Overlay => _overlay;
+
+    /// <summary>Lays the overlay over the artboards (inside the zoom transform) and routes it. The
+    /// scene is re-measured whenever the overlay's size changes - the first layout after the window
+    /// is shown included, since the scene built before it knows no positions.</summary>
+    private void WireOverlay()
+    {
+        Grid.SetColumn(_overlay, 1);
+        Grid.SetRowSpan(_overlay, 4);
+        Artboards.Children.Add(_overlay);
+        Overlay.SizeChanged += (_, _) => RefreshScene();
+        Overlay.LayerClicked += layer => { if (layer != _selection) Select(layer); };
+        Overlay.DragStarted += BeginDrag;
+        Overlay.Dragged += ApplyDrag;
+        Overlay.DragCompleted += EndDrag;
+        Overlay.PointerMoved += (board, x, y) =>
+            CursorText.Text = board is null ? "" : Loc.T("designer.status.cursor", x, y);
+    }
+
+    /// <summary>A drag works from the document at mouse-down, as one merge run: one undo step.</summary>
+    internal void BeginDrag()
+    {
+        EndMerge();
+        _dragStart = _history.Current;
+    }
+
+    internal void ApplyDrag(SkinLayer layer, SkinHandle handle, int dx, int dy)
+    {
+        if (_dragStart is { } start) Commit(SkinEdits.Drag(start, layer, handle, dx, dy, _probe), "canvas-drag");
+    }
+
+    internal void EndDrag()
+    {
+        EndMerge();
+        _dragStart = null;
+    }
+
+    /// <summary>Tells the overlay where every artboard and grabbable part is, measured the way the
+    /// renderers draw them. Elements are listed bottom to top, as the overlay picks topmost first:
+    /// the strip's click areas under its labels, and the percent text over everything - so a text
+    /// stopped at the bar's bottom edge, over the strip, is still the one a click on it picks.</summary>
+    private void RefreshScene()
+    {
+        Artboards.UpdateLayout();
+        double ppd = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var boards = new List<SceneBoard>();
+        var elements = new List<SceneElement>();
+
+        if (_skinView is not null)
+            boards.Add(Board(SkinLayer.VolumeBar, VolumeBoard, _info.Scale, _info.Width, _info.Height, _info.FillStartX, _info.FillEndX));
+
+        if (_stripSkinned && _info.AirPlay is { } strip)
+        {
+            boards.Add(Board(SkinLayer.AirPlay, AirPlayBoard, _info.Scale, strip.Width, strip.Height, strip.FillStartX, strip.FillEndX));
+            elements.Add(new SceneElement(SkinLayer.AirPlayDropdown, SkinLayer.AirPlay, Rectangle(strip.DropdownHit), AreaHandles));
+            if (strip.ConnectHit is { } power)
+                elements.Add(new SceneElement(SkinLayer.AirPlayPower, SkinLayer.AirPlay, Rectangle(power), AreaHandles));
+            if (strip.Name is { Show: true } name)
+                elements.Add(new SceneElement(SkinLayer.AirPlayName, SkinLayer.AirPlay,
+                    TextBounds(name, AirPlayPreview.DisplayName, ppd, FontWeights.Normal), [SkinHandle.Move]));
+            if (strip.Percent is { Show: true } level)
+                elements.Add(new SceneElement(SkinLayer.AirPlayLevel, SkinLayer.AirPlay,
+                    TextBounds(level, AirPlayPreview.State.VolumePercent.ToString(CultureInfo.CurrentCulture), ppd, FontWeights.Normal), [SkinHandle.Move]));
+        }
+        else
+        {
+            boards.Add(Board(SkinLayer.AirPlay, AirPlayBoard, 1, (int)AirPlayBoard.ActualWidth, (int)AirPlayBoard.ActualHeight, null, null));
+        }
+
+        if (_info.Notice is { HasArt: true } art)
+        {
+            boards.Add(Board(SkinLayer.Notice, NoticeBoard, _info.Scale, art.Width, art.Height, null, null));
+            elements.Add(new SceneElement(SkinLayer.NoticeText, SkinLayer.Notice,
+                new Rect(art.Text.X, art.Text.Y, art.TextWidth, art.Text.FontSize * SkinClamps.LineHeightRatio),
+                [SkinHandle.Move, SkinHandle.Right]));
+            if (art.Glyph.Show)
+                elements.Add(new SceneElement(SkinLayer.NoticeGlyph, SkinLayer.Notice,
+                    new Rect(art.Glyph.X, art.Glyph.Y, art.Glyph.Size, art.Glyph.Size * SkinClamps.LineHeightRatio), [SkinHandle.Move]));
+        }
+        else
+        {
+            boards.Add(Board(SkinLayer.Notice, NoticeBoard, 1, (int)NoticeBoard.ActualWidth, (int)NoticeBoard.ActualHeight, null, null));
+        }
+
+        if (_skinView is not null && _info.Text is { Show: true } text)
+            elements.Add(new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar,
+                TextBounds(text, PreviewPercent.ToString(CultureInfo.CurrentCulture), ppd, FontWeights.SemiBold), [SkinHandle.Move]));
+
+        var scene = new DesignerScene(boards, elements);
+        Overlay.Scene = scene;
+        Overlay.Selected = _selection;
+        // What lies past the artboards (text stopped at a far edge) gets canvas to scroll to.
+        var extent = scene.Extent;
+        Artboards.Margin = new Thickness(0, 0, Math.Max(0, extent.Right - Overlay.ActualWidth), Math.Max(0, extent.Bottom - Overlay.ActualHeight));
+    }
+
+    private SceneBoard Board(SkinLayer layer, FrameworkElement host, double scale, int width, int height, int? fillStart, int? fillEnd) =>
+        new(layer, host.TranslatePoint(new Point(0, 0), Overlay), scale, width, height, fillStart, fillEnd);
+
+    /// <summary>A text's outline on the canvas, measured at the weight its renderer draws it at.</summary>
+    private static Rect TextBounds(SkinText text, string sample, double pixelsPerDip, FontWeight unboldWeight)
+    {
+        var size = PercentTextRenderer.Measure(text, sample, pixelsPerDip, unboldWeight);
+        return new Rect(SkinMath.AlignedTextX(text.X, size.Width, text.Align), text.Y, size.Width, size.Height);
+    }
+
+    private static Rect Rectangle(SkinHitRect r) => new(r.X, r.Y, r.Width, r.Height);
 
     /// <summary>The strip's preview state: a live session, a chosen receiver not connected, or no
     /// receiver at all.</summary>
