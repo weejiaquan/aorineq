@@ -265,24 +265,50 @@ public class SkinAirPlayTests : IDisposable
         Assert.Equal(expected, loaded.AirPlay);
     }
 
-    /// <summary>A strip at the loader's defaults writes an empty block - present, so the strip is
-    /// declared, with every default omitted the way the rest of skin.json is written.</summary>
+    /// <summary>A strip whose fields are all at the loader's defaults is declared by its art alone,
+    /// exactly as the loader reads it, so the writer adds no "airplay" key: a skin.json that is
+    /// there for other reasons gains nothing, and the strip loads back as the same strip.</summary>
     [Fact]
-    public void A_strip_at_its_defaults_writes_an_empty_block()
+    public void An_art_only_strip_writes_no_airplay_block_and_loads_back_the_same()
     {
-        var source = MakeSkin("plain-strip", airPlayArt: true);
-        var strip = new SkinAirPlay(
-            Path.Combine(source, "airplay-empty.png"), Path.Combine(source, "airplay-full.png"),
-            300, 40, false, false, 1, 1, 0, 300, null, null, new SkinHitRect(0, 0, 300, 40));
+        var folder = MakeSkin("art-only", airPlayArt: true, airPlayJson: """{"percentText":{"show":true,"x":5,"y":6}}""");
+        var loaded = SkinLoader.Load(folder);
+        Assert.NotNull(loaded.AirPlay);
 
-        var folder = SkinWriter.Save(_dir, "plain-strip",
-            Path.Combine(source, "empty.png"), Path.Combine(source, "full.png"),
-            new SkinConfig(null, 1.0, AirPlay: strip));
+        SkinWriter.Save(_dir, "art-only", loaded.EmptyPath, loaded.FullPath,
+            new SkinConfig(loaded.Text, 1.0, AirPlay: loaded.AirPlay));
         var json = File.ReadAllText(Path.Combine(folder, "skin.json"));
+        var reloaded = SkinLoader.Load(folder);
 
         _out.WriteLine("skin.json: " + json);
-        Assert.Contains("\"airplay\":{}", json);
-        Assert.Equal(strip, SkinLoader.Load(folder).AirPlay);
+        _out.WriteLine($"expected {loaded.AirPlay}");
+        _out.WriteLine($"actual   {reloaded.AirPlay?.ToString() ?? "(none)"} error={reloaded.AirPlayError ?? "(none)"}");
+        Assert.DoesNotContain("airplay", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(loaded.AirPlay, reloaded.AirPlay);
+        Assert.Equal(2, Directory.GetFiles(folder, "airplay-*").Length);
+    }
+
+    /// <summary>An art-only strip on a skin with every other field at its default is the skin the
+    /// writer has always written without a skin.json: none is created, the art stays, and a
+    /// skin.json the writer wrote earlier for such a skin is gone exactly as it always was.</summary>
+    [Fact]
+    public void An_art_only_strip_on_an_all_default_skin_writes_no_skin_json()
+    {
+        var folder = MakeSkin("art-only-plain", airPlayArt: true);
+        var loaded = SkinLoader.Load(folder);
+        Assert.NotNull(loaded.AirPlay);
+
+        SkinWriter.Save(_dir, "art-only-plain", loaded.EmptyPath, loaded.FullPath,
+            new SkinConfig(null, 1.0, AirPlay: loaded.AirPlay));
+        var reloaded = SkinLoader.Load(folder);
+
+        _out.WriteLine($"skin.json exists: {File.Exists(Path.Combine(folder, "skin.json"))}; " +
+                       $"airplay files: [{string.Join(", ", Directory.GetFiles(folder, "airplay-*").Select(Path.GetFileName))}]");
+        _out.WriteLine($"expected {loaded.AirPlay}");
+        _out.WriteLine($"actual   {reloaded.AirPlay?.ToString() ?? "(none)"} error={reloaded.AirPlayError ?? "(none)"}");
+        Assert.False(File.Exists(Path.Combine(folder, "skin.json")));
+        Assert.Equal(loaded.AirPlay, reloaded.AirPlay);
+        Assert.Equal(2, Directory.GetFiles(folder, "airplay-*").Length);
     }
 
     /// <summary>No strip in the config is no strip on disk: the block AND both layers go, in both

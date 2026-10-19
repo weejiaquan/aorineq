@@ -336,6 +336,7 @@
   "eq.db-range.scale-db": "刻度：±{0} dB",
   "designer.status.editing-change-the-name": "正在編輯「{0}」。儲存前改一下名稱就會另存為副本。",
   "designer.status.notice-not-loaded": "正在編輯「{0}」。裝置通知無法載入，因此通知設定已關閉：{1}",
+  "designer.status.airplay-not-loaded": "正在編輯「{0}」。AirPlay 列無法載入，而此設計器儲存時會將其刪除，因此在修復該列之前無法儲存：{1}",
   "designer.status.pick-two-images-to": "選兩張圖片來開始製作新外觀。",
   "designer.empty-path.frames-sheet": "{0} 影格 → 圖集",
   "designer.full-path.frames-sheet": "{0} 影格 → 圖集",

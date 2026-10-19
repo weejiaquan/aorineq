@@ -336,6 +336,7 @@
   "eq.db-range.scale-db": "Scale: ±{0} dB",
   "designer.status.editing-change-the-name": "Editing '{0}'. Change the name before saving to create a copy.",
   "designer.status.notice-not-loaded": "Editing '{0}'. Its device notice could not be loaded, so the notice section is off: {1}",
+  "designer.status.airplay-not-loaded": "Editing '{0}'. Its AirPlay bar could not be loaded, and this designer would delete it on save, so saving is off until the bar is fixed: {1}",
   "designer.status.pick-two-images-to": "Pick two images to start a new skin.",
   "designer.empty-path.frames-sheet": "{0} frames → sheet",
   "designer.full-path.frames-sheet": "{0} frames → sheet",

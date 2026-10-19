@@ -83,8 +83,9 @@ public static class SkinWriter
 
             bool hasText = config.Text is { } text && text != SkinText.Hidden;
             var meta = config.Meta ?? SkinMeta.None;
+            var airPlay = config.AirPlay is { } a ? BuildAirPlay(a) : null;
 
-            if (config.AirPlay is not null || config.Notice is not null || noticeOff || hasText
+            if (airPlay is not null || config.Notice is not null || noticeOff || hasText
                 || config.Scale != 1.0 || config.Fps != 10.0
                 || config.EmptyFrames != 1 || config.FullFrames != 1
                 || config.MutedFrames != 1 || config.MutedDim != 0.6
@@ -116,7 +117,7 @@ public static class SkinWriter
                     mutedDim = config.MutedDim == 0.6 ? (double?)null : config.MutedDim,
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,
-                    airplay = config.AirPlay is { } a ? BuildAirPlay(a) : null,
+                    airplay = airPlay,
                     notice = config.Notice is not null ? BuildNotice(config.Notice) : noticeOff ? false : (object?)null,
                 }, JsonWriteOptions);
                 File.WriteAllText(jsonPath, json);
@@ -182,20 +183,20 @@ public static class SkinWriter
 
     /// <summary>Serializes the AirPlay strip with every field at the loader's default omitted:
     /// fill range at the strip's edges, single frames, the dropdown covering the whole strip, no
-    /// labels, no power button. A strip at all its defaults writes an empty object - present, so
-    /// the strip is declared.</summary>
-    private static object BuildAirPlay(SkinAirPlay a) => new
+    /// labels, no power button. A strip at all its defaults is null - no block at all - because
+    /// its art alone declares it to the loader, so an art-only skin resaves byte-identically.</summary>
+    private static Dictionary<string, object?>? BuildAirPlay(SkinAirPlay a) => NonNullMembers(new Dictionary<string, object?>
     {
-        fillStartX = a.FillStartX == 0 ? (int?)null : a.FillStartX,
-        fillEndX = a.FillEndX == a.Width ? (int?)null : a.FillEndX,
-        emptyFrames = a.EmptyFrames == 1 ? (int?)null : a.EmptyFrames,
-        fullFrames = a.FullFrames == 1 ? (int?)null : a.FullFrames,
-        nameText = a.Name is { } name && name != SkinText.Hidden ? BuildText(name) : null,
-        percentText = a.Percent is { } level && level != SkinText.Hidden ? BuildText(level) : null,
-        dropdownHit = a.DropdownHit == new SkinHitRect(0, 0, a.Width, a.Height) ? null : BuildHit(a.DropdownHit),
-        connectHit = a.ConnectHit is { } connect ? BuildHit(connect) : null,
-        connectColor = a.ConnectColor,
-    };
+        ["fillStartX"] = a.FillStartX == 0 ? null : a.FillStartX,
+        ["fillEndX"] = a.FillEndX == a.Width ? null : a.FillEndX,
+        ["emptyFrames"] = a.EmptyFrames == 1 ? null : a.EmptyFrames,
+        ["fullFrames"] = a.FullFrames == 1 ? null : a.FullFrames,
+        ["nameText"] = a.Name is { } name && name != SkinText.Hidden ? BuildText(name) : null,
+        ["percentText"] = a.Percent is { } level && level != SkinText.Hidden ? BuildText(level) : null,
+        ["dropdownHit"] = a.DropdownHit == new SkinHitRect(0, 0, a.Width, a.Height) ? null : BuildHit(a.DropdownHit),
+        ["connectHit"] = a.ConnectHit is { } connect ? BuildHit(connect) : null,
+        ["connectColor"] = a.ConnectColor,
+    });
 
     private static object BuildHit(SkinHitRect r) => new { x = r.X, y = r.Y, w = r.Width, h = r.Height };
 

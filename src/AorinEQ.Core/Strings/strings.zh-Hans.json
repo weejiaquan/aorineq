@@ -336,6 +336,7 @@
   "eq.db-range.scale-db": "刻度：±{0} dB",
   "designer.status.editing-change-the-name": "正在编辑「{0}」。保存前改一下名称就会另存为副本。",
   "designer.status.notice-not-loaded": "正在编辑「{0}」。设备通知无法加载，因此通知设置已关闭：{1}",
+  "designer.status.airplay-not-loaded": "正在编辑「{0}」。AirPlay 条无法加载，而此设计器保存时会将其删除，因此在修复该条之前无法保存：{1}",
   "designer.status.pick-two-images-to": "选两张图片来开始制作新皮肤。",
   "designer.empty-path.frames-sheet": "{0} 帧 → 精灵图",
   "designer.full-path.frames-sheet": "{0} 帧 → 精灵图",

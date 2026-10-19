@@ -336,6 +336,7 @@
   "eq.db-range.scale-db": "スケール: ±{0} dB",
   "designer.status.editing-change-the-name": "「{0}」を編集中です。保存前に名前を変えると別のスキンとして保存されます。",
   "designer.status.notice-not-loaded": "「{0}」を編集中です。デバイス通知を読み込めなかったため、通知の設定はオフになっています: {1}",
+  "designer.status.airplay-not-loaded": "「{0}」を編集中です。AirPlay バーを読み込めませんでした。このデザイナーで保存するとバーが削除されるため、バーを修正するまで保存できません: {1}",
   "designer.status.pick-two-images-to": "新しいスキンを始めるには画像を 2 枚選んでください。",
   "designer.empty-path.frames-sheet": "{0} フレーム → スプライトシート",
   "designer.full-path.frames-sheet": "{0} フレーム → スプライトシート",

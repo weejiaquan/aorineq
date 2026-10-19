@@ -336,6 +336,7 @@
   "eq.db-range.scale-db": "눈금: ±{0} dB",
   "designer.status.editing-change-the-name": "'{0}'을(를) 편집 중입니다. 저장 전에 이름을 바꾸면 사본으로 저장됩니다.",
   "designer.status.notice-not-loaded": "'{0}'을(를) 편집 중입니다. 장치 알림을 불러오지 못해 알림 설정이 꺼져 있습니다: {1}",
+  "designer.status.airplay-not-loaded": "'{0}'을(를) 편집 중입니다. AirPlay 막대를 불러오지 못했으며, 이 디자이너에서 저장하면 막대가 삭제되므로 막대를 고칠 때까지 저장할 수 없습니다: {1}",
   "designer.status.pick-two-images-to": "새 스킨을 시작하려면 그림 두 장을 고르세요.",
   "designer.empty-path.frames-sheet": "{0} 프레임 → 스프라이트 시트",
   "designer.full-path.frames-sheet": "{0} 프레임 → 스프라이트 시트",

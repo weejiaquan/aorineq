@@ -426,4 +426,39 @@ public class SkinDesignerNoticeTests : IDisposable
         Assert.Equal(info.AirPlay, loadedStrip);
         Assert.Null(clearedStrip);
     }
+
+    /// <summary>A strip that failed to load is not in the designer's config, so a save would
+    /// delete its art and block. The designer says why in its status line and refuses to save
+    /// until the strip loads; a cleared editor ("New skin…") has nothing to protect and saves.
+    /// The refusal is tested through the predicate OnSave calls: OnSave writes under the real
+    /// %APPDATA% skins root, which a test must never touch.</summary>
+    [Fact]
+    public void A_strip_that_failed_to_load_blocks_the_old_designers_save()
+    {
+        var folder = MakeSkin("broken-strip", """{"airplay":{"fillStartX":8}}""");
+        WritePng(Path.Combine(folder, "airplay-empty.png"), 300, 40);
+        WritePng(Path.Combine(folder, "airplay-full.png"), 300, 30); // mismatched: the strip fails
+        var info = LoadLogged(folder);
+        _out.WriteLine($"airplay={info.AirPlay?.ToString() ?? "(none)"} airPlayError={info.AirPlayError ?? "(none)"}");
+        Assert.Null(info.AirPlay);
+        Assert.NotNull(info.AirPlayError);
+
+        var (status, refusal, clearedRefusal) = WithDesigner(d =>
+        {
+            d.LoadSkin(info);
+            var shown = (d.StatusText.Text, d.SaveRefusal());
+            d.SkinSelect.SelectedIndex = -1; // no skin selected: OnSkinSelected clears the editor
+            return (shown.Item1, shown.Item2, d.SaveRefusal());
+        });
+
+        _out.WriteLine($"status   : {status}");
+        _out.WriteLine($"refusal  : {refusal ?? "(none - save would delete the strip)"}");
+        _out.WriteLine($"after clearing: {clearedRefusal ?? "(none)"} (expected none)");
+        Assert.NotNull(refusal);
+        Assert.Contains(info.AirPlayError, refusal);
+        Assert.Equal(refusal, status);
+        Assert.Null(clearedRefusal);
+        Assert.Equal(2, Directory.GetFiles(folder, "airplay-*").Length);
+        Assert.Contains("airplay", File.ReadAllText(Path.Combine(folder, "skin.json")));
+    }
 }

@@ -30,6 +30,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private string? _editingSkinName; // null = designing a new skin
     // The strip this designer cannot edit, handed back to the writer unchanged on save.
     private SkinAirPlay? _airPlay;
+    // Why the loaded skin's strip failed to load. Its art and block are still on disk but not in
+    // _airPlay, so a save would delete them: saving is refused while this is set.
+    private string? _airPlayError;
     // True from construction (same pattern as SettingsWindow): sliders with an initial Value
     // raise ValueChanged DURING InitializeComponent, before sibling elements exist — the guard
     // must already be up. PopulateSkinList drops it once the window is fully built.
@@ -162,6 +165,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     {
         _editingSkinName = info.Name;
         _airPlay = info.AirPlay;
+        _airPlayError = info.AirPlayError;
         _emptySource = info.EmptyPath;
         _fullSource = info.FullPath;
         _mutedSource = info.MutedPath;
@@ -188,16 +192,25 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         _initializing = false;
         ReloadPreviewData();
         // A notice that failed to load comes up off; say why, or saving would look like it
-        // dropped the notice for no reason.
-        StatusText.Text = info.NoticeError is null
-            ? Loc.T("designer.status.editing-change-the-name", info.Name)
-            : Loc.T("designer.status.notice-not-loaded", info.Name, info.NoticeError);
+        // dropped the notice for no reason. A strip that failed to load blocks saving, which
+        // matters more, so it is the one said.
+        StatusText.Text = SaveRefusal()
+            ?? (info.NoticeError is null
+                ? Loc.T("designer.status.editing-change-the-name", info.Name)
+                : Loc.T("designer.status.notice-not-loaded", info.Name, info.NoticeError));
     }
+
+    /// <summary>Why saving is refused, or null when it is not: the loaded skin's AirPlay strip
+    /// failed to load, and saving without it would delete its art and block from disk.</summary>
+    internal string? SaveRefusal() => _airPlayError is null
+        ? null
+        : Loc.T("designer.status.airplay-not-loaded", _editingSkinName, _airPlayError);
 
     private void ClearEditor()
     {
         _editingSkinName = null;
         _airPlay = null;
+        _airPlayError = null;
         _emptySource = null;
         _fullSource = null;
         _mutedSource = null;
@@ -1164,6 +1177,11 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
     private void OnSave(object sender, RoutedEventArgs e)
     {
         if (_emptySource is null || _fullSource is null) return;
+        if (SaveRefusal() is { } refusal)
+        {
+            StatusText.Text = refusal;
+            return;
+        }
         var name = NameBox.Text.Trim();
 
         // Saving under a different existing skin's name overwrites it — confirm first.
