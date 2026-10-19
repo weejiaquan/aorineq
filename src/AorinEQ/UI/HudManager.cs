@@ -30,6 +30,18 @@ internal sealed class HudManager : IDisposable
 
     private IDisposable? _audio;
     private System.Windows.Controls.ContextMenu? _openMenu;
+    private ColorPickerPopup? _colourPicker;
+    private Action<string>? _pickedColour;
+    private string _pickStart = "";
+    private string? _pickLatest;
+
+    /// <summary>The picker's recent colours - App's settings, shared with the Skin Designer.</summary>
+    public Func<IReadOnlyList<string>> RecentColors { get; set; } = () => [];
+
+    /// <summary>The picker changed the recent colours; App persists them.</summary>
+    public event Action<IReadOnlyList<string>>? RecentColorsChanged;
+
+    internal ColorPickerPopup? ColourPicker => _colourPicker;
     private TimeSpan _lastTick;
     private EqPalette _palette = EqPalette.For(SystemTheme.AppsUseLightTheme());
     private SkinInfo? _skin;
@@ -159,7 +171,7 @@ internal sealed class HudManager : IDisposable
     private void ShowWidgetMenu(HudWidgetWindow window)
     {
         CloseWidgetMenu();
-        var menu = HudWidgetMenu.Build(this, window.Widget);
+        var menu = HudWidgetMenu.Build(this, window);
         menu.PlacementTarget = window;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
         // A menu over a WS_EX_NOACTIVATE window would otherwise stay open after a click elsewhere,
@@ -178,9 +190,48 @@ internal sealed class HudManager : IDisposable
     /// still swallowed, by the one surface the mode switch had not reached.</summary>
     private void CloseWidgetMenu()
     {
+        if (_colourPicker is { IsOpen: true }) _colourPicker.IsOpen = false;
         if (_openMenu is null) return;
         _openMenu.IsOpen = false;
         _openMenu = null;
+    }
+
+    /// <summary>Opens the colour picker on the widget itself, starting from
+    /// <paramref name="current"/>; <paramref name="set"/> receives the colour once the picker is
+    /// closed or reopened on another field, if it differs. Applying then, not on every drag of the
+    /// square, keeps the layout file from being rewritten dozens of times a second - and not
+    /// waiting for the picker's Closed event, which WPF raises a turn later or never when the
+    /// picker is reopened in the same turn.</summary>
+    internal void PickColour(HudWidgetWindow window, string current, Action<string> set)
+    {
+        CloseWidgetMenu();
+        _colourPicker ??= CreateColourPicker();
+        // Open commits the previous opening's pending hex edit (raising ColorChanged for it) and only
+        // then is that opening's colour final.
+        _colourPicker.Open(window, current, RecentColors());
+        ApplyPickedColour();
+        _pickedColour = set;
+        _pickStart = SkinColor.Format(current) ?? current;
+        _pickLatest = null;
+    }
+
+    private void ApplyPickedColour()
+    {
+        var set = _pickedColour;
+        _pickedColour = null;
+        if (_disposed || set is null || _pickLatest is null
+            || string.Equals(_pickLatest, _pickStart, StringComparison.OrdinalIgnoreCase)) return;
+        set(_pickLatest);
+    }
+
+    private ColorPickerPopup CreateColourPicker()
+    {
+        var picker = new ColorPickerPopup { EyedropperAvailable = false };
+        picker.ColorChanged += colour => _pickLatest = colour;
+        // A late Closed from an opening that was since reopened must not end the new one.
+        picker.Closed += (_, _) => { if (!picker.IsOpen) ApplyPickedColour(); };
+        picker.RecentsChanged += colours => RecentColorsChanged?.Invoke(colours);
+        return picker;
     }
 
     private void CloseWindow(string id)

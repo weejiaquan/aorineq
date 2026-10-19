@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Windows.Controls;
 using AorinEQ.Core;
 
@@ -13,15 +12,16 @@ namespace AorinEQ.UI;
 /// widget never disagree.</summary>
 internal static class HudWidgetMenu
 {
-    public static ContextMenu Build(HudManager hud, HudWidget widget)
+    public static ContextMenu Build(HudManager hud, HudWidgetWindow window)
     {
+        var widget = window.Widget;
         var menu = new ContextMenu();
         menu.Items.Add(Header(HudWidgetTypes.DisplayName(widget.Type)));
         menu.Items.Add(new Separator());
 
         switch (widget.Type)
         {
-            case HudWidgetTypes.Spectrum: AddSpectrum(menu, hud, widget); break;
+            case HudWidgetTypes.Spectrum: AddSpectrum(menu, hud, window); break;
             case HudWidgetTypes.Levels: AddLevels(menu); break;
             case HudWidgetTypes.EqCurve: AddEqCurve(menu, hud, widget); break;
             case HudWidgetTypes.Volume: AddVolume(menu, hud, widget); break;
@@ -37,8 +37,9 @@ internal static class HudWidgetMenu
         return menu;
     }
 
-    private static void AddSpectrum(ContextMenu menu, HudManager hud, HudWidget w)
+    private static void AddSpectrum(ContextMenu menu, HudManager hud, HudWidgetWindow window)
     {
+        var w = window.Widget;
         menu.Items.Add(Choices(Loc.T("hud.menu.bars"), w.BandCount,
             [("16", 16), ("24", 24), ("32", 32), ("48", 48), ("64", 64), ("96", 96), ("128", 128)],
             v => hud.Update(w with { BandCount = v })));
@@ -65,9 +66,9 @@ internal static class HudWidgetMenu
             [(Loc.T("hud.menu.none"), 0), (Loc.T("hud.menu.1-px"), 1), (Loc.T("hud.menu.2-px"), 2), (Loc.T("hud.menu.4-px"), 4), (Loc.T("hud.menu.8-px"), 8)],
             v => hud.Update(w with { BarGap = v })));
         menu.Items.Add(Item(Loc.T("hud.menu.bar-colour-low"),
-            () => PickColour(w.ColorStart, c => hud.Update(w with { ColorStart = c }))));
+            () => hud.PickColour(window, w.ColorStart, c => UpdateLive(hud, w, l => l with { ColorStart = c }))));
         menu.Items.Add(Item(Loc.T("hud.menu.bar-colour-high"),
-            () => PickColour(w.ColorEnd, c => hud.Update(w with { ColorEnd = c }))));
+            () => hud.PickColour(window, w.ColorEnd, c => UpdateLive(hud, w, l => l with { ColorEnd = c }))));
     }
 
     private static void AddLevels(ContextMenu menu)
@@ -133,21 +134,10 @@ internal static class HudWidgetMenu
         return parent;
     }
 
-    /// <summary>The native colour picker, as the skin designer already uses — one colour dialog in
-    /// the app, not two.</summary>
-    private static void PickColour(string current, Action<string> set)
+    /// <summary>Applies an edit to the widget as it is NOW: the picker applies its colour on a later
+    /// turn, by when the widget this menu was built from may have been changed by another pick.</summary>
+    private static void UpdateLive(HudManager hud, HudWidget built, Func<HudWidget, HudWidget> edit)
     {
-        var start = HudSpectrumView.ParseColor(current, System.Windows.Media.Colors.DeepSkyBlue);
-        using var dialog = new System.Windows.Forms.ColorDialog
-        {
-            FullOpen = true,
-            Color = System.Drawing.Color.FromArgb(start.A, start.R, start.G, start.B),
-        };
-        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
-        var c = dialog.Color;
-        // Alpha is carried over from the previous value: the native dialog has no alpha channel,
-        // and dropping it would silently make a deliberately translucent bar opaque.
-        set(string.Create(CultureInfo.InvariantCulture,
-            $"#{start.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}"));
+        if (hud.Layout.Find(built.Id) is { } live) hud.Update(edit(live));
     }
 }

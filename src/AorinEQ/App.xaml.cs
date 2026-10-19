@@ -2704,6 +2704,8 @@ public partial class App : System.Windows.Application
             var store = new HudStore(HudLayout.DefaultPath);
             _hud = new HudManager(store, _audioPipeline, SnapshotHudState);
             _hud.LayoutChanged += layout => _settingsWindow?.ApplyHud(layout);
+            _hud.RecentColors = () => _settings.RecentColors ?? [];
+            _hud.RecentColorsChanged += OnRecentColorsChanged;
             _hud.MovedToPrimary += () => _tray?.ShowInfo(
                 Loc.T("app.a-hud-widget-s-screen-is"));
             _hud.SetSkin(_useSkinOsd ? CurrentSkinInfo() : null);
@@ -3028,6 +3030,14 @@ public partial class App : System.Windows.Application
         {
             return null;
         }
+    }
+
+    /// <summary>The colour picker's recent colours changed - in the HUD menu or the Skin Designer,
+    /// which share one list. Persisted with everything else.</summary>
+    private void OnRecentColorsChanged(IReadOnlyList<string> colours)
+    {
+        _settings = _settings with { RecentColors = colours };
+        SaveSettings();
     }
 
     /// <summary>Merges the live volume state into <see cref="_settings"/> and (coalesced) persists
