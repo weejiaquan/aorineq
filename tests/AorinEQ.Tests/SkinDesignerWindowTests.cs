@@ -1995,6 +1995,43 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.False(Directory.Exists(folder), "the test folder outlived the designer");
     }
 
+    /// <summary>A test copy that fails half-written (an art file held open by another process) is
+    /// still the designer's to delete: the next test, or the designer going, removes it.</summary>
+    [Fact]
+    public void A_test_copy_that_fails_half_way_is_still_cleaned_up()
+    {
+        var skin = MakeSkin("half-test", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("half-test");
+            string? failedFolder;
+            bool shown;
+            string[] written;
+            // The art was probed on load, so the held file does not raise an issue: the copy fails.
+            using (new FileStream(Path.Combine(skin, "full.png"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                shown = d.TestOnDesktop();
+                failedFolder = d.TestFolder;
+                written = failedFolder is not null && Directory.Exists(failedFolder)
+                    ? Directory.GetFiles(failedFolder).Select(f => Path.GetFileName(f)).ToArray()
+                    : [];
+            }
+            var status = d.StatusText.Text;
+            bool retested = d.TestOnDesktop();
+            return (shown, failedFolder, Written: string.Join(", ", written), status, retested,
+                FailedGone: failedFolder is not null && !Directory.Exists(failedFolder), Next: d.TestFolder);
+        });
+        _out.WriteLine($"expected: the test fails with the copy's folder known and holding empty.png, the status naming the failure; the " +
+                       $"next test deletes it and works; actual {r}");
+        Assert.False(r.shown);
+        Assert.NotNull(r.failedFolder);
+        Assert.Equal("empty.png", r.Written);
+        Assert.Contains("full.png", r.status);
+        Assert.True(r.retested);
+        Assert.True(r.FailedGone, "the half-written test copy was left in %TEMP%");
+        Assert.False(Directory.Exists(r.Next), "the test folder outlived the designer");
+    }
+
     [Fact]
     public void Test_on_desktop_shows_the_skins_own_strip()
     {
@@ -2342,9 +2379,8 @@ public class SkinDesignerWindowTests : IDisposable
             d.LoadSkin("frames-typed");
             d.Select(SkinLayer.VolumeEmpty);
             bool typed = TypeWithoutCommitting(d, Number(d, Loc.T("designer.prop.frames")).Box, "2");
-            var answer = new Answer(SkinDesignerWindow.UnsavedChoice.Cancel);
-            bool go = d.ConfirmLeaveAsync(answer.Ask).Result;
-            var prompted = (answer.Asked, go, d.Document.Config.EmptyFrames, Dirty: d.NeedsUnsavedPrompt);
+            var leave = Leave(d, SkinDesignerWindow.UnsavedChoice.Cancel);
+            var prompted = (leave, d.Document.Config.EmptyFrames, Dirty: d.NeedsUnsavedPrompt);
 
             // New straight away, with the box focused and typed into again: no prompt in between.
             d.Select(SkinLayer.VolumeEmpty);
@@ -2356,11 +2392,11 @@ public class SkinDesignerWindowTests : IDisposable
             return (typed, prompted, retyped, OldFrames: oldHistory.Current.Config.EmptyFrames,
                 New: (d.Document == SkinDocument.New(Loc.T("designer.untitled")), d.History.CanUndo, Dirty: d.NeedsUnsavedPrompt));
         });
-        _out.WriteLine("expected: typed; the prompt asked once, Cancel, frames 2 committed and dirty; retyped; the old document has 4 " +
+        _out.WriteLine("expected: typed; the leave completed, Cancel, asked once; frames 2 committed and dirty; retyped; the old document has 4 " +
                        "frames; the new document untouched, nothing to undo, clean");
         _out.WriteLine($"actual  : typed {r.typed}; prompted {r.prompted}; retyped {r.retyped}; old frames {r.OldFrames}; new {r.New}");
         Assert.True(r.typed && r.retyped, "the test window could not take the keyboard focus (see output)");
-        Assert.Equal((1, false, 2, true), r.prompted);
+        Assert.Equal(((true, false, 1), 2, true), r.prompted);
         Assert.Equal(4, r.OldFrames);
         Assert.Equal((true, false, false), r.New);
     }

@@ -26,8 +26,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     private readonly Func<Settings> _currentSettings;
     private readonly string _skinsRoot;
     private readonly ImageProbe _probe = new();
-    private readonly string _scratchFolder =
-        Path.Combine(Path.GetTempPath(), "aorineq-designer", Guid.NewGuid().ToString("N"));
+    private readonly string _scratchFolder = Path.Combine(DesignerTempFolders.ScratchRoot, Guid.NewGuid().ToString("N"));
     /// <summary>The preview OSD's wheel accumulator: the studio keeps its own rather than sharing
     /// App's, because the preview drives the designer's fill slider, not the machine's volume.</summary>
     private readonly ScrollStep _previewScroll = new();
@@ -562,8 +561,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         OnDocumentChanged();
         if (TestBlockers().Count > 0) throw new InvalidOperationException(TestBlockedMessage());
         var doc = _history.Current;
-        var root = Path.Combine(Path.GetTempPath(), "aorineq-skin-preview");
-        _testFolder = SkinWriter.Save(root, Guid.NewGuid().ToString("N"), doc.EmptyPath, doc.FullPath,
+        // Known before the write: a copy that fails half-way is still deleted by CleanupTestOsd.
+        _testFolder = Path.Combine(DesignerTempFolders.PreviewRoot, Guid.NewGuid().ToString("N"));
+        SkinWriter.Save(DesignerTempFolders.PreviewRoot, Path.GetFileName(_testFolder), doc.EmptyPath, doc.FullPath,
             doc.SaveConfig(_probe), doc.MutedPath);
         var info = SkinLoader.Load(_testFolder);
         return info.IsValid ? info : throw new InvalidOperationException(info.Error);

@@ -347,6 +347,11 @@ public partial class App : System.Windows.Application
         // the OSD. Clicking a link during the app's own startup is rare enough to accept that.)
         _protocolSpool.TakeAll();
 
+        // Likewise the Skin Designer's temp folders: only the instance gets here and no designer
+        // exists yet, so every one left is a killed or crashed session's.
+        DesignerTempFolders.DeleteStale(DesignerTempFolders.ScratchRoot);
+        DesignerTempFolders.DeleteStale(DesignerTempFolders.PreviewRoot);
+
         // The second-instance listener starts as soon as the named event exists: a second launch
         // during first-run onboarding must activate the wizard (not vanish into a signal nobody
         // hears). The dispatch target is dynamic — wizard while one is up, the OSD once built.
