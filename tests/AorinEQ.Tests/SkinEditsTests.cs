@@ -564,16 +564,40 @@ public class SkinEditsTests : IDisposable
         Assert.Equal(new SkinHitRect(x, y, w, h), resized);
     }
 
-    [Theory]
-    [InlineData(SkinLayer.PercentText, SkinLayer.VolumeBar)]
-    [InlineData(SkinLayer.VolumeMuted, SkinLayer.VolumeBar)]
-    [InlineData(SkinLayer.AirPlayPower, SkinLayer.AirPlay)]
-    [InlineData(SkinLayer.NoticeGlyph, SkinLayer.Notice)]
-    [InlineData(SkinLayer.SkinInfo, SkinLayer.SkinInfo)]
-    public void Every_layer_belongs_to_one_artboard(SkinLayer layer, SkinLayer board)
+    /// <summary>Every SkinLayer value, each with the board written out here: a layer added to the
+    /// enum without an expected board fails, rather than falling to Skin info unnoticed.</summary>
+    [Fact]
+    public void Every_layer_belongs_to_one_artboard()
     {
-        _out.WriteLine($"{layer}: expected board {board}, actual {SkinLayers.BoardOf(layer)}");
-        Assert.Equal(board, SkinLayers.BoardOf(layer));
+        var expected = new Dictionary<SkinLayer, SkinLayer>
+        {
+            [SkinLayer.SkinInfo] = SkinLayer.SkinInfo,
+            [SkinLayer.VolumeBar] = SkinLayer.VolumeBar,
+            [SkinLayer.VolumeEmpty] = SkinLayer.VolumeBar,
+            [SkinLayer.VolumeFull] = SkinLayer.VolumeBar,
+            [SkinLayer.VolumeMuted] = SkinLayer.VolumeBar,
+            [SkinLayer.PercentText] = SkinLayer.VolumeBar,
+            [SkinLayer.AirPlay] = SkinLayer.AirPlay,
+            [SkinLayer.AirPlayEmpty] = SkinLayer.AirPlay,
+            [SkinLayer.AirPlayFull] = SkinLayer.AirPlay,
+            [SkinLayer.AirPlayName] = SkinLayer.AirPlay,
+            [SkinLayer.AirPlayLevel] = SkinLayer.AirPlay,
+            [SkinLayer.AirPlayDropdown] = SkinLayer.AirPlay,
+            [SkinLayer.AirPlayPower] = SkinLayer.AirPlay,
+            [SkinLayer.Notice] = SkinLayer.Notice,
+            [SkinLayer.NoticeArt] = SkinLayer.Notice,
+            [SkinLayer.NoticeText] = SkinLayer.Notice,
+            [SkinLayer.NoticeGlyph] = SkinLayer.Notice,
+        };
+        var wrong = new List<string>();
+        foreach (var layer in Enum.GetValues<SkinLayer>())
+        {
+            var board = SkinLayers.BoardOf(layer);
+            _out.WriteLine($"{layer}: expected board {(expected.TryGetValue(layer, out var e) ? e : "(none written)")}, actual {board}");
+            if (!expected.TryGetValue(layer, out var want) || want != board) wrong.Add(layer.ToString());
+        }
+        Assert.Empty(wrong);
+        Assert.Equal(Enum.GetValues<SkinLayer>().Length, expected.Count);
     }
 
     /// <summary>A strip or notice the loader could not load stays a blocking issue through every

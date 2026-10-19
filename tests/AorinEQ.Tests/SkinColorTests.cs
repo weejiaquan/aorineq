@@ -5,7 +5,8 @@ namespace AorinEQ.Tests;
 
 /// <summary>The one parser every renderer, the preview generator and the colour picker read a
 /// skin's colours through. Each spelling a shipped or hand-written skin may contain is pinned, and
-/// the HSV maths the picker is built on round-trips every 8-bit colour it is asked about.</summary>
+/// the HSV maths the picker is built on round-trips a sample of 8-bit colours spanning every
+/// channel (each one in steps of 17, so 0 and 255 included).</summary>
 public class SkinColorTests
 {
     private readonly ITestOutputHelper _out;
