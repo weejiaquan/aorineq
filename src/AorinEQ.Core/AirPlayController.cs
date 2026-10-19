@@ -137,6 +137,20 @@ public sealed class AirPlayController : IDisposable
         return true;
     }
 
+    /// <summary>Re-attaches the running stream's capture to the endpoint it was capturing. A restart
+    /// of the Windows audio service (the Equalizer APO repair and its undo do one) invalidates every
+    /// WASAPI client, and a dead loopback capture sends the receiver nothing while the session
+    /// stays up. The session itself is untouched. False when nothing is streaming, or when the
+    /// endpoint would not open again.</summary>
+    public bool RestartCapture()
+    {
+        lock (_gate)
+        {
+            if (_capture is null || _session?.IsStreaming != true) return false;
+            return _capture.Restart();
+        }
+    }
+
     public void Stop()
     {
         lock (_gate)

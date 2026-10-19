@@ -86,6 +86,21 @@ public class AirPlayControllerTests
         Assert.False(controller.IsStreaming);
     }
 
+    /// <summary>App asks for a re-attach after every repair-helper run while a stream is up; with
+    /// nothing streaming there is no capture to re-attach, and asking must not start one (that
+    /// would be a WASAPI client nobody stops). The streaming half needs a real receiver and is a
+    /// live check.</summary>
+    [Fact]
+    public void Re_attaching_the_capture_of_an_idle_controller_does_nothing()
+    {
+        using var controller = new AirPlayController();
+        bool reattached = controller.RestartCapture();
+        _out.WriteLine($"idle RestartCapture -> {reattached}; streaming={controller.IsStreaming} source={controller.SourceEndpointId ?? "(none)"}");
+        Assert.False(reattached);
+        Assert.False(controller.IsStreaming);
+        Assert.Null(controller.SourceEndpointId);
+    }
+
     [Fact]
     public void Volume_changes_while_idle_are_remembered_for_the_next_session()
     {

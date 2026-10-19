@@ -51,4 +51,10 @@ public static class Requires
     /// which no saved copy can; CI must not go red because somebody else's server is slow or
     /// redesigned, so the gate excludes them and they run at the desk and before every release.</summary>
     public const string Network = "Network";
+
+    /// <summary>A test process running ELEVATED, because the test restarts the Windows audio
+    /// service itself (what the Equalizer APO repair helper does, from its own elevated process).
+    /// A non-elevated run cannot, and raising a UAC prompt from inside the suite would hang it
+    /// unattended; so the test fails up front saying so, like every other trait here.</summary>
+    public const string Administrator = "Administrator";
 }

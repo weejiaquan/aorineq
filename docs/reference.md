@@ -561,7 +561,9 @@ settings** rather than a reinstall. VB-Cable is donationware by VB-Audio.
 VB-Cable is its own playback device, so Equalizer APO has to be switched on for it separately. The
 toggle runs the same elevated, backed-up, verified repair as the Volume page's button, aimed at the
 cable; turning it off undoes exactly that repair. Each device keeps its own undo record, so
-repairing the cable never touches the undo held for your speakers. **Edit EQ** opens the equalizer
+repairing the cable never touches the undo held for your speakers. The repair restarts Windows'
+audio, so a running stream drops out for a few seconds and then carries on (AorinEQ re-attaches it
+after any repair or undo). **Edit EQ** opens the equalizer
 on the cable's tab, and the Global chain applies to it as well. If Equalizer APO is not installed,
 the toggle opens the setup guide instead. Turning it off is refused when Equalizer APO was switched
 on for the cable with its own Configurator rather than by this toggle: there is no AorinEQ backup to

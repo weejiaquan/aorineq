@@ -40,6 +40,38 @@ public class LoopbackCaptureTests
         capture.Stop();
     }
 
+    /// <summary>The Equalizer APO repair and its undo restart the Windows audio service, which
+    /// invalidates every WASAPI client — the AirPlay stream's capture among them. App re-attaches
+    /// that capture with <see cref="LoopbackCapture.Restart"/> afterwards
+    /// (<see cref="AirPlayController.RestartCapture"/>), so this drives exactly that across a real
+    /// restart, through the same <see cref="AudioServices.RestartAndSettle"/> the helper runs, on a
+    /// NAMED endpoint at 44100 as a stream opens it: the re-attach has to land on the rebuilt
+    /// endpoint, on the same endpoint, at a real rate.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    [Trait(Requires.Key, Requires.EqualizerApo)]
+    [Trait(Requires.Key, Requires.Administrator)]
+    public void A_capture_re_attaches_after_the_audio_service_restart_the_repair_helper_does()
+    {
+        Assert.True(Elevation.IsElevated,
+            "restarting the audio service needs an elevated test run - run the suite from an elevated prompt");
+        var endpointId = AudioEndpoint.GetDefaultRenderEndpointId()!;
+        using var capture = new LoopbackCapture();
+        Assert.True(capture.Start(endpointId, 44100));
+        int rateBefore = capture.SampleRate;
+
+        bool restarted = AudioServices.RestartAndSettle(elevate: false);
+        _out.WriteLine($"capture on {endpointId} at {rateBefore} Hz; audio service restart -> {restarted}");
+        Assert.True(restarted, "the audio service restart failed, so there was nothing to re-attach across");
+
+        bool reattached = capture.Restart();
+        _out.WriteLine($"re-attach -> {reattached}; endpoint {capture.EndpointId}; rate {capture.SampleRate} Hz");
+        Assert.True(reattached);
+        Assert.Equal(endpointId, capture.EndpointId);
+        Assert.InRange(capture.SampleRate, 8000, 384000);
+        capture.Stop();
+    }
+
     [Fact]
     public void DecodeInterleaved_handles_float32_and_16_24_32_bit_pcm()
     {

@@ -1961,6 +1961,11 @@ public partial class App : System.Windows.Application
             CheckEapoHealth(force: true);
             _eapoRepairRunning = false;
             _settingsWindow?.SetEapoUndoAvailable(DefaultEndpointBackup() is not null);
+            // The helper restarts the Windows audio service, which kills the AirPlay stream's
+            // capture (the HUD and the EQ editor re-attach their own); without this the receiver
+            // goes silent for the rest of the stream.
+            if (_airPlay?.IsStreaming == true && !_airPlay.RestartCapture())
+                System.Diagnostics.Trace.TraceWarning("AirPlay: the capture didn't re-attach after the repair helper ran.");
         }
     }
 
