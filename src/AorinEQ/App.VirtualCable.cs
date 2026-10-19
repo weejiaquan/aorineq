@@ -97,8 +97,8 @@ public partial class App
         _virtualCableInstalling = true;
         string? work = null;
         string? verdict = null;
-        bool setupRan = false;
-        bool cableFound = false;
+        // Null until the setup has run and the machine has been read; what follows the dialog.
+        VirtualCableSetupResult? setupResult = null;
         try
         {
             string zip;
@@ -141,19 +141,25 @@ public partial class App
                     verdict = Loc.T("app.vbcable.setup-failed");
                     return;
             }
-            setupRan = true;
 
             ShowVirtualCableProgress(Loc.T("app.vbcable.detecting"));
-            cableFound = await VirtualCableInstaller.WaitForCableAsync(VirtualCableInstaller.DetectTimeout) is not null;
-            if (cableFound)
+            bool cableFound = await VirtualCableInstaller.WaitForCableAsync(VirtualCableInstaller.DetectTimeout) is not null;
+            setupResult = VirtualCableInstaller.SetupResult(cableFound, !cableFound && VirtualCable.IsDriverPresent());
+            switch (setupResult)
             {
-                verdict = Loc.T("app.vbcable.installed");
-            }
-            else
-            {
-                // The card turns to "Restart Windows to finish"; the next starts resolve it.
-                _settings = VirtualCableInstaller.EnterPendingReboot(_settings);
-                SaveSettings();
+                case VirtualCableSetupResult.Installed:
+                    verdict = Loc.T("app.vbcable.installed");
+                    break;
+                case VirtualCableSetupResult.NeedsRestart:
+                    // The card turns to "Restart Windows to finish"; the next starts resolve it.
+                    _settings = VirtualCableInstaller.EnterPendingReboot(_settings);
+                    SaveSettings();
+                    break;
+                case VirtualCableSetupResult.NotInstalled:
+                    // Cancelled (or failed) inside VB-Audio's own installer: no driver, so no
+                    // restart would help and nothing is left pending.
+                    verdict = Loc.T("app.vbcable.cancelled");
+                    break;
             }
         }
         catch (Exception ex)
@@ -165,7 +171,7 @@ public partial class App
             TryWriteCrashLog(ex, "VirtualCableInstall");
             OpenUrl(VirtualCable.VendorPage);
             verdict = Loc.T("app.vbcable.setup-failed");
-            setupRan = false;
+            setupResult = null;
         }
         finally
         {
@@ -180,9 +186,8 @@ public partial class App
             }
         }
 
-        if (!setupRan) return;
-        if (cableFound) OfferAirPlayOnly();
-        else await ConfirmRestartForVirtualCableAsync();
+        if (setupResult == VirtualCableSetupResult.Installed) OfferAirPlayOnly();
+        else if (setupResult == VirtualCableSetupResult.NeedsRestart) await ConfirmRestartForVirtualCableAsync();
     }
 
     /// <summary>Runs VB-Audio's setup elevated from the extract folder (it installs the .inf/.sys/

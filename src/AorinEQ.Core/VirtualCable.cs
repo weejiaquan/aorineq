@@ -70,6 +70,38 @@ public static class VirtualCable
             .Split('\0', StringSplitOptions.RemoveEmptyEntries);
     }
 
+    /// <summary>Whether VB-Cable's DRIVER is on the machine: a PRESENT device node carries
+    /// <see cref="HardwareId"/>, endpoint or not. Right after VB-Audio's setup this tells "installed,
+    /// Windows needs a restart to build its endpoint" (true) from "the setup was cancelled or failed"
+    /// (false). An uninstalled cable's leftover node is not present, so it does not count.</summary>
+    public static bool IsDriverPresent() => AnyPresentDevNodeWithHardwareId(HardwareId);
+
+    /// <summary>Whether any present device node lists <paramref name="hardwareId"/> among its
+    /// hardware ids. False on any enumeration failure. Never throws.</summary>
+    internal static bool AnyPresentDevNodeWithHardwareId(string hardwareId) =>
+        PresentDeviceInstanceIds().Any(id =>
+            DevNodeHardwareIds(id).Contains(hardwareId, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>The instance ids of every present device node (CM_GETIDLIST_FILTER_PRESENT); empty
+    /// on failure. The list can grow between sizing it and reading it (a device arriving), so a
+    /// too-small buffer is sized again a few times before giving up.</summary>
+    private static IReadOnlyList<string> PresentDeviceInstanceIds()
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            if (CM_Get_Device_ID_List_SizeW(out uint length, null, GetIdListFilterPresent) != CrSuccess || length == 0)
+                return [];
+            var buffer = new char[length];
+            int cr = CM_Get_Device_ID_ListW(null, buffer, length, GetIdListFilterPresent);
+            if (cr == CrBufferSmall)
+                continue;
+            if (cr != CrSuccess)
+                return [];
+            return new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+        }
+        return [];
+    }
+
     /// <summary>One answer for the page: a working cable wins; then a pending reboot (the install
     /// ran, Windows has not caught up); then a cable that exists but is switched off.</summary>
     public static VirtualCableState StateFor(bool found, bool installedButInactive, bool pendingReboot) =>
@@ -82,6 +114,13 @@ public static class VirtualCable
     private const int CrBufferSmall = 0x1A;
     private const uint LocateDevNodeNormal = 0x0; // CM_LOCATE_DEVNODE_NORMAL: present nodes only
     private const uint DrpHardwareId = 0x2;       // CM_DRP_HARDWAREID (REG_MULTI_SZ)
+    private const uint GetIdListFilterPresent = 0x100; // CM_GETIDLIST_FILTER_PRESENT
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int CM_Get_Device_ID_List_SizeW(out uint length, string? filter, uint flags);
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int CM_Get_Device_ID_ListW(string? filter, char[] buffer, uint length, uint flags);
 
     [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int CM_Locate_DevNodeW(out uint devInst, string deviceId, uint flags);

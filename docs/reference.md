@@ -552,8 +552,10 @@ VB-Audio's page for the newest driver pack (falling back to Pack45), downloads i
 the setup only if its Authenticode signature is intact **and** names VB-Audio's publisher
 (`BUREL VINCENT Entrepreneur individuel`). VB-Audio's own installer then runs - you accept their
 licence, Windows asks for administrator permission. If the device appears within ten seconds you
-are offered AirPlay only; otherwise Windows needs a restart, the card says so, and AorinEQ tells you
-when the cable is ready (it stops waiting after three starts). A package that can't be found or
+are offered AirPlay only. If the driver installed but the device hasn't appeared, Windows needs a
+restart: the card says so, and AorinEQ tells you when the cable is ready (it stops waiting after three
+starts). If nothing was installed (you cancelled inside VB-Audio's installer), the card says **Install
+cancelled** and no restart is asked for. A package that can't be found or
 downloaded, or an installer that can't be started, opens VB-Audio's page instead; a download that
 fails verification is never run. A cable that is installed but disabled gets **Open Sound
 settings** rather than a reinstall. VB-Cable is donationware by VB-Audio.

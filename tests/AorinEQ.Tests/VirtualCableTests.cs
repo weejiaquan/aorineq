@@ -85,6 +85,44 @@ public class VirtualCableTests
         Assert.Equal(expected, VirtualCable.IsInstalledButInactive());
     }
 
+    /// <summary>The device-node sweep behind <see cref="VirtualCable.IsDriverPresent"/>, proved on a
+    /// node every machine with sound has: the hardware id of the default endpoint's own device is
+    /// found among the present nodes, and an id nothing carries is not. Without the positive half,
+    /// a sweep that listed nothing would pass the "no VB-Cable here" test for the wrong reason.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void The_present_device_sweep_finds_a_real_hardware_id_and_not_a_made_up_one()
+    {
+        var defaultId = AudioEndpoint.GetDefaultRenderEndpointId()!;
+        var real = VirtualCable.HardwareIdsOf(defaultId);
+        _out.WriteLine($"default endpoint {defaultId} | instance={AudioEndpoint.GetDeviceInstanceId(defaultId)} | hwids=[{string.Join(", ", real)}]");
+        Assert.NotEmpty(real);
+
+        bool foundReal = VirtualCable.AnyPresentDevNodeWithHardwareId(real[0]);
+        bool foundLower = VirtualCable.AnyPresentDevNodeWithHardwareId(real[0].ToLowerInvariant());
+        bool foundMadeUp = VirtualCable.AnyPresentDevNodeWithHardwareId("AORINEQ_NO_SUCH_HARDWARE_ID");
+        _out.WriteLine($"'{real[0]}' -> {foundReal}; lower-cased -> {foundLower}; made-up -> {foundMadeUp}");
+        Assert.True(foundReal);
+        Assert.True(foundLower);
+        Assert.False(foundMadeUp);
+    }
+
+    /// <summary>The driver check the installer asks after VB-Audio's setup exits. A cable with an
+    /// endpoint (active, or turned off in Sound settings or Device Manager) has a present node; with
+    /// neither, as on a machine without VB-Cable, there is none — the one state this cannot tell from
+    /// the endpoints is a driver installed moments ago and waiting for a restart, which is the point
+    /// of asking.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void The_driver_is_present_exactly_when_a_cable_endpoint_exists_on_a_machine_not_awaiting_a_restart()
+    {
+        bool found = VirtualCable.Find() is not null;
+        bool inactive = VirtualCable.IsInstalledButInactive();
+        bool driver = VirtualCable.IsDriverPresent();
+        _out.WriteLine($"Find()={found} IsInstalledButInactive()={inactive} -> IsDriverPresent()={driver}");
+        Assert.Equal(found || inactive, driver);
+    }
+
     [Theory]
     [InlineData(true, false, false, VirtualCableState.Present)]
     [InlineData(true, true, true, VirtualCableState.Present)]

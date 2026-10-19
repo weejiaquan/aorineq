@@ -409,6 +409,22 @@ public class VirtualCableInstallerTests
         Assert.Equal(expected, outcome);
     }
 
+    /// <summary>After the ten-second wait. Cancelling inside VB-Audio's installer leaves no driver,
+    /// and must not turn into "Restart Windows to finish" and three starts of waiting for a cable
+    /// that is never coming; only a driver without its endpoint is worth a restart.</summary>
+    [Theory]
+    [InlineData(true, true, VirtualCableSetupResult.Installed)]
+    [InlineData(true, false, VirtualCableSetupResult.Installed)]     // the endpoint is the proof; the node check is moot
+    [InlineData(false, true, VirtualCableSetupResult.NeedsRestart)]  // driver installed, endpoint not built yet
+    [InlineData(false, false, VirtualCableSetupResult.NotInstalled)] // cancelled or failed inside the installer
+    public void Only_a_driver_without_its_endpoint_asks_for_a_restart(
+        bool cableFound, bool driverPresent, VirtualCableSetupResult expected)
+    {
+        var result = VirtualCableInstaller.SetupResult(cableFound, driverPresent);
+        _out.WriteLine($"cableFound={cableFound} driverPresent={driverPresent} -> {result}");
+        Assert.Equal(expected, result);
+    }
+
     [Fact]
     [Trait(Requires.Key, Requires.AudioEndpoint)]
     public async Task Waiting_for_the_cable_returns_it_at_once_when_present_and_gives_up_on_time_when_not()

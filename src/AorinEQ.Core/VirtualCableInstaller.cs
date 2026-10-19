@@ -12,6 +12,17 @@ public enum VirtualCableLaunch
     Failed,
 }
 
+/// <summary>What VB-Audio's setup left behind once the wait for the cable is over.</summary>
+public enum VirtualCableSetupResult
+{
+    /// <summary>The cable's endpoint is here.</summary>
+    Installed,
+    /// <summary>The driver is installed but Windows has not built the endpoint: restart.</summary>
+    NeedsRestart,
+    /// <summary>Nothing was installed: the user cancelled inside VB-Audio's installer, or it failed.</summary>
+    NotInstalled,
+}
+
 /// <summary>The persisted "installed, waiting for a restart" state after one more start.</summary>
 public sealed record VirtualCablePending(bool Pending, int Starts, bool AnnounceReady);
 
@@ -262,6 +273,15 @@ public static class VirtualCableInstaller
             await Task.Delay(left < DetectPollInterval ? left : DetectPollInterval, cancellationToken);
         }
     }
+
+    /// <summary>Reads the machine after the setup exited and the <see cref="DetectTimeout"/> wait
+    /// ended: a cable endpoint means installed; no endpoint but a present VB-Cable device node
+    /// (<see cref="VirtualCable.IsDriverPresent"/>) means Windows needs a restart; neither means the
+    /// setup installed nothing, so there is nothing to restart for.</summary>
+    public static VirtualCableSetupResult SetupResult(bool cableFound, bool driverPresent) =>
+        cableFound ? VirtualCableSetupResult.Installed
+        : driverPresent ? VirtualCableSetupResult.NeedsRestart
+        : VirtualCableSetupResult.NotInstalled;
 
     /// <summary>One app start's step of the "restart to finish installing" state: a cable that has
     /// appeared clears it and is announced; otherwise the start is counted, and the
