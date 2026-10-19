@@ -79,6 +79,11 @@ internal sealed class DesignerOverlay : FrameworkElement
     {
         Focusable = true;
         FocusVisualStyle = null;
+        // A mouse-down focuses the canvas, and a focused element asks to be scrolled into view.
+        // The overlay spans every artboard, so on a canvas larger than its viewport (zoomed in,
+        // or a small screen) that scroll moved the art under the still pointer and the press hit
+        // whatever was there instead. The focus is for the keyboard only: the view stays put.
+        RequestBringIntoView += (_, e) => e.Handled = e.TargetObject == this;
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.NearestNeighbor); // the magnifier shows pixels, not a blur
     }
 

@@ -60,6 +60,14 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _currentSettings = currentSettings;
         _skinsRoot = skinsRoot;
         InitializeComponent();
+        // The designed size, or the work area where that is smaller (a 1366x768 laptop at 125 % is
+        // about 1093x576): larger, the centred window would open past the screen's edges, its
+        // title bar out of reach.
+        var area = SystemParameters.WorkArea;
+        MinWidth = Math.Min(MinWidth, area.Width);
+        MinHeight = Math.Min(MinHeight, area.Height);
+        Width = Math.Min(Width, area.Width);
+        Height = Math.Min(Height, area.Height);
         var settings = currentSettings();
         LayersColumn.Width = new GridLength(settings.DesignerLayersWidth);
         PropertiesColumn.Width = new GridLength(settings.DesignerPropertiesWidth);

@@ -907,12 +907,29 @@ public class SkinDesignerWindowTests : IDisposable
             d.PanelWidthsChanged += (l, p) => reported = (l, p);
             var widths = (d.LayersColumn.Width.Value, d.PropertiesColumn.Width.Value);
             d.LayersSplitter.RaiseEvent(new DragCompletedEventArgs(0, 0, false) { RoutedEvent = Thumb.DragCompletedEvent });
-            return (widths, reported, Actual: (d.LayersColumn.ActualWidth, d.PropertiesColumn.ActualWidth), d.Width, d.MinWidth);
+            return (widths, reported, Actual: (d.LayersColumn.ActualWidth, d.PropertiesColumn.ActualWidth));
         }, Settings.Default with { DesignerLayersWidth = 250, DesignerPropertiesWidth = 300 });
         _out.WriteLine($"{r}");
         Assert.Equal((250.0, 300.0), r.widths);
         Assert.Equal(r.Actual, r.reported);
-        Assert.Equal((1180.0, 900.0), (r.Width, r.MinWidth));
+    }
+
+    /// <summary>The window opens at its designed 1180x720, or the work area where that is smaller,
+    /// so it never opens past the screen's edges. The 1180-wide branch runs on a desk monitor,
+    /// the fitted one on a 1024x768 CI runner.</summary>
+    [Fact]
+    public void The_window_opens_at_its_designed_size_fitted_to_the_work_area()
+    {
+        var area = _sta.Run(() => SystemParameters.WorkArea);
+        var size = WithDesigner(d =>
+        {
+            d.UpdateLayout();
+            return (d.Width, d.Height, d.MinWidth, d.MinHeight, d.ActualWidth, d.ActualHeight);
+        });
+        var expected = (Math.Min(1180, area.Width), Math.Min(720, area.Height), Math.Min(900, area.Width), Math.Min(560, area.Height));
+        _out.WriteLine($"work area {area}; expected (width, height, min width, min height) {expected}; actual {size}");
+        Assert.Equal(expected, (size.Width, size.Height, size.MinWidth, size.MinHeight));
+        Assert.True(size.ActualWidth <= area.Width && size.ActualHeight <= area.Height, $"the window fits the work area {area}: {size}");
     }
 
     [Fact]
@@ -1159,7 +1176,8 @@ public class SkinDesignerWindowTests : IDisposable
 
     /// <summary>The canvas is centred, so growing it for text past the bar's edge mid-drag would
     /// move the overlay under a still pointer. Its growth waits for the drag's end: the text keeps
-    /// tracking the pointer exactly.</summary>
+    /// tracking the pointer exactly. The side panels are at their narrowest so the canvas fits its
+    /// viewport (and is centred) on a screen as small as 1024 px, as a CI runner's is.</summary>
     [Fact]
     public void A_drag_past_the_edge_tracks_the_pointer_and_the_canvas_grows_after()
     {
@@ -1180,13 +1198,46 @@ public class SkinDesignerWindowTests : IDisposable
             int x = d.Document.Config.Text!.X;
             d.Overlay.FinishDrag();
             d.UpdateLayout();
-            return (x, before, during, After: (Margin: d.Artboards.Margin.Right, Overlay: d.Overlay.TranslatePoint(new Point(0, 0), d)));
-        });
-        _out.WriteLine($"expected x 190; actual {r.x}. Margin {r.before} before the drag; during it margin {r.during.Margin}, overlay at {r.during.Overlay}; after it margin {r.After.Margin}, overlay at {r.After.Overlay}");
+            return (x, before, during, After: (Margin: d.Artboards.Margin.Right, Overlay: d.Overlay.TranslatePoint(new Point(0, 0), d)),
+                Grown: (Extent: d.CanvasScroll.ExtentWidth, Viewport: d.CanvasScroll.ViewportWidth, Window: d.ActualWidth));
+        }, Settings.Default with { DesignerLayersWidth = 160, DesignerPropertiesWidth = 160 });
+        _out.WriteLine($"expected x 190; actual {r.x}. Margin {r.before} before the drag; during it margin {r.during.Margin}, overlay at {r.during.Overlay}; after it margin {r.After.Margin}, overlay at {r.After.Overlay}; grown canvas {r.Grown}");
+        Assert.True(r.Grown.Extent <= r.Grown.Viewport, $"the grown canvas must fit its viewport to be centred: {r.Grown}");
         Assert.Equal(190, r.x);
         Assert.Equal(r.before, r.during.Margin); // frozen while the drag runs
         Assert.True(r.After.Margin > r.before, "the canvas grows for the text once the drag ends");
         Assert.NotEqual(r.during.Overlay, r.After.Overlay); // the growth really moves the overlay: why it waits
+    }
+
+    /// <summary>A press focuses the canvas, and a focused element asks to be scrolled into view. On a
+    /// canvas larger than its viewport that scroll moved the art under the still pointer, so the
+    /// press hit whatever was there instead. The view stays put and the press drags what was under it.</summary>
+    [Fact]
+    public void A_press_on_a_canvas_larger_than_its_viewport_does_not_scroll_it_and_drags_what_is_under_the_pointer()
+    {
+        MakeSkin("scrolled", """{"scale":2,"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("scrolled");
+            d.SetZoom(4);
+            d.UpdateLayout();
+            var pointer = d.Overlay.TranslatePoint(Centre(d, SkinLayer.PercentText), d);
+            Point OverOverlay(Vector by) { d.UpdateLayout(); return d.TranslatePoint(pointer + by, d.Overlay); }
+            var canvas = (Extent: d.CanvasScroll.ExtentWidth, Viewport: d.CanvasScroll.ViewportWidth);
+            var offsetBefore = (d.CanvasScroll.HorizontalOffset, d.CanvasScroll.VerticalOffset);
+            bool began = d.Overlay.BeginDragAt(() => OverOverlay(new Vector(0, 0)));
+            var offsetAfter = (d.CanvasScroll.HorizontalOffset, d.CanvasScroll.VerticalOffset);
+            d.Overlay.DragTo(OverOverlay(new Vector(40, 0)), snap: false); // 40 screen px at 400 % on a 2x skin: 5 skin px
+            d.Overlay.FinishDrag();
+            return (canvas, offsetBefore, offsetAfter, began, d.Selection, d.Overlay.IsKeyboardFocused, d.Document.Config.Text!.X);
+        });
+        _out.WriteLine($"expected the offset unchanged, the drag begun on PercentText and x 15; actual canvas {r.canvas}, offset {r.offsetBefore} -> {r.offsetAfter}, began {r.began}, selection {r.Selection}, focused {r.IsKeyboardFocused}, x {r.X}");
+        Assert.True(r.canvas.Extent > r.canvas.Viewport, $"at 400 % the canvas must be larger than its viewport: {r.canvas}");
+        Assert.Equal(r.offsetBefore, r.offsetAfter);
+        Assert.True(r.began, "the press is on the percent text, so a drag begins");
+        Assert.Equal(SkinLayer.PercentText, r.Selection);
+        Assert.True(r.IsKeyboardFocused, "the canvas still takes the keyboard");
+        Assert.Equal(15, r.X);
     }
 
     /// <summary>Undo pressed during a drag ends the drag first: the drag is one undo step, and the
