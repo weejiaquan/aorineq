@@ -558,7 +558,8 @@ starts). If nothing was installed (you cancelled inside VB-Audio's installer), t
 cancelled** and no restart is asked for. A package that can't be found or
 downloaded, or an installer that can't be started, opens VB-Audio's page instead; a download that
 fails verification is never run. A cable that is installed but disabled gets **Open Sound
-settings** rather than a reinstall. VB-Cable is donationware by VB-Audio.
+settings** rather than a reinstall (a cable whose device is disabled is turned back on in Device
+Manager). VB-Cable is donationware by VB-Audio.
 
 ### EQ the AirPlay stream
 

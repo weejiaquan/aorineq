@@ -51,5 +51,21 @@ public sealed class StaWpf : IDisposable
 
     public void Run(Action work) => _thread.Invoke(work);
 
+    /// <summary>Runs the dispatcher queue to empty.
+    ///
+    /// The whole of a test body runs inside a single <see cref="Run"/>, which occupies the message
+    /// loop for its duration - so without this nothing queued ever runs: Loaded never fires, the
+    /// controls stay unloaded, and WPF refuses to open a Popup whose placement target is not
+    /// loaded. IsOpen then reads back false however it is set, including when assigned directly,
+    /// which looks exactly like a broken feature and is not.</summary>
+    public static void Pump()
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ContextIdle,
+            new Action(() => frame.Continue = false));
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+    }
+
     public void Dispose() => _thread.Dispose();
 }

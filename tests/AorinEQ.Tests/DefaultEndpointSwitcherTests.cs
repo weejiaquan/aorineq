@@ -116,6 +116,36 @@ public class DefaultEndpointSwitcherTests
         Assert.Equal(before, DefaultEndpointSwitcher.Capture());
     }
 
+    /// <summary>The callers only see a bool, so the refusal itself — which role, which HRESULT — is
+    /// what the trace has to carry for anyone debugging a switch that did not happen.</summary>
+    [Fact]
+    [Trait(Requires.Key, Requires.AudioEndpoint)]
+    public void A_refused_switch_is_traced_with_its_role_and_hresult()
+    {
+        var before = DefaultEndpointSwitcher.Capture();
+        using var writer = new StringWriter();
+        var listener = new System.Diagnostics.TextWriterTraceListener(writer);
+        System.Diagnostics.Trace.Listeners.Add(listener);
+        bool ok;
+        try
+        {
+            ok = DefaultEndpointSwitcher.SetDefault(NoSuchEndpoint, AudioEndpoint.ERole.Communications);
+            listener.Flush();
+        }
+        finally
+        {
+            System.Diagnostics.Trace.Listeners.Remove(listener);
+            listener.Dispose();
+        }
+        var traced = writer.ToString();
+        _out.WriteLine($"SetDefault(bogus, Communications) -> {ok}; traced:\n{traced}");
+        Assert.False(ok);
+        Assert.Contains(NoSuchEndpoint, traced);
+        Assert.Contains(nameof(AudioEndpoint.ERole.Communications), traced);
+        Assert.Matches("0x[0-9A-F]{8}", traced);
+        Assert.Equal(before, DefaultEndpointSwitcher.Capture());
+    }
+
     [Fact]
     [Trait(Requires.Key, Requires.AudioEndpoint)]
     [Trait(Requires.Key, Requires.MultipleRenderEndpoints)]

@@ -555,7 +555,7 @@
   "settings.airplay.while-streaming-the-volume-keys-set": "While streaming, the volume keys set the AirPlay device's level instead of Windows'.",
   "settings.airplay.default-playback-device": "Default playback device",
   "settings.airplay.cable.inactive-title": "VB-Cable is installed but turned off",
-  "settings.airplay.cable.inactive-subtitle": "Turn “CABLE Input” back on in Windows' Sound settings and it appears here.",
+  "settings.airplay.cable.inactive-subtitle": "Turn “CABLE Input” back on in Windows' Sound settings (or, if its device is disabled, in Device Manager) and it appears here.",
   "settings.airplay.cable.open-sound-settings": "Open Sound settings",
   "settings.airplay.cable.pending-title": "Restart Windows to finish installing VB-Cable",
   "settings.airplay.cable.pending-subtitle": "The installer has run, but the new device only appears after a restart.",

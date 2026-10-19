@@ -555,7 +555,7 @@
   "settings.airplay.while-streaming-the-volume-keys-set": "스트리밍 중에는 음량 키가 Windows가 아니라 AirPlay 기기의 음량을 바꿉니다.",
   "settings.airplay.default-playback-device": "기본 재생 장치",
   "settings.airplay.cable.inactive-title": "VB-Cable이 설치되어 있지만 꺼져 있습니다",
-  "settings.airplay.cable.inactive-subtitle": "Windows 소리 설정에서 “CABLE Input”을 다시 켜면 여기에 나타납니다.",
+  "settings.airplay.cable.inactive-subtitle": "Windows 소리 설정에서 “CABLE Input”을 다시 켜면(장치 자체가 사용 안 함 상태라면 장치 관리자에서 사용으로 설정하면) 여기에 나타납니다.",
   "settings.airplay.cable.open-sound-settings": "소리 설정 열기",
   "settings.airplay.cable.pending-title": "VB-Cable 설치를 마치려면 Windows를 다시 시작하세요",
   "settings.airplay.cable.pending-subtitle": "설치 프로그램은 실행되었지만 새 기기는 다시 시작한 뒤에 나타납니다.",

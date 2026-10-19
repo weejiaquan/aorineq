@@ -555,7 +555,7 @@
   "settings.airplay.while-streaming-the-volume-keys-set": "串流時，音量鍵改變的是 AirPlay 裝置的音量，而不是 Windows 的。",
   "settings.airplay.default-playback-device": "預設播放裝置",
   "settings.airplay.cable.inactive-title": "VB-Cable 已安裝，但被關閉了",
-  "settings.airplay.cable.inactive-subtitle": "在 Windows 的音效設定裡重新啟用「CABLE Input」，它就會出現在這裡。",
+  "settings.airplay.cable.inactive-subtitle": "在 Windows 的音效設定裡重新啟用「CABLE Input」（如果是裝置本身被停用，則在裝置管理員中啟用），它就會出現在這裡。",
   "settings.airplay.cable.open-sound-settings": "開啟音效設定",
   "settings.airplay.cable.pending-title": "重新啟動 Windows 以完成 VB-Cable 的安裝",
   "settings.airplay.cable.pending-subtitle": "安裝程式已經執行，但新裝置要重新啟動後才會出現。",

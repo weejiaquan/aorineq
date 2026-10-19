@@ -4,7 +4,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        Title="{loc:T eq.window-title.equalizer-aorineq}" Icon="/AorinEQ.ico" Width="1000" Height="640"
+        Title="{loc:T eq.window-title.equalizer-aorineq}" Icon="/AorinEQ;component/AorinEQ.ico" Width="1000" Height="640"
         MinWidth="820" MinHeight="520" WindowStartupLocation="CenterScreen"
         Background="{DynamicResource EqPanelBrush}" Focusable="True"
         ExtendsContentIntoTitleBar="True"
@@ -16,7 +16,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <ui:TitleBar Grid.Row="0" Title="{loc:T eq.title.equalizer-aorineq}"
-                     Icon="{ui:ImageIcon '/AorinEQ.ico'}" />
+                     Icon="{ui:ImageIcon '/AorinEQ;component/AorinEQ.ico'}" />
         <Grid Grid.Row="1" Margin="10">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace AorinEQ.Core;
@@ -62,6 +63,8 @@ public static class DefaultEndpointSwitcher
         return all;
     }
 
+    /// <summary>One role's switch. False when Windows refused it; the HRESULT and the role are
+    /// traced, since the callers only see the bool.</summary>
     internal static bool SetDefault(string endpointId, AudioEndpoint.ERole role)
     {
         try
@@ -69,19 +72,24 @@ public static class DefaultEndpointSwitcher
             var config = (IPolicyConfig)new PolicyConfigClient();
             try
             {
-                return config.SetDefaultEndpoint(endpointId, role) >= 0;
+                int hr = config.SetDefaultEndpoint(endpointId, role);
+                if (hr < 0)
+                    Trace.TraceWarning($"DefaultEndpointSwitcher: SetDefaultEndpoint('{endpointId}', {role}) failed with 0x{hr:X8}");
+                return hr >= 0;
             }
             finally
             {
                 Marshal.ReleaseComObject(config);
             }
         }
-        catch (COMException)
+        catch (COMException ex)
         {
+            Trace.TraceWarning($"DefaultEndpointSwitcher: SetDefaultEndpoint('{endpointId}', {role}) failed with 0x{ex.HResult:X8}");
             return false;
         }
-        catch (InvalidCastException)
+        catch (InvalidCastException ex)
         {
+            Trace.TraceWarning($"DefaultEndpointSwitcher: IPolicyConfig unavailable for {role}: {ex.Message}");
             return false;
         }
     }

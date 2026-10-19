@@ -555,7 +555,7 @@
   "settings.airplay.while-streaming-the-volume-keys-set": "配信中、音量キーは Windows ではなく AirPlay 機器の音量を変えます。",
   "settings.airplay.default-playback-device": "既定の再生デバイス",
   "settings.airplay.cable.inactive-title": "VB-Cable はインストール済みですがオフになっています",
-  "settings.airplay.cable.inactive-subtitle": "Windows のサウンド設定で「CABLE Input」をオンに戻すと、ここに表示されます。",
+  "settings.airplay.cable.inactive-subtitle": "Windows のサウンド設定で「CABLE Input」をオンに戻すと（デバイス自体が無効になっている場合はデバイス マネージャーで有効にすると）、ここに表示されます。",
   "settings.airplay.cable.open-sound-settings": "サウンド設定を開く",
   "settings.airplay.cable.pending-title": "VB-Cable のインストールを完了するには Windows を再起動してください",
   "settings.airplay.cable.pending-subtitle": "インストーラーは実行されましたが、新しい機器は再起動後に現れます。",

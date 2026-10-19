@@ -1596,7 +1596,10 @@ public partial class App : System.Windows.Application
         // tracker never sees it — so no balloon, no automatic-repair prompt, and no "working again"
         // balloon when the default comes back (the tracker's last reading is still the device the
         // user had). The cable's Equalizer APO is the "EQ the AirPlay stream" switch's business.
-        if (IsAirPlayOnlyCable(snapshot.EndpointGuid))
+        // Repair and Undo would act on that default — the cable — so the page hides them meanwhile.
+        bool heldOnCable = IsAirPlayOnlyCable(snapshot.EndpointGuid);
+        _settingsWindow?.SetEapoHeldOnCable(heldOnCable);
+        if (heldOnCable)
         {
             _settingsWindow?.SetEapoHealth(snapshot, _settings.VolumeMode, applies: true);
             return;
@@ -1647,23 +1650,6 @@ public partial class App : System.Windows.Application
 
     // ---------------------------------------------------------------- the endpoint repair
 
-    /// <summary>The whole privileged half of the repair, inside ONE elevated process: capture,
-    /// write, restart audio, verify, and revert if the verification does not hold.
-    ///
-    /// It is one process on purpose. Splitting the write from the verify would put a UAC prompt
-    /// between them, and a user who declines that second prompt is left in exactly the half-written
-    /// state the design exists to prevent. The verdict is left in a file the launching process
-    /// consumes, because an exit code cannot carry the sentence the user needs to read.
-    ///
-    /// TARGETING. Without <c>--endpoint</c> the endpoint is resolved HERE, from the current default
-    /// render device. With it (AirPlay's "EQ the AirPlay stream", aimed at VB-Cable) the GUID is the
-    /// one thing besides the token taken from the command line, and it is held to the strictest
-    /// reading available: it must parse as a GUID — never used as a path or a command — name a
-    /// render endpoint Windows has right now, AND be either the current default render device or
-    /// VB-Cable. So the helper still never accepts an arbitrary target from its own arguments: the
-    /// argument can only choose between the two devices AorinEQ would repair anyway. Changing the
-    /// default between clicking and answering the prompt still repairs the device you are listening
-    /// through now. See <see cref="RepairEndpointFrom"/>.</summary>
     /// <summary>The run identifier the launching process passed, or "" when there is none or it is
     /// not one. The ONLY thing taken from the command line, and it is never used as a path, a
     /// device id or a command — only echoed back so the launcher can tell this run's verdict from
@@ -1713,6 +1699,23 @@ public partial class App : System.Windows.Application
         return RepairEndpointVerdict.Accepted;
     }
 
+    /// <summary>The whole privileged half of the repair, inside ONE elevated process: capture,
+    /// write, restart audio, verify, and revert if the verification does not hold.
+    ///
+    /// It is one process on purpose. Splitting the write from the verify would put a UAC prompt
+    /// between them, and a user who declines that second prompt is left in exactly the half-written
+    /// state the design exists to prevent. The verdict is left in a file the launching process
+    /// consumes, because an exit code cannot carry the sentence the user needs to read.
+    ///
+    /// TARGETING. Without <c>--endpoint</c> the endpoint is resolved HERE, from the current default
+    /// render device. With it (AirPlay's "EQ the AirPlay stream", aimed at VB-Cable) the GUID is the
+    /// one thing besides the token taken from the command line, and it is held to the strictest
+    /// reading available: it must parse as a GUID — never used as a path or a command — name a
+    /// render endpoint Windows has right now, AND be either the current default render device or
+    /// VB-Cable. So the helper still never accepts an arbitrary target from its own arguments: the
+    /// argument can only choose between the two devices AorinEQ would repair anyway. Changing the
+    /// default between clicking and answering the prompt still repairs the device you are listening
+    /// through now. See <see cref="RepairEndpointFrom"/>.</summary>
     private static int RunElevatedEapoRepair(bool undo, string token, string[] args)
     {
         // ONE privileged repair at a time, machine-wide. Without this, two helpers can both pass
@@ -1890,6 +1893,8 @@ public partial class App : System.Windows.Application
             // Said on the surface that asked: the run holding the helper reports elsewhere, so a
             // silent drop would read as a click that did nothing.
             ShowRepairStatus(_settingsWindow, endpointGuid, Loc.T("app.aorineq-is-already-changing-this-pc"), busy: false);
+            // busy:false re-enabled the Volume page's Undo; it may only be offered with a backup to undo.
+            if (endpointGuid is null) _settingsWindow?.SetEapoUndoAvailable(DefaultEndpointBackup() is not null);
             return false;
         }
         _eapoRepairRunning = true;

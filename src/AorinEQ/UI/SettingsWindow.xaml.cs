@@ -423,8 +423,35 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Shows or hides "Undo repair". App calls this after every repair attempt and at
     /// startup: the button exists exactly as long as a backup of the user's original settings
     /// does.</summary>
-    public void SetEapoUndoAvailable(bool available) =>
-        UndoRepairButton.Visibility = available ? Visibility.Visible : Visibility.Collapsed;
+    public void SetEapoUndoAvailable(bool available)
+    {
+        _eapoUndoAvailable = available;
+        ApplyEapoRepairActions();
+    }
+
+    /// <summary>Whether the reading behind this page is of VB-Cable while AorinEQ's own AirPlay-only
+    /// switch holds the default there (App asks <see cref="DefaultEndpointSwitcher.IsHeldOnCable"/>
+    /// on every health check). The Volume page's Repair and Undo act on the DEFAULT device, which is
+    /// then the cable for as long as the stream runs: the cable's Equalizer APO is the AirPlay page's
+    /// "EQ the AirPlay stream" switch, so they are hidden until the default is the user's again.</summary>
+    public void SetEapoHeldOnCable(bool held)
+    {
+        _eapoHeldOnCable = held;
+        ApplyEapoRepairActions();
+    }
+
+    private bool _eapoUndoAvailable;
+    private bool _eapoHeldOnCable;
+
+    private void ApplyEapoRepairActions()
+    {
+        var repair = _eapoHeldOnCable ? Visibility.Collapsed : Visibility.Visible;
+        RepairEapoButton.Visibility = repair;
+        EapoBannerRepairButton.Visibility = repair;
+        UndoRepairButton.Visibility = _eapoUndoAvailable && !_eapoHeldOnCable
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
 
     /// <summary>The one line under the repair buttons: progress while the elevated helper runs,
     /// then its verdict. Buttons are disabled while it is busy so a second prompt cannot be

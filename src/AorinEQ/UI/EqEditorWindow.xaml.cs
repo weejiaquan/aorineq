@@ -105,7 +105,7 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         Interval = TimeSpan.FromMilliseconds(33), // ~30 fps cap
     };
 
-    private sealed record ScopeTab(string? DeviceId, string Label)
+    internal sealed record ScopeTab(string? DeviceId, string Label)
     {
         public override string ToString() => Label;
     }
