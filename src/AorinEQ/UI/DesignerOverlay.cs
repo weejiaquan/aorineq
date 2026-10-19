@@ -99,6 +99,20 @@ internal sealed class DesignerOverlay : FrameworkElement
         set { _zoom = CanvasZoom.Clamp(value); InvalidateVisual(); }
     }
 
+    /// <summary>Where the overlay takes the mouse, in its own coordinates: all of it, and whatever
+    /// of the scene lies past it (text stopped at an artboard's far edge, and the handles on it),
+    /// or that part could be seen but not grabbed.</summary>
+    internal Rect HitArea
+    {
+        get
+        {
+            var area = new Rect(RenderSize);
+            double half = HandleScreenSize / _zoom / 2;
+            if (_scene.Extent is { IsEmpty: false } extent) area.Union(Rect.Inflate(extent, half, half));
+            return area;
+        }
+    }
+
     /// <summary>The targets the drag in progress has snapped to, drawn as the magenta guides.</summary>
     internal IReadOnlyList<SnapTarget> Guides => _guides;
 
@@ -116,7 +130,9 @@ internal sealed class DesignerOverlay : FrameworkElement
     public event Action<SkinLayer?, int, int>? PointerMoved;
 
     /// <summary>What a point (overlay coordinates) is over: the selected element's handles first,
-    /// then a fill-range line, then elements topmost first, then an artboard.</summary>
+    /// then a fill-range line, then elements topmost first, then an artboard. An element on the
+    /// artboard under the point wins over one that only overflows onto it from another artboard
+    /// (text stopped at the bar's bottom edge never takes a click meant for the strip).</summary>
     internal (SceneBoard? Board, SceneElement? Element, SkinHandle? Handle) HitTest(Point point)
     {
         double grab = HandleScreenSize / _zoom;
@@ -135,9 +151,15 @@ internal sealed class DesignerOverlay : FrameworkElement
             if (board.FillEnd is int end && Math.Abs(point.X - board.ToOverlay(end, 0).X) <= grab / 2)
                 return (board, null, SkinHandle.FillEnd);
         }
-        foreach (var element in _scene.Elements.Reverse())
-            if (_scene.BoardFor(element.Board) is { } board && board.ToOverlay(element.Bounds).Contains(point))
-                return (board, element, SkinHandle.Move);
+        var hits = _scene.Elements.Reverse()
+            .Select(e => (Board: _scene.BoardFor(e.Board), Element: e))
+            .Where(h => h.Board is { } b && b.ToOverlay(h.Element.Bounds).Contains(point))
+            .ToList();
+        if (hits.Count > 0)
+        {
+            var (board, element) = hits.FirstOrDefault(h => h.Board!.Bounds.Contains(point)) is { Element: not null } own ? own : hits[0];
+            return (board, element, SkinHandle.Move);
+        }
         foreach (var board in _scene.Boards)
             if (board.Bounds.Contains(point)) return (board, null, null);
         return (null, null, null);
@@ -181,7 +203,8 @@ internal sealed class DesignerOverlay : FrameworkElement
     }
 
     /// <summary>The artboard's edges and centre, its fill lines (not the one being dragged) and
-    /// every other element on the same artboard.</summary>
+    /// every other element on the same artboard. "Other" is by layer: every step of a drag rebuilds
+    /// the scene, so the dragged element's last position is a new element of the same layer.</summary>
     private IReadOnlyList<SnapTarget> Targets(SceneBoard board, SceneElement? self, SkinHandle handle)
     {
         var targets = new List<SnapTarget>(SnapMath.ArtboardTargets(board.Width, board.Height));
@@ -190,7 +213,7 @@ internal sealed class DesignerOverlay : FrameworkElement
         if (board.FillEnd is int end && handle != SkinHandle.FillEnd)
             targets.Add(new SnapTarget(SnapAxis.X, end, SnapSource.Artboard));
         foreach (var element in _scene.Elements)
-            if (element.Board == board.Layer && !ReferenceEquals(element, self))
+            if (element.Board == board.Layer && element.Layer != self?.Layer)
                 targets.AddRange(SnapMath.ElementTargets(new SnapRect(element.Bounds.X, element.Bounds.Y,
                     element.Bounds.Width, element.Bounds.Height)));
         return targets;
@@ -213,20 +236,29 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
-        Focus(); // the canvas takes the keyboard (arrows nudge) and the field being typed in commits
-        var point = e.GetPosition(this);
+        if (BeginDragAt(e.GetPosition(this))) e.Handled = true;
+    }
+
+    /// <summary>The mouse went down at <paramref name="point"/> (overlay coordinates): the canvas
+    /// takes the focus, the layer under it is clicked, and a drag starts when it is on something
+    /// that drags. False when no drag started.</summary>
+    internal bool BeginDragAt(Point point)
+    {
+        // Focus first: the field being typed in commits (ending its merge run) before the drag's
+        // first commit, and the canvas takes the keyboard (arrows nudge).
+        Focus();
         var (board, element, handle) = HitTest(point);
         if (board is null)
         {
             LayerClicked?.Invoke(SkinLayer.SkinInfo);
-            return;
+            return false;
         }
         bool fillHandle = handle is SkinHandle.FillStart or SkinHandle.FillEnd;
         LayerClicked?.Invoke(element?.Layer ?? board.Layer);
-        if (handle is not { } held || (element is null && !fillHandle) || !CaptureMouse()) return;
+        if (handle is not { } held || (element is null && !fillHandle) || !CaptureMouse()) return false;
         _drag = new DragState(board, element, held, point);
         DragStarted?.Invoke();
-        e.Handled = true;
+        return true;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -238,14 +270,21 @@ internal sealed class DesignerOverlay : FrameworkElement
         else PointerMoved?.Invoke(over.Layer, (int)Math.Floor((point.X - over.Origin.X) / over.Scale),
             (int)Math.Floor((point.Y - over.Origin.Y) / over.Scale));
 
-        if (_drag is not { } drag || e.LeftButton != MouseButtonState.Pressed)
+        if (_drag is null || e.LeftButton != MouseButtonState.Pressed)
         {
             var hit = HitTest(point);
             Cursor = CursorFor(hit.Element is null && hit.Handle is not (SkinHandle.FillStart or SkinHandle.FillEnd) ? null : hit.Handle);
             return;
         }
-        var (dx, dy, guides) = ComputeDrag(drag.Board, drag.Element, drag.Handle, point - drag.Start,
-            snap: !Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
+        DragTo(point, snap: !Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
+    }
+
+    /// <summary>The pointer of a running drag is at <paramref name="point"/>; snapped unless
+    /// <paramref name="snap"/> is false (the caller reads Alt).</summary>
+    internal void DragTo(Point point, bool snap)
+    {
+        if (_drag is not { } drag) return;
+        var (dx, dy, guides) = ComputeDrag(drag.Board, drag.Element, drag.Handle, point - drag.Start, snap);
         _guides = guides;
         InvalidateVisual();
         Dragged?.Invoke(drag.Element?.Layer ?? drag.Board.Layer, drag.Handle, dx, dy);
@@ -254,12 +293,25 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonUp(e);
-        if (_drag is not null) ReleaseMouseCapture();
+        FinishDrag();
+    }
+
+    /// <summary>Ends a running drag (the button released, or Undo/Redo pressed mid-drag); nothing
+    /// when none is running. Losing the capture any other way ends it too.</summary>
+    internal void FinishDrag()
+    {
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        CompleteDrag();
     }
 
     protected override void OnLostMouseCapture(MouseEventArgs e)
     {
         base.OnLostMouseCapture(e);
+        CompleteDrag();
+    }
+
+    private void CompleteDrag()
+    {
         if (_drag is null) return;
         _drag = null;
         _guides = [];
@@ -279,13 +331,8 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         double px = 1 / _zoom;
-        // Transparent, not null: the whole overlay takes the mouse, so the renderers under it never
-        // do - and so does whatever of the scene lies past it (text stopped at an artboard's far
-        // edge, the handles on it), or that part could be seen but not grabbed.
-        var hitArea = new Rect(RenderSize);
-        if (_scene.Extent is { IsEmpty: false } extent)
-            hitArea.Union(Rect.Inflate(extent, HandleScreenSize * px / 2, HandleScreenSize * px / 2));
-        dc.DrawRectangle(Brushes.Transparent, null, hitArea);
+        // Transparent, not null: the whole overlay takes the mouse, so the renderers under it never do.
+        dc.DrawRectangle(Brushes.Transparent, null, HitArea);
         var line = MakePen(Accent, px);
         var dashed = MakePen(Accent, px, dashed: true);
 

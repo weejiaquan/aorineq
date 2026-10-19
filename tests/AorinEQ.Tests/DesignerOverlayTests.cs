@@ -138,12 +138,13 @@ public class DesignerOverlayTests
             overlay.Arrange(new Rect(0, 0, 100, 40));
             var onText = VisualTreeHelper.HitTest(overlay, new Point(115, 49))?.VisualHit;
             var beyond = VisualTreeHelper.HitTest(overlay, new Point(160, 49))?.VisualHit;
-            return (scene.Extent, EmptyExtent: DesignerScene.Empty.Extent, overlay.RenderSize,
+            return (scene.Extent, EmptyExtent: DesignerScene.Empty.Extent, overlay.RenderSize, overlay.HitArea,
                 OnText: ReferenceEquals(onText, overlay), Beyond: beyond is null,
                 Picked: overlay.HitTest(new Point(115, 49)).Element?.Layer);
         });
-        _out.WriteLine($"expected extent 0,0,130,58, mouse taken on the text and not beyond, PercentText picked; actual {r}");
+        _out.WriteLine($"expected extent 0,0,130,58, hit area -4,-4,138,66, mouse taken on the text and not beyond, PercentText picked; actual {r}");
         Assert.Equal(new Rect(0, 0, 130, 58), r.Extent);
+        Assert.Equal(new Rect(-4, -4, 138, 66), r.HitArea); // the extent and half a handle round it
         Assert.True(r.EmptyExtent.IsEmpty);
         Assert.True(r.OnText);
         Assert.True(r.Beyond);
@@ -187,5 +188,56 @@ public class DesignerOverlayTests
         Assert.True(r.semiBold.Height > 20 && r.semiBold.Height < 40);
         Assert.True(Math.Abs(r.semiBold.Width - r.normal.Width) > 0.01, "the caller's unbold weight was ignored");
         Assert.Equal(r.boldStyle, r.boldAtSemiBold); // a bold style is Bold whatever the caller's weight
+    }
+
+    /// <summary>Every step of a drag rebuilds the scene, so the dragged layer's last position comes
+    /// back as a new element. It is the element itself, not a target: a slow drag must not stick
+    /// to where it just was.</summary>
+    [Fact]
+    public void A_drag_never_snaps_to_its_own_last_position()
+    {
+        var r = _sta.Run(() =>
+        {
+            var atStart = new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar, new Rect(100, 10, 30, 18), [SkinHandle.Move]);
+            var overlay = new DesignerOverlay
+            {
+                Scene = new DesignerScene(
+                    [new SceneBoard(SkinLayer.VolumeBar, new Point(0, 0), 1, 300, 40, null, null)],
+                    [atStart with { Bounds = new Rect(101, 10, 30, 18) }]), // after the drag's first 1 px step
+                Zoom = 1,
+            };
+            return overlay.ComputeDrag(overlay.Scene.Boards[0], atStart, SkinHandle.Move, new Vector(2, 0), snap: true);
+        });
+        _out.WriteLine($"expected Dx 2 with no guide on the element's own last position; actual {r.Dx} guides [{string.Join(", ", r.Guides)}]");
+        Assert.Equal(2, r.Dx);
+        Assert.DoesNotContain(r.Guides, g => g.Source == SnapSource.Element);
+    }
+
+    /// <summary>Text stopped at the bar's bottom edge overflows onto the strip below. The strip's own
+    /// element under the point wins the click; where nothing of the strip's is, the text does.</summary>
+    [Fact]
+    public void An_element_on_its_own_board_wins_over_one_overflowing_onto_it()
+    {
+        var r = _sta.Run(() =>
+        {
+            var overlay = new DesignerOverlay
+            {
+                Scene = new DesignerScene(
+                    [
+                        new SceneBoard(SkinLayer.VolumeBar, new Point(0, 0), 1, 100, 40, null, null),
+                        new SceneBoard(SkinLayer.AirPlay, new Point(0, 40), 1, 100, 30, null, null),
+                    ],
+                    [
+                        new SceneElement(SkinLayer.AirPlayPower, SkinLayer.AirPlay, new Rect(0, 0, 50, 30), [SkinHandle.Move]),
+                        new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar, new Rect(20, 30, 60, 18), [SkinHandle.Move]),
+                    ]),
+                Zoom = 1,
+            };
+            return (OnPower: overlay.HitTest(new Point(30, 45)).Element?.Layer,
+                OnBarItself: overlay.HitTest(new Point(30, 35)).Element?.Layer,
+                OnBareStrip: overlay.HitTest(new Point(70, 45)).Element?.Layer);
+        });
+        _out.WriteLine($"expected (AirPlayPower, PercentText, PercentText); actual {r}");
+        Assert.Equal((SkinLayer.AirPlayPower, SkinLayer.PercentText, SkinLayer.PercentText), (r.OnPower!.Value, r.OnBarItself!.Value, r.OnBareStrip!.Value));
     }
 }

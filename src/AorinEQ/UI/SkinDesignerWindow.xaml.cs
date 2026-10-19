@@ -134,7 +134,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _history = new DesignerHistory(document);
         _history.Changed += OnDocumentChanged;
         _loadedName = loadedName;
-        _selection = SkinLayer.SkinInfo;
+        SetSelection(SkinLayer.SkinInfo);
         CleanupTestOsd();
         // Before the canvas draws: a decode failure it reports must not be overwritten by this.
         StatusText.Text = status;
@@ -150,8 +150,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         if (ShownLayer(_selection) is var shown && shown != _selection)
         {
             // The selected part left the tree (an undone "Add AirPlay strip"): its parent instead.
-            ClosePicker();
-            _selection = shown;
+            SetSelection(shown);
         }
         RefreshTitle();
         RefreshLayers();
@@ -265,9 +264,18 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     private void OnNew(object sender, RoutedEventArgs e) => NewDocument();
 
-    private void OnUndo(object sender, RoutedEventArgs e) => _history.Undo();
+    // A drag still running ends first, so it stays one undo step and is not resumed on top of the undo.
+    private void OnUndo(object sender, RoutedEventArgs e)
+    {
+        Overlay.FinishDrag();
+        _history.Undo();
+    }
 
-    private void OnRedo(object sender, RoutedEventArgs e) => _history.Redo();
+    private void OnRedo(object sender, RoutedEventArgs e)
+    {
+        Overlay.FinishDrag();
+        _history.Redo();
+    }
 
     private void OnSave(object sender, RoutedEventArgs e) => Save();
 
@@ -423,6 +431,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         RefreshTitle();
         RefreshLayers();
         RefreshProperties(rebuild: true);
+        RefreshCanvas(); // the measured text outlines follow the language's sample text
         RefreshCommands();
     }
 

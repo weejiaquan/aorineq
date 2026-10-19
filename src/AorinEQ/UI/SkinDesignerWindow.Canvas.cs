@@ -148,12 +148,12 @@ public partial class SkinDesignerWindow
     {
         EndMerge();
         _dragStart = null;
+        ApplyOverhang();
     }
 
     /// <summary>Tells the overlay where every artboard and grabbable part is, measured the way the
-    /// renderers draw them. Elements are listed bottom to top, as the overlay picks topmost first:
-    /// the strip's click areas under its labels, and the percent text over everything - so a text
-    /// stopped at the bar's bottom edge, over the strip, is still the one a click on it picks.</summary>
+    /// renderers draw them. Each artboard's elements are listed bottom to top, as the overlay picks
+    /// topmost first: the strip's click areas under its labels, so a click on a label picks it.</summary>
     private void RefreshScene()
     {
         Artboards.UpdateLayout();
@@ -162,7 +162,12 @@ public partial class SkinDesignerWindow
         var elements = new List<SceneElement>();
 
         if (_skinView is not null)
+        {
             boards.Add(Board(SkinLayer.VolumeBar, VolumeBoard, _info.Scale, _info.Width, _info.Height, _info.FillStartX, _info.FillEndX));
+            if (_info.Text is { Show: true } text)
+                elements.Add(new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar,
+                    TextBounds(text, PreviewPercent.ToString(CultureInfo.CurrentCulture), ppd, FontWeights.SemiBold), [SkinHandle.Move]));
+        }
 
         if (_stripSkinned && _info.AirPlay is { } strip)
         {
@@ -197,16 +202,19 @@ public partial class SkinDesignerWindow
             boards.Add(Board(SkinLayer.Notice, NoticeBoard, 1, (int)NoticeBoard.ActualWidth, (int)NoticeBoard.ActualHeight, null, null));
         }
 
-        if (_skinView is not null && _info.Text is { Show: true } text)
-            elements.Add(new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar,
-                TextBounds(text, PreviewPercent.ToString(CultureInfo.CurrentCulture), ppd, FontWeights.SemiBold), [SkinHandle.Move]));
+        Overlay.Scene = new DesignerScene(boards, elements);
+        // Frozen while a drag runs: the canvas is centred, so growing it would move the overlay
+        // under a still pointer and run the drag ahead of it. The drag's end applies it.
+        if (_dragStart is null) ApplyOverhang();
+    }
 
-        var scene = new DesignerScene(boards, elements);
-        Overlay.Scene = scene;
-        Overlay.Selected = _selection;
-        // What lies past the artboards (text stopped at a far edge) gets canvas to scroll to.
-        var extent = scene.Extent;
-        Artboards.Margin = new Thickness(0, 0, Math.Max(0, extent.Right - Overlay.ActualWidth), Math.Max(0, extent.Bottom - Overlay.ActualHeight));
+    /// <summary>What of the overlay's hit area lies past the artboards (text stopped at a far edge
+    /// and its handles) gets canvas to scroll to, in whole pixels.</summary>
+    private void ApplyOverhang()
+    {
+        var area = Overlay.HitArea;
+        Artboards.Margin = new Thickness(0, 0, Math.Max(0, Math.Ceiling(area.Right - Overlay.ActualWidth)),
+            Math.Max(0, Math.Ceiling(area.Bottom - Overlay.ActualHeight)));
     }
 
     private SceneBoard Board(SkinLayer layer, FrameworkElement host, double scale, int width, int height, int? fillStart, int? fillEnd) =>

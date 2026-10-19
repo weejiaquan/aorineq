@@ -703,11 +703,31 @@ public class SkinDesignerWindowTests : IDisposable
             d.Select(SkinLayer.AirPlayName);
             d.History.Undo();
             var selectedItem = d.LayersTree.Items.OfType<TreeViewItem>().FirstOrDefault(i => i.IsSelected)?.Tag;
-            return (d.Selection, SelectedItem: selectedItem);
+            return (d.Selection, SelectedItem: selectedItem, Outlined: d.Overlay.Selected);
         });
-        _out.WriteLine($"expected AirPlay selected in the tree; actual selection {r.Selection}, tree item {r.SelectedItem}");
+        _out.WriteLine($"expected AirPlay selected in the tree and outlined; actual selection {r.Selection}, tree item {r.SelectedItem}, outline {r.Outlined}");
         Assert.Equal(SkinLayer.AirPlay, r.Selection);
         Assert.Equal(SkinLayer.AirPlay, r.SelectedItem);
+        Assert.Equal(SkinLayer.AirPlay, r.Outlined);
+    }
+
+    /// <summary>Loading a skin starts on Skin info, and the canvas outline follows: the layer
+    /// outlined in the previous skin is not left outlined in the new one.</summary>
+    [Fact]
+    public void Loading_a_skin_clears_the_canvas_outline()
+    {
+        MakeSkin("first", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        MakeSkin("second", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("first");
+            d.Select(SkinLayer.PercentText);
+            var before = d.Overlay.Selected;
+            d.LoadSkin("second");
+            return (before, d.Selection, After: d.Overlay.Selected);
+        });
+        _out.WriteLine($"expected PercentText outlined, then SkinInfo selected and outlined; actual {r}");
+        Assert.Equal((SkinLayer.PercentText, SkinLayer.SkinInfo, SkinLayer.SkinInfo), r);
     }
 
     /// <summary>Art that passes the header check but will not decode: the status line keeps the
@@ -850,8 +870,10 @@ public class SkinDesignerWindowTests : IDisposable
     }
 
     /// <summary>Text dragged past the bar's bottom-right corner stops anchored on the edge, so it
-    /// lies outside the bar - over the strip below and past the widest artboard. It must still be
-    /// on the scrollable canvas, take the mouse there, and win the click over the strip's areas.</summary>
+    /// lies outside the bar. On its own bar it is picked; stopped on the bottom edge it overflows
+    /// onto the strip, whose element under it keeps the click (the Layers tree still selects the
+    /// text); at the far corner, past every artboard, it is picked again - and the canvas grows to
+    /// scroll to it.</summary>
     [Fact]
     public void Text_stopped_at_the_far_edge_stays_reachable_and_selectable()
     {
@@ -859,37 +881,45 @@ public class SkinDesignerWindowTests : IDisposable
         var r = WithDesigner(d =>
         {
             d.LoadSkin("far-edge");
-            SkinLayer? PickedOnText()
-            {
-                var box = d.Overlay.Scene.BoardFor(SkinLayer.PercentText)!
-                    .ToOverlay(d.Overlay.Scene.Elements.Single(e => e.Layer == SkinLayer.PercentText).Bounds);
-                return d.Overlay.HitTest(new Point(box.X + box.Width / 2, box.Y + box.Height / 2)).Element?.Layer;
-            }
+            var onBar = d.Overlay.HitTest(Centre(d, SkinLayer.PercentText)).Element?.Layer;
             d.BeginDrag();
             d.ApplyDrag(SkinLayer.PercentText, SkinHandle.Move, 0, 10000); // onto the bottom edge, over the strip
-            var bottom = (d.Document.Config.Text!.Y, Picked: PickedOnText());
+            var overStrip = (d.Document.Config.Text!.Y, Picked: d.Overlay.HitTest(Centre(d, SkinLayer.PercentText)).Element?.Layer);
             d.ApplyDrag(SkinLayer.PercentText, SkinHandle.Move, 10000, 10000); // the far corner, past every artboard
             d.EndDrag();
             d.UpdateLayout();
+            d.LayersTree.Items.OfType<TreeViewItem>().SelectMany(n => n.Items.OfType<TreeViewItem>())
+                .First(i => i.Tag is SkinLayer.PercentText).IsSelected = true;
             var text = d.Overlay.Scene.Elements.Single(e => e.Layer == SkinLayer.PercentText);
             var onCanvas = d.Overlay.Scene.BoardFor(SkinLayer.PercentText)!.ToOverlay(text.Bounds);
-            var centre = new Point(onCanvas.X + onCanvas.Width / 2, onCanvas.Y + onCanvas.Height / 2);
+            var centre = Centre(d, SkinLayer.PercentText);
             var farCorner = d.Overlay.TranslatePoint(onCanvas.BottomRight, d.ZoomHost);
             var hit = System.Windows.Media.VisualTreeHelper.HitTest(d.Overlay, centre)?.VisualHit;
-            return (bottom, d.Document.Config.Text, onCanvas, OverlaySize: d.Overlay.RenderSize,
+            return (onBar, overStrip, d.Document.Config.Text, onCanvas, OverlaySize: d.Overlay.RenderSize,
                 Picked: d.Overlay.HitTest(centre).Element?.Layer, TakesMouse: ReferenceEquals(hit, d.Overlay),
-                farCorner, Host: (d.ZoomHost.ActualWidth, d.ZoomHost.ActualHeight));
+                Tree: (d.Selection, d.Overlay.Selected), farCorner, Host: (d.ZoomHost.ActualWidth, d.ZoomHost.ActualHeight));
         });
-        _out.WriteLine($"bottom edge: y {r.bottom.Y} picked {r.bottom.Picked} (expected 40, PercentText)");
-        _out.WriteLine($"text {r.Text!.X},{r.Text.Y} at {r.onCanvas} on an overlay of {r.OverlaySize}; " +
-            $"picked {r.Picked} (expected PercentText), takes the mouse {r.TakesMouse}; far corner {r.farCorner} inside host {r.Host}");
-        Assert.Equal((40, SkinLayer.PercentText), (r.bottom.Y, r.bottom.Picked));
+        _out.WriteLine($"on its bar: picked {r.onBar} (expected PercentText)");
+        _out.WriteLine($"bottom edge: y {r.overStrip.Y} picked {r.overStrip.Picked} (expected 40, AirPlayDropdown)");
+        _out.WriteLine($"far corner: text {r.Text!.X},{r.Text.Y} at {r.onCanvas} on an overlay of {r.OverlaySize}; " +
+            $"picked {r.Picked} (expected PercentText), takes the mouse {r.TakesMouse}; tree selection {r.Tree}; corner {r.farCorner} inside host {r.Host}");
+        Assert.Equal(SkinLayer.PercentText, r.onBar);
+        Assert.Equal((40, SkinLayer.AirPlayDropdown), (r.overStrip.Y, r.overStrip.Picked));
         Assert.Equal((200, 40), (r.Text.X, r.Text.Y));
         Assert.True(r.onCanvas.Right > r.OverlaySize.Width, "the scenario needs text past the overlay's own width");
         Assert.Equal(SkinLayer.PercentText, r.Picked);
         Assert.True(r.TakesMouse);
-        // The zoom host is laid out in whole pixels (the window rounds; only the artboards do not).
-        Assert.True(r.farCorner.X <= r.Host.ActualWidth + 0.5 && r.farCorner.Y <= r.Host.ActualHeight + 0.5);
+        Assert.Equal((SkinLayer.PercentText, SkinLayer.PercentText), r.Tree);
+        // The handles round it too (half a handle, at the canvas's 100 %).
+        double half = DesignerOverlay.HandleScreenSize / 2;
+        Assert.True(r.farCorner.X + half <= r.Host.ActualWidth && r.farCorner.Y + half <= r.Host.ActualHeight);
+    }
+
+    /// <summary>The centre of a layer's outline, in overlay coordinates.</summary>
+    private static Point Centre(SkinDesignerWindow d, SkinLayer layer)
+    {
+        var box = d.Overlay.Scene.BoardFor(layer)!.ToOverlay(d.Overlay.Scene.Elements.Single(e => e.Layer == layer).Bounds);
+        return new Point(box.X + box.Width / 2, box.Y + box.Height / 2);
     }
 
     /// <summary>The dropdown covers the whole strip by default; the labels drawn on it are still
@@ -930,5 +960,176 @@ public class SkinDesignerWindowTests : IDisposable
         _out.WriteLine($"expected scene board {r.Laid}; actual {r.Scene}");
         Assert.True(r.Laid.Item2 > 0 && r.Laid.Item3 > 0);
         Assert.Equal((r.Laid.Item1, (int)r.Laid.Item2, (int)r.Laid.Item3), r.Scene);
+    }
+
+    /// <summary>A slow drag through the overlay, one pixel at a time with snapping on, moves one
+    /// pixel per step - it never sticks to where the previous step left it.</summary>
+    [Fact]
+    public void A_slow_canvas_drag_moves_one_pixel_per_step()
+    {
+        // y 0: the text's top sits on the bar's top edge, so snapping holds it there exactly.
+        MakeSkin("slow", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("slow");
+            var start = Centre(d, SkinLayer.PercentText);
+            bool began = d.Overlay.BeginDragAt(start);
+            var steps = new List<(int X, int Y)>();
+            foreach (var dx in new[] { 1, 2, 3 })
+            {
+                d.Overlay.DragTo(start + new Vector(dx, 0), snap: true);
+                steps.Add((d.Document.Config.Text!.X, d.Document.Config.Text.Y));
+            }
+            d.Overlay.FinishDrag();
+            d.History.Undo();
+            return (began, steps, Undone: d.Document.Config.Text!.X, d.History.CanUndo);
+        });
+        _out.WriteLine($"expected steps 41,0 42,0 43,0 then one undo back to 40; actual began {r.began}, steps {string.Join(" ", r.steps)}, undone {r.Undone}, can undo {r.CanUndo}");
+        Assert.True(r.began);
+        Assert.Equal([(41, 0), (42, 0), (43, 0)], r.steps);
+        Assert.Equal(40, r.Undone);
+        Assert.False(r.CanUndo);
+    }
+
+    /// <summary>A drag that snaps draws its magenta guide on the canvas; the same drag with
+    /// snapping off (Alt) lands where the pointer is and draws none.</summary>
+    [Fact]
+    public void A_snapped_canvas_drag_draws_its_guide_and_an_unsnapped_one_does_not()
+    {
+        MakeSkin("guide", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("guide");
+            var start = Centre(d, SkinLayer.PercentText);
+            d.Overlay.BeginDragAt(start);
+            d.Overlay.DragTo(start + new Vector(58, 0), snap: true); // left edge 98: 2 px from the bar's centre line
+            var snapped = (d.Document.Config.Text!.X, Guides: d.Overlay.Guides.ToArray(), Magenta: MagentaColumns(d));
+            d.Overlay.DragTo(start + new Vector(58, 0), snap: false);
+            var free = (d.Document.Config.Text!.X, Guides: d.Overlay.Guides.ToArray(), Magenta: MagentaColumns(d));
+            d.Overlay.FinishDrag();
+            var after = MagentaColumns(d);
+            var guideX = d.Overlay.Scene.BoardFor(SkinLayer.VolumeBar)!.ToOverlay(100, 0).X
+                + System.Windows.Media.VisualTreeHelper.GetOffset(d.Overlay).X;
+            return (snapped, free, after, guideX);
+        });
+        _out.WriteLine($"snapped: x {r.snapped.X} (expected 100), guides [{string.Join(", ", r.snapped.Guides.Select(g => g.ToString()))}], " +
+            $"magenta columns [{string.Join(", ", r.snapped.Magenta)}] (expected beside {r.guideX})");
+        _out.WriteLine($"free: x {r.free.X} (expected 98), guides {r.free.Guides.Length}, magenta columns {r.free.Magenta.Count}; after the drag {r.after.Count}");
+        Assert.Equal(100, r.snapped.X);
+        Assert.Contains(new SnapTarget(SnapAxis.X, 100, SnapSource.Artboard), r.snapped.Guides);
+        Assert.NotEmpty(r.snapped.Magenta);
+        Assert.All(r.snapped.Magenta, x => Assert.InRange(x + 0.5, r.guideX - 1, r.guideX + 1)); // pixel centres beside the line
+        Assert.Equal(98, r.free.X);
+        Assert.Empty(r.free.Guides);
+        Assert.Empty(r.free.Magenta);
+        Assert.Empty(r.after);
+    }
+
+    /// <summary>The bitmap columns holding a magenta (guide) pixel over at least half the bar's
+    /// height, with the overlay rendered as the canvas draws it.</summary>
+    private static List<int> MagentaColumns(SkinDesignerWindow d)
+    {
+        d.UpdateLayout();
+        int w = (int)Math.Ceiling(d.Artboards.ActualWidth), h = (int)Math.Ceiling(d.Artboards.ActualHeight);
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(w, h, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+        bitmap.Render(d.Overlay);
+        var bgra = new byte[w * h * 4];
+        bitmap.CopyPixels(bgra, w * 4, 0);
+        var columns = new List<int>();
+        for (int x = 0; x < w; x++)
+        {
+            int rows = 0;
+            for (int y = 0; y < h; y++)
+            {
+                int i = (y * w + x) * 4;
+                if (bgra[i + 3] > 0 && bgra[i + 1] == 0 && bgra[i] == bgra[i + 2] && bgra[i] > 0) rows++; // premultiplied magenta
+            }
+            if (rows >= d.Info.Height / 2) columns.Add(x);
+        }
+        return columns;
+    }
+
+    /// <summary>The canvas is centred, so growing it for text past the bar's edge mid-drag would
+    /// move the overlay under a still pointer. Its growth waits for the drag's end: the text keeps
+    /// tracking the pointer exactly.</summary>
+    [Fact]
+    public void A_drag_past_the_edge_tracks_the_pointer_and_the_canvas_grows_after()
+    {
+        MakeSkin("track", """{"scale":2,"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("track");
+            d.UpdateLayout();
+            // The pointer lives in window coordinates; where it is over the overlay is what the
+            // mouse handler's GetPosition would read after every layout.
+            var pointer = d.Overlay.TranslatePoint(Centre(d, SkinLayer.PercentText), d);
+            Point OverOverlay(Vector by) { d.UpdateLayout(); return d.TranslatePoint(pointer + by, d.Overlay); }
+            double before = d.Artboards.Margin.Right;
+            d.Overlay.BeginDragAt(OverOverlay(new Vector(0, 0)));
+            d.Overlay.DragTo(OverOverlay(new Vector(380, 0)), snap: false); // x 200: past the bar's right edge
+            var during = (Margin: d.Artboards.Margin.Right, Overlay: d.Overlay.TranslatePoint(new Point(0, 0), d));
+            d.Overlay.DragTo(OverOverlay(new Vector(360, 0)), snap: false); // back 10 skin px
+            int x = d.Document.Config.Text!.X;
+            d.Overlay.FinishDrag();
+            d.UpdateLayout();
+            return (x, before, during, After: (Margin: d.Artboards.Margin.Right, Overlay: d.Overlay.TranslatePoint(new Point(0, 0), d)));
+        });
+        _out.WriteLine($"expected x 190; actual {r.x}. Margin {r.before} before the drag; during it margin {r.during.Margin}, overlay at {r.during.Overlay}; after it margin {r.After.Margin}, overlay at {r.After.Overlay}");
+        Assert.Equal(190, r.x);
+        Assert.Equal(r.before, r.during.Margin); // frozen while the drag runs
+        Assert.True(r.After.Margin > r.before, "the canvas grows for the text once the drag ends");
+        Assert.NotEqual(r.during.Overlay, r.After.Overlay); // the growth really moves the overlay: why it waits
+    }
+
+    /// <summary>Undo pressed during a drag ends the drag first: the drag is one undo step, and the
+    /// pointer moving on afterwards edits nothing.</summary>
+    [Fact]
+    public void Undo_during_a_canvas_drag_ends_it_as_one_step()
+    {
+        MakeSkin("undo-drag", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("undo-drag");
+            var start = Centre(d, SkinLayer.PercentText);
+            d.Overlay.BeginDragAt(start);
+            d.Overlay.DragTo(start + new Vector(10, 0), snap: false);
+            int dragged = d.Document.Config.Text!.X;
+            d.UndoButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            d.Overlay.DragTo(start + new Vector(20, 0), snap: false); // the mouse moving on
+            var afterUndo = (d.Document.Config.Text!.X, d.History.CanUndo, d.History.CanRedo);
+            d.History.Redo();
+            return (dragged, afterUndo, Redone: d.Document.Config.Text!.X);
+        });
+        _out.WriteLine($"expected dragged 50, after undo (40, no undo, redo), redone 50; actual {r}");
+        Assert.Equal(50, r.dragged);
+        Assert.Equal((40, false, true), r.afterUndo);
+        Assert.Equal(50, r.Redone);
+    }
+
+    /// <summary>A language change re-measures the outlines: a label showing translated text (the
+    /// strip's no-receiver name) is outlined at its new width.</summary>
+    [Fact]
+    public void A_language_change_re_measures_the_outlines()
+    {
+        MakeSkin("lang", """{"airplay":{"nameText":{"show":true,"x":10,"y":4}}}""", strip: true);
+        var previous = Loc.Language;
+        try
+        {
+            var r = WithDesigner(d =>
+            {
+                d.LoadSkin("lang");
+                d.PreviewAirPlayMode.SelectedIndex = 2; // no receiver: the name is the localised "no device"
+                double Width() => d.Overlay.Scene.Elements.Single(e => e.Layer == SkinLayer.AirPlayName).Bounds.Width;
+                double before = Width();
+                Loc.Language = previous == Languages.Ja ? Languages.En : Languages.Ja;
+                return (before, After: Width(), Shown: d.AirPlayPreview.DisplayName);
+            });
+            _out.WriteLine($"name outline {r.before} before, {r.After} after the switch (showing '{r.Shown}')");
+            Assert.NotEqual(r.before, r.After, 3);
+        }
+        finally
+        {
+            _sta.Run(() => Loc.Language = previous);
+        }
     }
 }
