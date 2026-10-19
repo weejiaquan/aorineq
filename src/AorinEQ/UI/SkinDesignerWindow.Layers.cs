@@ -41,8 +41,8 @@ public partial class SkinDesignerWindow
         SkinLayer.AirPlayPower => Loc.T("designer.layer.power-area"),
         SkinLayer.Notice => Loc.T("designer.text.notice"),
         SkinLayer.NoticeArt => Loc.T("designer.layer.notice-art"),
-        SkinLayer.NoticeText => Loc.T("designer.notice.text-color.label"),
-        _ => Loc.T("designer.notice.glyph-color.label"),
+        SkinLayer.NoticeText => Loc.T("designer.layer.notice-text"),
+        _ => Loc.T("designer.layer.notice-icon"),
     };
 
     /// <summary>Whether an optional layer is in use; one that is not is drawn dimmed.</summary>

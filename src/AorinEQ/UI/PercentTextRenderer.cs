@@ -89,7 +89,7 @@ internal static class PercentTextRenderer
     private static FormattedText Format(SkinText style, string text, double scale, double pixelsPerDip, FontWeight unboldWeight)
     {
         var typeface = new Typeface(
-            new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
+            new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? SkinClamps.DefaultFontFamily : style.FontFamily),
             FontStyles.Normal,
             style.Bold ? FontWeights.Bold : unboldWeight,
             FontStretches.Normal);

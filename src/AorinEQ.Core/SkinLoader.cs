@@ -7,9 +7,10 @@ namespace AorinEQ.Core;
 /// which falls back gracefully on malformed values; a null OutlineColor/ShadowColor means that
 /// effect is off. Defaults reproduce the pre-styling look (white, 14px, bold-ish).</summary>
 public sealed record SkinText(bool Show, int X, int Y,
-    string Color = "#FFFFFFFF", string FontFamily = "Segoe UI", double FontSize = 14, bool Bold = false,
+    string Color = SkinClamps.DefaultTextColor, string FontFamily = SkinClamps.DefaultFontFamily,
+    double FontSize = SkinClamps.DefaultFontSize, bool Bold = false,
     string? OutlineColor = null, double OutlineWidth = 0,
-    string? ShadowColor = null, double ShadowBlur = 4, double ShadowDepth = 2,
+    string? ShadowColor = null, double ShadowBlur = SkinClamps.DefaultShadowBlur, double ShadowDepth = SkinClamps.DefaultShadowDepth,
     string Align = "left")
 {
     /// <summary>A hidden text that carries nothing else. The writer omits it, so it is the same
@@ -103,6 +104,15 @@ public sealed record SkinInfo(string Name, string Folder, string EmptyPath, stri
 /// &lt;layer&gt;.png (preferred — static or sprite sheet) or &lt;layer&gt;.gif (animated).</summary>
 public static class SkinLoader
 {
+    /// <summary>The layers, each named as its file is without the extension - and as the loader's
+    /// and the designer's messages name it.</summary>
+    public const string EmptyLayer = "empty";
+    public const string FullLayer = "full";
+    public const string MutedLayer = "muted";
+    public const string AirPlayEmptyLayer = "airplay-empty";
+    public const string AirPlayFullLayer = "airplay-full";
+    public const string NoticeLayer = "notice";
+
     // JsonSerializerOptions caches type metadata internally — a fresh instance per Deserialize
     // call would rebuild that metadata every time a skin is (re)loaded or the folder is scanned.
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -174,11 +184,11 @@ public static class SkinLoader
                         JsonStrings(parsed.Tags), JsonString(parsed.SourceUrl));
             }
 
-            var empty = ResolveLayer(folder, "empty", emptyFrames);
+            var empty = ResolveLayer(folder, EmptyLayer, emptyFrames);
             emptyPath = empty.Path;
             if (empty.Error is not null)
                 return Bad(empty.Error);
-            var full = ResolveLayer(folder, "full", fullFrames);
+            var full = ResolveLayer(folder, FullLayer, fullFrames);
             fullPath = full.Path;
             if (full.Error is not null)
                 return Bad(full.Error);
@@ -192,7 +202,7 @@ public static class SkinLoader
             bool mutedIsGif = false;
             if (File.Exists(Path.Combine(folder, "muted.png")) || File.Exists(Path.Combine(folder, "muted.gif")))
             {
-                var muted = ResolveLayer(folder, "muted", mutedFrames);
+                var muted = ResolveLayer(folder, MutedLayer, mutedFrames);
                 if (muted.Error is not null)
                     return Bad(muted.Error);
                 if (FrameMismatch(Path.GetFileName(muted.Path), muted, Path.GetFileName(empty.Path), empty) is { } mutedMismatch)
@@ -287,12 +297,12 @@ public static class SkinLoader
         int emptyFrames = SkinClamps.Frames(json?.EmptyFrames ?? 1);
         int fullFrames = SkinClamps.Frames(json?.FullFrames ?? 1);
 
-        var empty = ResolveLayer(folder, "airplay-empty", emptyFrames);
+        var empty = ResolveLayer(folder, AirPlayEmptyLayer, emptyFrames);
         if (empty.Error is not null) return (null, empty.Error);
-        var full = ResolveLayer(folder, "airplay-full", fullFrames);
+        var full = ResolveLayer(folder, AirPlayFullLayer, fullFrames);
         if (full.Error is not null) return (null, full.Error);
 
-        if (FrameMismatch("airplay-full", full, "airplay-empty", empty) is { } stripMismatch)
+        if (FrameMismatch(AirPlayFullLayer, full, AirPlayEmptyLayer, empty) is { } stripMismatch)
             return (null, stripMismatch);
 
         int width = empty.LogicalWidth;
@@ -329,7 +339,7 @@ public static class SkinLoader
     /// <summary>The dark-pill plate: what a notice looks like when nothing says otherwise.</summary>
     public static readonly SkinNotice DefaultNotice = new(
         "#F2202020", null, 12, 16, 10,
-        new SkinText(true, 0, 0, "#FFFFFFFF", "Segoe UI", 14, Bold: false),
+        new SkinText(true, 0, 0, SkinClamps.DefaultTextColor, SkinClamps.DefaultFontFamily, SkinClamps.DefaultFontSize, Bold: false),
         new SkinNoticeGlyph(true, 16, 0, 18, null));
 
     private static SkinNoticeJson? ParseNotice(JsonElement? element)
@@ -368,7 +378,7 @@ public static class SkinLoader
         if (!hasArt) return (plate, null);
 
         int frames = SkinClamps.Frames(json?.Frames ?? 1);
-        var art = ResolveLayer(folder, "notice", frames);
+        var art = ResolveLayer(folder, NoticeLayer, frames);
         if (art.Error is not null) return (null, art.Error);
 
         return (PlaceNoticeArt(plate, art.Path, art.IsGif, art.IsGif ? 1 : frames,

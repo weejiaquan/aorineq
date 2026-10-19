@@ -64,16 +64,16 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
 
         if (EmptyPath.Length == 0) return Bad("empty artwork not chosen");
         if (FullPath.Length == 0) return Bad("full artwork not chosen");
-        var empty = probe.Layer(EmptyPath, "empty", c.EmptyFrames);
+        var empty = probe.Layer(EmptyPath, SkinLoader.EmptyLayer, c.EmptyFrames);
         if (!empty.IsUsable) return Bad(empty.Error!);
-        var full = probe.Layer(FullPath, "full", c.FullFrames);
+        var full = probe.Layer(FullPath, SkinLoader.FullLayer, c.FullFrames);
         if (!full.IsUsable) return Bad(full.Error!);
         if (Mismatch(full, empty) is { } fullMismatch) return Bad(fullMismatch);
 
         bool mutedIsGif = false;
         if (MutedPath is not null)
         {
-            var muted = probe.Layer(MutedPath, "muted", c.MutedFrames);
+            var muted = probe.Layer(MutedPath, SkinLoader.MutedLayer, c.MutedFrames);
             if (!muted.IsUsable) return Bad(muted.Error!);
             if (Mismatch(muted, empty) is { } mutedMismatch) return Bad(mutedMismatch);
             mutedIsGif = muted.IsGif;
@@ -113,9 +113,9 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
         if (SkinWriter.ValidateName(Name) is { } nameError)
             issues.Add(new SkinIssue(SkinLayer.SkinInfo, SkinIssueKind.InvalidName, [nameError]));
 
-        var empty = Required(SkinLayer.VolumeEmpty, EmptyPath, "empty", c.EmptyFrames);
-        var full = Required(SkinLayer.VolumeFull, FullPath, "full", c.FullFrames);
-        var muted = MutedPath is null ? null : Probe(SkinLayer.VolumeMuted, MutedPath, "muted", c.MutedFrames);
+        var empty = Required(SkinLayer.VolumeEmpty, EmptyPath, SkinLoader.EmptyLayer, c.EmptyFrames);
+        var full = Required(SkinLayer.VolumeFull, FullPath, SkinLoader.FullLayer, c.FullFrames);
+        var muted = MutedPath is null ? null : Probe(SkinLayer.VolumeMuted, MutedPath, SkinLoader.MutedLayer, c.MutedFrames);
         if (empty is { IsUsable: true } e)
         {
             MismatchIssue(SkinLayer.VolumeFull, full, e);
@@ -125,8 +125,8 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
 
         if (c.AirPlay is { } a)
         {
-            var stripEmpty = Probe(SkinLayer.AirPlayEmpty, a.EmptyPath, "airplay-empty", a.EmptyFrames);
-            var stripFull = Probe(SkinLayer.AirPlayFull, a.FullPath, "airplay-full", a.FullFrames);
+            var stripEmpty = Probe(SkinLayer.AirPlayEmpty, a.EmptyPath, SkinLoader.AirPlayEmptyLayer, a.EmptyFrames);
+            var stripFull = Probe(SkinLayer.AirPlayFull, a.FullPath, SkinLoader.AirPlayFullLayer, a.FullFrames);
             if (stripEmpty.IsUsable)
             {
                 MismatchIssue(SkinLayer.AirPlayFull, stripFull, stripEmpty);
@@ -137,7 +137,7 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
         }
 
         if (c.Notice is { HasArt: true } n)
-            Probe(SkinLayer.NoticeArt, n.ArtPath!, "notice", n.ArtFrames);
+            Probe(SkinLayer.NoticeArt, n.ArtPath!, SkinLoader.NoticeLayer, n.ArtFrames);
 
         if (AirPlayError is { } stripError)
             issues.Add(new SkinIssue(SkinLayer.AirPlay, SkinIssueKind.AirPlayUnloadable, [stripError]));
@@ -194,7 +194,7 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
             });
 
         int frames = SkinClamps.Frames(notice.ArtFrames);
-        var art = probe.Layer(notice.ArtPath!, "notice", frames);
+        var art = probe.Layer(notice.ArtPath!, SkinLoader.NoticeLayer, frames);
         if (!art.IsUsable)
         {
             error = art.Error;
@@ -211,8 +211,8 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
     /// covering it.</summary>
     internal static SkinAirPlay Restrip(SkinAirPlay strip, ImageProbe probe)
     {
-        var empty = probe.Layer(strip.EmptyPath, "airplay-empty", strip.EmptyFrames);
-        var full = probe.Layer(strip.FullPath, "airplay-full", strip.FullFrames);
+        var empty = probe.Layer(strip.EmptyPath, SkinLoader.AirPlayEmptyLayer, strip.EmptyFrames);
+        var full = probe.Layer(strip.FullPath, SkinLoader.AirPlayFullLayer, strip.FullFrames);
         int w = empty.LogicalWidth, h = empty.LogicalHeight;
         bool newWidth = w != strip.Width;
         bool wholeDropdown = strip.DropdownHit == new SkinHitRect(0, 0, strip.Width, strip.Height);
@@ -235,11 +235,11 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
     {
         error = null;
         if (Config.AirPlay is not { } a) return null;
-        var empty = probe.Layer(a.EmptyPath, "airplay-empty", a.EmptyFrames);
+        var empty = probe.Layer(a.EmptyPath, SkinLoader.AirPlayEmptyLayer, a.EmptyFrames);
         if (!empty.IsUsable) { error = empty.Error; return null; }
-        var full = probe.Layer(a.FullPath, "airplay-full", a.FullFrames);
+        var full = probe.Layer(a.FullPath, SkinLoader.AirPlayFullLayer, a.FullFrames);
         if (!full.IsUsable) { error = full.Error; return null; }
-        error = SkinLoader.FrameMismatch("airplay-full", full, "airplay-empty", empty);
+        error = SkinLoader.FrameMismatch(SkinLoader.AirPlayFullLayer, full, SkinLoader.AirPlayEmptyLayer, empty);
         if (error is not null) return null;
         var strip = Restrip(a, probe);
         error = SkinLoader.FillRangeError("airplay ", strip.FillStartX, strip.FillEndX);

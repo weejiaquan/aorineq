@@ -66,11 +66,13 @@ public sealed record Settings(
     // newest first. Null for everyone upgrading into this, which reads as "none yet".
     IReadOnlyList<string>? RecentColors = null,
     // The Skin Designer's Layers and Properties panel widths, as the user last dragged them.
-    double DesignerLayersWidth = 220,
-    double DesignerPropertiesWidth = 320)
+    double DesignerLayersWidth = Settings.DefaultDesignerLayersWidth,
+    double DesignerPropertiesWidth = Settings.DefaultDesignerPropertiesWidth)
 {
     public static Settings Default { get; } = new(50, false);
 
+    public const double DefaultDesignerLayersWidth = 220;
+    public const double DefaultDesignerPropertiesWidth = 320;
     public const double MinDesignerPanelWidth = 160;
     public const double MaxDesignerPanelWidth = 520;
 
@@ -130,8 +132,8 @@ public sealed record Settings(
             // default (disabled) rather than a null the UI has to guard on everywhere.
             AirPlay = NormalizeAirPlay(s.AirPlay ?? AirPlaySetting.Default),
             RecentColors = s.RecentColors is null ? null : SkinColor.NormalizeRecents(s.RecentColors),
-            DesignerLayersWidth = PanelWidth(s.DesignerLayersWidth, 220),
-            DesignerPropertiesWidth = PanelWidth(s.DesignerPropertiesWidth, 320),
+            DesignerLayersWidth = PanelWidth(s.DesignerLayersWidth, DefaultDesignerLayersWidth),
+            DesignerPropertiesWidth = PanelWidth(s.DesignerPropertiesWidth, DefaultDesignerPropertiesWidth),
         };
     }
 

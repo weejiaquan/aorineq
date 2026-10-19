@@ -56,7 +56,7 @@ public static class SkinEdits
                 // New art for notice art that failed to load is the fix the issue asks for; it
                 // starts from the default plate, as the loader dropped the failed one.
                 var notice = c.Notice ?? SkinLoader.DefaultNotice;
-                var art = probe.Layer(path, "notice", n);
+                var art = probe.Layer(path, SkinLoader.NoticeLayer, n);
                 return doc with
                 {
                     NoticeError = null,
@@ -377,7 +377,7 @@ public static class SkinEdits
     private static (int Width, int Height) VolumeSize(SkinDocument doc, ImageProbe probe)
     {
         if (doc.EmptyPath.Length == 0) return (0, 0);
-        var empty = probe.Layer(doc.EmptyPath, "empty", doc.Config.EmptyFrames);
+        var empty = probe.Layer(doc.EmptyPath, SkinLoader.EmptyLayer, doc.Config.EmptyFrames);
         return empty.IsUsable ? (empty.LogicalWidth, empty.LogicalHeight) : (0, 0);
     }
 

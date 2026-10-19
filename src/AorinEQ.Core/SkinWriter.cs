@@ -8,9 +8,9 @@ namespace AorinEQ.Core;
 /// authorship metadata, no notice look and no AirPlay strip. <c>Notice.ArtPath</c> and the
 /// strip's <c>EmptyPath</c>/<c>FullPath</c> are SOURCE images (any folder).</summary>
 public sealed record SkinConfig(SkinText? Text, double Scale,
-    double Fps = 10.0, int EmptyFrames = 1, int FullFrames = 1,
+    double Fps = SkinClamps.DefaultFps, int EmptyFrames = 1, int FullFrames = 1,
     int? FillStartX = null, int? FillEndX = null,
-    int MutedFrames = 1, double MutedDim = 0.6,
+    int MutedFrames = 1, double MutedDim = SkinClamps.DefaultMutedDim,
     SkinMeta? Meta = null, SkinNotice? Notice = null, SkinAirPlay? AirPlay = null);
 
 /// <summary>Writes a skin folder (empty.png + full.png + optional skin.json) for the skin
@@ -47,21 +47,21 @@ public static class SkinWriter
         try
         {
             Directory.CreateDirectory(folder);
-            CopyLayer(emptySourcePath, folder, "empty");
-            CopyLayer(fullSourcePath, folder, "full");
+            CopyLayer(emptySourcePath, folder, SkinLoader.EmptyLayer);
+            CopyLayer(fullSourcePath, folder, SkinLoader.FullLayer);
             if (mutedSourcePath is not null)
-                CopyLayer(mutedSourcePath, folder, "muted");
+                CopyLayer(mutedSourcePath, folder, SkinLoader.MutedLayer);
             else
-                DeleteLayer(folder, "muted");
+                DeleteLayer(folder, SkinLoader.MutedLayer);
             if (config.AirPlay is { } strip)
             {
-                CopyLayer(strip.EmptyPath, folder, "airplay-empty");
-                CopyLayer(strip.FullPath, folder, "airplay-full");
+                CopyLayer(strip.EmptyPath, folder, SkinLoader.AirPlayEmptyLayer);
+                CopyLayer(strip.FullPath, folder, SkinLoader.AirPlayFullLayer);
             }
             else
             {
-                DeleteLayer(folder, "airplay-empty");
-                DeleteLayer(folder, "airplay-full");
+                DeleteLayer(folder, SkinLoader.AirPlayEmptyLayer);
+                DeleteLayer(folder, SkinLoader.AirPlayFullLayer);
             }
             var jsonPath = Path.Combine(folder, "skin.json");
 
@@ -77,18 +77,18 @@ public static class SkinWriter
                     || SkinArt.All.Contains(name.Trim(), StringComparer.OrdinalIgnoreCase));
 
             if (config.Notice?.ArtPath is { } noticeArt)
-                CopyLayer(noticeArt, folder, "notice");
+                CopyLayer(noticeArt, folder, SkinLoader.NoticeLayer);
             else
-                DeleteLayer(folder, "notice");
+                DeleteLayer(folder, SkinLoader.NoticeLayer);
 
             bool hasText = config.Text is { } text && text != SkinText.Hidden;
             var meta = config.Meta ?? SkinMeta.None;
             var airPlay = config.AirPlay is { } a ? BuildAirPlay(a) : null;
 
             if (airPlay is not null || config.Notice is not null || noticeOff || hasText
-                || config.Scale != 1.0 || config.Fps != 10.0
+                || config.Scale != SkinClamps.DefaultScale || config.Fps != SkinClamps.DefaultFps
                 || config.EmptyFrames != 1 || config.FullFrames != 1
-                || config.MutedFrames != 1 || config.MutedDim != 0.6
+                || config.MutedFrames != 1 || config.MutedDim != SkinClamps.DefaultMutedDim
                 || config.FillStartX is not null || config.FillEndX is not null
                 || !meta.IsEmpty)
             {
@@ -114,7 +114,7 @@ public static class SkinWriter
                     fullFrames = config.FullFrames,
                     // Both omitted at their defaults so a pre-1.8 skin resaves byte-identically.
                     mutedFrames = config.MutedFrames == 1 ? (int?)null : config.MutedFrames,
-                    mutedDim = config.MutedDim == 0.6 ? (double?)null : config.MutedDim,
+                    mutedDim = config.MutedDim == SkinClamps.DefaultMutedDim ? (double?)null : config.MutedDim,
                     fillStartX = config.FillStartX,
                     fillEndX = config.FillEndX,
                     airplay = airPlay,
@@ -169,15 +169,15 @@ public static class SkinWriter
         show = t.Show,
         x = t.X,
         y = t.Y,
-        color = t.Color == "#FFFFFFFF" ? null : t.Color,
-        fontFamily = t.FontFamily == "Segoe UI" ? null : t.FontFamily,
-        fontSize = t.FontSize == 14 ? (double?)null : t.FontSize,
+        color = t.Color == SkinClamps.DefaultTextColor ? null : t.Color,
+        fontFamily = t.FontFamily == SkinClamps.DefaultFontFamily ? null : t.FontFamily,
+        fontSize = t.FontSize == SkinClamps.DefaultFontSize ? (double?)null : t.FontSize,
         bold = t.Bold ? (bool?)true : null,
         outlineColor = t.OutlineColor,
         outlineWidth = t.OutlineColor is null || t.OutlineWidth == 0 ? (double?)null : t.OutlineWidth,
         shadowColor = t.ShadowColor,
-        shadowBlur = t.ShadowColor is null || t.ShadowBlur == 4 ? (double?)null : t.ShadowBlur,
-        shadowDepth = t.ShadowColor is null || t.ShadowDepth == 2 ? (double?)null : t.ShadowDepth,
+        shadowBlur = t.ShadowColor is null || t.ShadowBlur == SkinClamps.DefaultShadowBlur ? (double?)null : t.ShadowBlur,
+        shadowDepth = t.ShadowColor is null || t.ShadowDepth == SkinClamps.DefaultShadowDepth ? (double?)null : t.ShadowDepth,
         align = t.Align == "left" ? null : t.Align,
     };
 
