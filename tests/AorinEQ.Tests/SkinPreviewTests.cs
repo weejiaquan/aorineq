@@ -233,21 +233,51 @@ public class SkinPreviewTests : IDisposable
         Assert.True(differing > 100, $"italic drew the same number as upright ({differing} pixels differ)");
     }
 
-    /// <summary>GDI+ has two weights: 600 and up is Bold, lighter is Regular. So 300 and 500
-    /// look the same, and 600 and 900 do, and the two pairs differ.</summary>
+    /// <summary>GDI+ has two weights: 700 and up is Bold, lighter is Regular. So 300 and 600
+    /// look the same, and 700 and 900 do, and the two pairs differ.</summary>
     [Fact]
-    public void Preview_weight_is_bold_from_600_and_regular_below()
+    public void Preview_weight_is_bold_from_700_and_regular_below()
     {
         int InkOf(int weight)
         {
             using var image = PreviewWith("weight-" + weight, $", \"weight\": {weight}");
             return Ink(image).Pixels;
         }
-        var r = (W300: InkOf(300), W500: InkOf(500), W600: InkOf(600), W900: InkOf(900));
+        var r = (W300: InkOf(300), W600: InkOf(600), W700: InkOf(700), W900: InkOf(900));
         _out.WriteLine($"glyph pixels by weight: {r}");
-        Assert.Equal(r.W300, r.W500);
-        Assert.Equal(r.W600, r.W900);
-        Assert.True(r.W600 > r.W500, "weight 600 was not drawn heavier than 500");
+        Assert.Equal(r.W300, r.W600);
+        Assert.Equal(r.W700, r.W900);
+        Assert.True(r.W700 > r.W600, "weight 700 was not drawn heavier than 600");
+    }
+
+    /// <summary>Skins written before weights preview exactly as they did: the old unbold number
+    /// was Regular and the old "bold": true was Bold. Weight 600 (today's default, and what
+    /// "bold": false reads as) must give the same file as Regular did, and 700 the same as Bold.
+    /// The preview is byte-for-byte deterministic, so the files are compared whole.</summary>
+    [Fact]
+    public void Preview_of_a_skin_from_before_weights_is_unchanged()
+    {
+        byte[] Bytes(string name, string style)
+        {
+            var folder = MakeSkin(name, 300, 100,
+                "{ \"percentText\": { \"show\": true, \"x\": 20, \"y\": 20, \"fontSize\": 40, \"color\": \"#FF0000FF\"" + style + " } }");
+            var preview = Path.Combine(_dir, name + ".png");
+            SkinPreview.Write(SkinLoader.Load(folder), preview);
+            return File.ReadAllBytes(preview);
+        }
+        var regular = Bytes("old-unbold", ", \"bold\": false");
+        var plain = Bytes("old-plain", "");
+        var at600 = Bytes("weight-600", ", \"weight\": 600");
+        var at400 = Bytes("weight-400", ", \"weight\": 400");
+        var bold = Bytes("old-bold", ", \"bold\": true");
+        var at700 = Bytes("weight-700", ", \"weight\": 700");
+        _out.WriteLine($"preview sizes: bold:false {regular.Length}, no key {plain.Length}, weight 600 {at600.Length}, " +
+                       $"weight 400 {at400.Length}; bold:true {bold.Length}, weight 700 {at700.Length}");
+        Assert.Equal(regular, plain);
+        Assert.Equal(regular, at600);
+        Assert.Equal(regular, at400);   // Regular is Regular: 600 is not drawn any heavier
+        Assert.Equal(bold, at700);
+        Assert.NotEqual(regular, bold); // the two are distinguishable, so the equalities mean something
     }
 
     [Fact]

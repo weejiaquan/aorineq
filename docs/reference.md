@@ -292,7 +292,8 @@ and `"bold": false` (or neither) as the text's default; when both are there, `we
 Skin Designer writes `weight`, only when it differs from the default, and never `bold`. Letter
 spacing goes between characters (a character with combining marks, or an emoji, stays whole),
 never after the last, so alignment still measures the text as drawn. The gallery preview draws
-weights 600 and up bold and lighter ones regular — the most its renderer can say.
+weights 700 and up bold and lighter ones regular — the most its renderer can say — so a skin
+previews as it did before weights.
 
 ### The AirPlay strip
 

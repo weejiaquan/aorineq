@@ -15,10 +15,10 @@ namespace AorinEQ.Core;
 /// Drawing is GDI+ rather than WPF because this is <see cref="AorinEQ.Core"/> — the same reason
 /// <see cref="TrayGlyph"/> is — and because it must run without a Dispatcher. Two consequences are
 /// deliberate and worth knowing when comparing a preview against the live OSD:
-/// GDI+ has two weights, so the number is Bold from weight 600 up and Regular below (the default
-/// SemiBold number previews Bold), and a text shadow is drawn as an offset copy because GDI+ has no
-/// gaussian blur. Everything else — position, alignment, size, italic, letter spacing, fill
-/// geometry, outline stroke, colours, transparency — matches.
+/// GDI+ has two weights, so the number is Bold from weight 700 up and Regular below (the default
+/// SemiBold number previews Regular, as it always has), and a text shadow is drawn as an offset
+/// copy because GDI+ has no gaussian blur. Everything else — position, alignment, size, italic,
+/// letter spacing, fill geometry, outline stroke, colours, transparency — matches.
 ///
 /// Nothing here holds a handle on the skin folder after it returns: each layer is read into memory
 /// and decoded from there, because the caller zips that very folder immediately afterwards.</summary>
@@ -36,8 +36,8 @@ public static class SkinPreview
     /// right, at 45°. cos/sin of 45° are the same number.</summary>
     private const double ShadowDirectionComponent = 0.70710678118654752;
 
-    /// <summary>The lightest weight GDI+ draws Bold: SemiBold is nearer Bold than Regular.</summary>
-    private const int BoldFromWeight = 600;
+    /// <summary>The lightest weight GDI+ draws Bold: the legacy "bold": true, so a skin previews as it always has.</summary>
+    private const int BoldFromWeight = 700;
 
     /// <summary>Composes <paramref name="info"/> at <paramref name="percent"/> and writes it as a
     /// PNG to <paramref name="destinationPath"/>, replacing whatever was there.</summary>
