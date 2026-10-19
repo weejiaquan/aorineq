@@ -5,10 +5,13 @@ namespace AorinEQ.Core;
 /// <summary>Position, visibility, and styling of the percent-text overlay drawn on top of a
 /// skin. Colors are stored as raw strings (#AARRGGBB or #RRGGBB) and parsed in the UI layer,
 /// which falls back gracefully on malformed values; a null OutlineColor/ShadowColor means that
-/// effect is off. Defaults reproduce the pre-styling look (white, 14px, bold-ish).</summary>
+/// effect is off. Weight is an OpenType weight (100-900); LetterSpacing is extra room between
+/// characters in skin pixels, as FontSize is. Defaults reproduce the pre-styling look (white,
+/// 14px, SemiBold); an AirPlay label's default weight is <see cref="SkinClamps.DefaultLabelWeight"/>.</summary>
 public sealed record SkinText(bool Show, int X, int Y,
     string Color = SkinClamps.DefaultTextColor, string FontFamily = SkinClamps.DefaultFontFamily,
-    double FontSize = SkinClamps.DefaultFontSize, bool Bold = false,
+    double FontSize = SkinClamps.DefaultFontSize, int Weight = SkinClamps.DefaultWeight,
+    bool Italic = false, double LetterSpacing = 0,
     string? OutlineColor = null, double OutlineWidth = 0,
     string? ShadowColor = null, double ShadowBlur = SkinClamps.DefaultShadowBlur, double ShadowDepth = SkinClamps.DefaultShadowDepth,
     string Align = "left")
@@ -17,6 +20,9 @@ public sealed record SkinText(bool Show, int X, int Y,
     /// skin as no text at all; a hidden text with any other field set is written with
     /// "show": false and keeps its position and styling.</summary>
     public static SkinText Hidden { get; } = new(false, 0, 0);
+
+    /// <summary><see cref="Hidden"/> for an AirPlay label, whose default weight is its own.</summary>
+    public static SkinText HiddenLabel { get; } = Hidden with { Weight = SkinClamps.DefaultLabelWeight };
 }
 
 /// <summary>A rectangle in skin coordinates - the click target a skin declares for the AirPlay
@@ -160,7 +166,7 @@ public static class SkinLoader
                     return Bad($"skin.json is invalid: {ex.Message}");
                 }
 
-                text = ReadText(parsed?.PercentText) ?? text;
+                text = ReadText(parsed?.PercentText, SkinClamps.DefaultWeight) ?? text;
                 if (parsed?.Scale is { } rawScale)
                     scale = SkinClamps.Scale(rawScale);
                 if (parsed?.Fps is { } rawFps)
@@ -242,18 +248,29 @@ public static class SkinLoader
     ///
     /// Shared by the volume bar's percent text and by both of the AirPlay bar's labels: three
     /// callers, one set of defaults, so a clamp fixed in one place is fixed everywhere.</summary>
-    private static SkinText? ReadText(SkinTextJson? t) =>
-        t is null ? null : SkinClamps.Text(new SkinText(t.Show, t.X, t.Y,
-            Color: t.Color ?? "",
-            FontFamily: t.FontFamily ?? "",
-            FontSize: t.FontSize ?? SkinClamps.DefaultFontSize,
-            Bold: t.Bold ?? false,
-            OutlineColor: t.OutlineColor,
-            OutlineWidth: t.OutlineWidth ?? 0,
-            ShadowColor: t.ShadowColor,
-            ShadowBlur: t.ShadowBlur ?? SkinClamps.DefaultShadowBlur,
-            ShadowDepth: t.ShadowDepth ?? SkinClamps.DefaultShadowDepth,
-            Align: t.Align ?? ""));
+    private static SkinText? ReadText(SkinTextJson? t, int defaultWeight) =>
+        t is null ? null : ReadStyle(t, new SkinText(t.Show, t.X, t.Y), defaultWeight);
+
+    /// <summary>The styling every text reads - the percent number, the AirPlay labels and the
+    /// notice name - put on <paramref name="at"/> and clamped. A weight wins over the legacy
+    /// "bold", which reads as 700; with neither the text keeps <paramref name="defaultWeight"/>,
+    /// the look it had before weights could be chosen.</summary>
+    private static SkinText ReadStyle(SkinTextStyleJson t, SkinText at, int defaultWeight) =>
+        SkinClamps.Text(at with
+        {
+            Color = t.Color ?? "",
+            FontFamily = t.FontFamily ?? "",
+            FontSize = t.FontSize ?? SkinClamps.DefaultFontSize,
+            Weight = t.Weight ?? (t.Bold == true ? SkinClamps.BoldWeight : defaultWeight),
+            Italic = t.Italic ?? false,
+            LetterSpacing = t.LetterSpacing ?? 0,
+            OutlineColor = t.OutlineColor,
+            OutlineWidth = t.OutlineWidth ?? 0,
+            ShadowColor = t.ShadowColor,
+            ShadowBlur = t.ShadowBlur ?? SkinClamps.DefaultShadowBlur,
+            ShadowDepth = t.ShadowDepth ?? SkinClamps.DefaultShadowDepth,
+            Align = t.Align ?? "",
+        });
 
     /// <summary>Reads the "airplay" block out of its raw element, or null when it is absent or is
     /// not an object at all. Deliberately total: a wrong type there must not throw, for the same
@@ -332,14 +349,14 @@ public static class SkinLoader
             empty.IsGif, full.IsGif,
             empty.IsGif ? 1 : emptyFrames, full.IsGif ? 1 : fullFrames,
             fillStart, fillEnd,
-            ReadText(json?.NameText), ReadText(json?.PercentText), hit,
+            ReadText(json?.NameText, SkinClamps.DefaultLabelWeight), ReadText(json?.PercentText, SkinClamps.DefaultLabelWeight), hit,
             connect, json?.ConnectColor), null);
     }
 
     /// <summary>The dark-pill plate: what a notice looks like when nothing says otherwise.</summary>
     public static readonly SkinNotice DefaultNotice = new(
         "#F2202020", null, 12, 16, 10,
-        new SkinText(true, 0, 0, SkinClamps.DefaultTextColor, SkinClamps.DefaultFontFamily, SkinClamps.DefaultFontSize, Bold: false),
+        new SkinText(true, 0, 0),
         new SkinNoticeGlyph(true, 16, 0, 18, null));
 
     private static SkinNoticeJson? ParseNotice(JsonElement? element)
@@ -366,12 +383,8 @@ public static class SkinLoader
             CornerRadius = json?.CornerRadius ?? d.CornerRadius,
             PadX = json?.Padding?.X ?? d.PadX,
             PadY = json?.Padding?.Y ?? d.PadY,
-            Text = new SkinText(true, json?.Text?.X ?? 0, json?.Text?.Y ?? 0,
-                Color: SkinClamps.OrDefault(json?.Text?.Color, d.Text.Color),
-                FontFamily: SkinClamps.OrDefault(json?.Text?.FontFamily, d.Text.FontFamily),
-                FontSize: json?.Text?.FontSize ?? d.Text.FontSize,
-                Bold: json?.Text?.Bold ?? d.Text.Bold,
-                Align: SkinClamps.Align(json?.Text?.Align)),
+            Text = ReadStyle(json?.Text ?? new SkinNoticeTextJson(),
+                d.Text with { X = json?.Text?.X ?? 0, Y = json?.Text?.Y ?? 0 }, d.Text.Weight),
             Glyph = new SkinNoticeGlyph(json?.Glyph?.Show ?? true, json?.Glyph?.X ?? d.Glyph.X, 0,
                 json?.Glyph?.Size ?? d.Glyph.Size, SkinClamps.NullIfBlank(json?.Glyph?.Color)),
         });
@@ -386,15 +399,16 @@ public static class SkinLoader
             json?.Text?.X, json?.Text?.Y, json?.Glyph?.X, json?.Glyph?.Y, json?.TextWidth), null);
     }
 
-    /// <summary>A notice's plate values pulled into range: corner radius and padding 0..64, text
-    /// and glyph sizes 4..200. The loader and the Skin Designer both go through here, so what the
-    /// designer previews is what the saved skin loads as.</summary>
+    /// <summary>A notice's plate values pulled into range: corner radius and padding 0..64, the
+    /// text clamped as every skin text is (and always shown), the glyph size 4..200. The loader and
+    /// the Skin Designer both go through here, so what the designer previews is what the saved skin
+    /// loads as.</summary>
     public static SkinNotice ClampNotice(SkinNotice look) => look with
     {
         CornerRadius = SkinClamps.CornerRadius(look.CornerRadius),
         PadX = SkinClamps.Padding(look.PadX),
         PadY = SkinClamps.Padding(look.PadY),
-        Text = look.Text with { FontSize = SkinClamps.FontSize(look.Text.FontSize) },
+        Text = SkinClamps.Text(look.Text with { Show = true }),
         Glyph = look.Glyph with { Size = SkinClamps.FontSize(look.Glyph.Size) },
     };
 
@@ -537,15 +551,23 @@ public static class SkinLoader
         public int? H { get; set; }
     }
 
-    private sealed class SkinTextJson
+    private sealed class SkinTextJson : SkinTextStyleJson
     {
         public bool Show { get; set; }
         public int X { get; set; }
         public int Y { get; set; }
+    }
+
+    /// <summary>The styling keys every text takes; each text adds where it sits.</summary>
+    private class SkinTextStyleJson
+    {
         public string? Color { get; set; }
         public string? FontFamily { get; set; }
         public double? FontSize { get; set; }
-        public bool? Bold { get; set; }
+        public int? Weight { get; set; }
+        public bool? Bold { get; set; } // legacy: read as weight 700 when no weight is given
+        public bool? Italic { get; set; }
+        public double? LetterSpacing { get; set; }
         public string? OutlineColor { get; set; }
         public double? OutlineWidth { get; set; }
         public string? ShadowColor { get; set; }
@@ -566,11 +588,9 @@ public static class SkinLoader
         public int? Frames { get; set; }
     }
     private sealed class SkinPadJson { public double? X { get; set; } public double? Y { get; set; } }
-    private sealed class SkinNoticeTextJson
+    private sealed class SkinNoticeTextJson : SkinTextStyleJson
     {
         public int? X { get; set; } public int? Y { get; set; }
-        public string? Color { get; set; } public string? FontFamily { get; set; }
-        public double? FontSize { get; set; } public bool? Bold { get; set; } public string? Align { get; set; }
     }
     private sealed class SkinNoticeGlyphJson
     {

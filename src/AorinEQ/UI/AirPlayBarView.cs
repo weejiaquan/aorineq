@@ -332,8 +332,7 @@ public sealed class AirPlayBarView : UserControl
 
     /// <summary>One label, drawn by <see cref="PercentTextRenderer"/> so it gets the skin's font,
     /// outline and shadow exactly as the volume bar's number does, placed by its anchor under its
-    /// alignment. Unbold is Normal: the weight the labels have always had (the number's SemiBold
-    /// is the number's own).</summary>
+    /// alignment.</summary>
     private void ApplySkinText(System.Windows.Shapes.Path block, SkinText? spec, string value)
     {
         if (spec is not { Show: true })
@@ -343,8 +342,7 @@ public sealed class AirPlayBarView : UserControl
         }
 
         block.Visibility = Visibility.Visible;
-        double width = PercentTextRenderer.Update(block, spec, value, _scale, VisualTreeHelper.GetDpi(this).PixelsPerDip,
-            FontWeights.Normal);
+        double width = PercentTextRenderer.Update(block, spec, value, _scale, VisualTreeHelper.GetDpi(this).PixelsPerDip);
         block.Margin = new Thickness(SkinMath.AlignedTextX(spec.X * _scale, width, spec.Align), spec.Y * _scale, 0, 0);
     }
 

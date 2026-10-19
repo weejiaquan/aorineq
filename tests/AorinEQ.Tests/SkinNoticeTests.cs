@@ -68,7 +68,7 @@ public class SkinNoticeTests : IDisposable
         Assert.Equal("#FF00FF00", n.Text.Color);
         Assert.Equal("Tahoma", n.Text.FontFamily);
         Assert.Equal(13, n.Text.FontSize);
-        Assert.True(n.Text.Bold); // the default is not bold, so this is the block's value
+        Assert.Equal(700, n.Text.Weight); // the legacy "bold": true, with no weight, is 700
         Assert.Equal(16, n.Glyph.Size);
         Assert.Equal("#FFFF0000", n.Glyph.Color);
     }
@@ -189,7 +189,11 @@ public class SkinNoticeTests : IDisposable
         var want = d with
         {
             Background = "#FF112233", CornerRadius = 3, Border = "#FF445566", PadX = 9, PadY = 5,
-            Text = d.Text with { Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Bold = true, Align = "center" },
+            Text = d.Text with
+            {
+                Color = "#FF00FF00", FontFamily = "Tahoma", FontSize = 13, Weight = 300, Italic = true, LetterSpacing = 1.5,
+                OutlineColor = "#FF000000", OutlineWidth = 2, ShadowColor = "#80000000", ShadowBlur = 3, ShadowDepth = 1, Align = "center",
+            },
             Glyph = d.Glyph with { Show = false, Size = 20, Color = "#FFFF0000" },
         };
 

@@ -104,30 +104,32 @@ public class SkinViewUpdateTests : IDisposable
         Assert.Equal(System.Windows.Visibility.Collapsed, visibility);
     }
 
-    /// <summary>The percent number keeps the SemiBold it has always had when it is not bold: the
-    /// renderer takes that weight from SkinView, its caller, because the AirPlay labels it also
-    /// draws (Task 9) have always been Normal.</summary>
+    /// <summary>The percent number keeps the SemiBold it has always had when its skin names no
+    /// weight, and a weight it names - Light here - is the weight drawn.</summary>
     [Fact]
-    public void The_number_is_drawn_semibold_unless_bold()
+    public void The_number_is_drawn_semibold_unless_its_skin_names_a_weight()
     {
-        var info = Skin("weight", """{"percentText":{"show":true,"x":5,"y":5,"fontSize":30}}""");
+        var plain = Skin("weight", """{"percentText":{"show":true,"x":5,"y":5,"fontSize":30}}""");
+        var light = Skin("light", """{"percentText":{"show":true,"x":5,"y":5,"fontSize":30,"weight":300}}""");
         var r = _sta.Run(() =>
         {
-            var view = new SkinView(info);
-            view.SetVolume(88, false);
-            double dip = System.Windows.Media.VisualTreeHelper.GetDpi(view).PixelsPerDip;
-            double WidthAt(System.Windows.FontWeight weight)
+            double Drawn(SkinInfo info)
             {
-                var path = new System.Windows.Shapes.Path();
-                PercentTextRenderer.Update(path, info.Text!, "88", view.RenderScale, dip, weight);
-                return path.Data.Bounds.Width;
+                var view = new SkinView(info);
+                view.SetVolume(88, false);
+                return view.PercentPath.Data.Bounds.Width;
             }
-            return (Drawn: view.PercentPath.Data.Bounds.Width,
-                SemiBold: WidthAt(System.Windows.FontWeights.SemiBold), Normal: WidthAt(System.Windows.FontWeights.Normal));
+            double dip = System.Windows.Media.VisualTreeHelper.GetDpi(new SkinView(plain)).PixelsPerDip;
+            double InkAt(System.Windows.FontWeight weight) =>
+                TextInk.Width(SkinClamps.DefaultFontFamily, 30, weight, System.Windows.FontStyles.Normal, "88", dip);
+            return (Plain: Drawn(plain), Light: Drawn(light), SemiBold: InkAt(System.Windows.FontWeights.SemiBold),
+                Normal: InkAt(System.Windows.FontWeights.Normal), LightInk: InkAt(System.Windows.FontWeights.Light));
         });
-        _out.WriteLine($"drawn width {r.Drawn:0.###}; expected the SemiBold width {r.SemiBold:0.###}, not the Normal width {r.Normal:0.###}");
-        Assert.Equal(r.SemiBold, r.Drawn, 3);
-        Assert.True(Math.Abs(r.Normal - r.Drawn) > 0.01, "the number was drawn at Normal weight: the renderer ignored its caller's weight");
+        _out.WriteLine($"no weight: drawn {r.Plain:0.###}; expected the SemiBold width {r.SemiBold:0.###}, not the Normal width {r.Normal:0.###}");
+        _out.WriteLine($"weight 300: drawn {r.Light:0.###}; expected the Light width {r.LightInk:0.###}");
+        Assert.Equal(r.SemiBold, r.Plain, 3);
+        Assert.True(Math.Abs(r.Normal - r.Plain) > 0.01, "the number was drawn at Normal weight, lighter than it has always been");
+        Assert.Equal(r.LightInk, r.Light, 3);
     }
 
     [Fact]

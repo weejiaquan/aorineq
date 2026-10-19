@@ -173,20 +173,81 @@ public class SkinPreviewTests : IDisposable
 
         using var textImage = Open(a);
         using var plainImage = Open(b);
-        // Count pixels that are neither of the two layer colours: those can only be glyph pixels.
-        int glyphPixels = 0, plainGlyphPixels = 0;
-        for (int x = 0; x < 300; x++)
-            for (int y = 0; y < 100; y++)
-            {
-                if (!IsLayerColour(textImage.GetPixel(x, y))) glyphPixels++;
-                if (!IsLayerColour(plainImage.GetPixel(x, y))) plainGlyphPixels++;
-            }
+        int glyphPixels = Ink(textImage).Pixels, plainGlyphPixels = Ink(plainImage).Pixels;
         _out.WriteLine($"non-layer pixels: with text {glyphPixels}, without text {plainGlyphPixels}");
         Assert.Equal(0, plainGlyphPixels);
         Assert.True(glyphPixels > 100, $"expected the number '60' to be drawn, found {glyphPixels} glyph pixels");
+    }
 
-        static bool IsLayerColour(Color c) =>
-            c.ToArgb() == Color.Red.ToArgb() || c.ToArgb() == Color.Lime.ToArgb();
+    /// <summary>The pixels that are neither of the two layer colours - those can only be glyph
+    /// pixels - counted, with the leftmost and rightmost column they reach.</summary>
+    private static (int Pixels, int MinX, int MaxX) Ink(Bitmap image)
+    {
+        int pixels = 0, minX = int.MaxValue, maxX = int.MinValue;
+        for (int x = 0; x < image.Width; x++)
+            for (int y = 0; y < image.Height; y++)
+            {
+                var c = image.GetPixel(x, y);
+                if (c.ToArgb() == Color.Red.ToArgb() || c.ToArgb() == Color.Lime.ToArgb()) continue;
+                pixels++;
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+            }
+        return (pixels, minX, maxX);
+    }
+
+    /// <summary>The preview of a skin whose number has the extra percentText members in
+    /// <paramref name="style"/>, as pixels.</summary>
+    private Bitmap PreviewWith(string name, string style)
+    {
+        var folder = MakeSkin(name, 300, 100,
+            "{ \"percentText\": { \"show\": true, \"x\": 20, \"y\": 20, \"fontSize\": 40, \"color\": \"#FF0000FF\"" + style + " } }");
+        var preview = Path.Combine(_dir, name + ".png");
+        SkinPreview.Write(SkinLoader.Load(folder), preview);
+        return Open(preview);
+    }
+
+    [Fact]
+    public void Preview_letter_spacing_widens_the_number_by_the_gap_between_its_digits()
+    {
+        using var plain = PreviewWith("unspaced", "");
+        using var spaced = PreviewWith("spaced", ", \"letterSpacing\": 20");
+        var (_, plainMin, plainMax) = Ink(plain);
+        var (_, spacedMin, spacedMax) = Ink(spaced);
+        int widened = (spacedMax - spacedMin) - (plainMax - plainMin);
+        _out.WriteLine($"'60' ink: unspaced x {plainMin}..{plainMax}, spaced 20 x {spacedMin}..{spacedMax}; widened by {widened}, expected 20 (one gap)");
+        Assert.Equal(plainMin, spacedMin); // left-aligned: it still starts at its anchor
+        Assert.InRange(widened, 19, 21);
+    }
+
+    [Fact]
+    public void Preview_italic_slants_the_number()
+    {
+        using var upright = PreviewWith("upright", "");
+        using var italic = PreviewWith("italic", ", \"italic\": true");
+        int differing = 0;
+        for (int x = 0; x < 300; x++)
+            for (int y = 0; y < 100; y++)
+                if (upright.GetPixel(x, y).ToArgb() != italic.GetPixel(x, y).ToArgb()) differing++;
+        _out.WriteLine($"pixels that differ between upright and italic: {differing}; ink upright {Ink(upright)}, italic {Ink(italic)}");
+        Assert.True(differing > 100, $"italic drew the same number as upright ({differing} pixels differ)");
+    }
+
+    /// <summary>GDI+ has two weights: 600 and up is Bold, lighter is Regular. So 300 and 500
+    /// look the same, and 600 and 900 do, and the two pairs differ.</summary>
+    [Fact]
+    public void Preview_weight_is_bold_from_600_and_regular_below()
+    {
+        int InkOf(int weight)
+        {
+            using var image = PreviewWith("weight-" + weight, $", \"weight\": {weight}");
+            return Ink(image).Pixels;
+        }
+        var r = (W300: InkOf(300), W500: InkOf(500), W600: InkOf(600), W900: InkOf(900));
+        _out.WriteLine($"glyph pixels by weight: {r}");
+        Assert.Equal(r.W300, r.W500);
+        Assert.Equal(r.W600, r.W900);
+        Assert.True(r.W600 > r.W500, "weight 600 was not drawn heavier than 500");
     }
 
     [Fact]
@@ -321,13 +382,7 @@ public class SkinPreviewTests : IDisposable
         SkinPreview.Write(SkinLoader.Load(folder), preview);
 
         using var image = Open(preview);
-        int glyphPixels = 0;
-        for (int x = 0; x < 300; x++)
-            for (int y = 0; y < 100; y++)
-            {
-                var c = image.GetPixel(x, y);
-                if (c.ToArgb() != Color.Red.ToArgb() && c.ToArgb() != Color.Lime.ToArgb()) glyphPixels++;
-            }
+        int glyphPixels = Ink(image).Pixels;
         _out.WriteLine($"glyph pixels with a missing font: {glyphPixels}");
         Assert.True(glyphPixels > 100, "a missing font must fall back, not silently drop the number");
     }
@@ -346,15 +401,7 @@ public class SkinPreviewTests : IDisposable
         SkinPreview.Write(SkinLoader.Load(folder), preview);
 
         using var image = Open(preview);
-        int minX = int.MaxValue, maxX = int.MinValue;
-        for (int x = 0; x < 300; x++)
-            for (int y = 0; y < 100; y++)
-            {
-                var c = image.GetPixel(x, y);
-                if (c.ToArgb() == Color.Red.ToArgb() || c.ToArgb() == Color.Lime.ToArgb()) continue;
-                minX = Math.Min(minX, x);
-                maxX = Math.Max(maxX, x);
-            }
+        var (_, minX, maxX) = Ink(image);
         _out.WriteLine($"align={align}: glyph ink spans x {minX}..{maxX} around the anchor x=150");
         Assert.True(minX < maxX, "the number must actually be drawn");
         switch (align)

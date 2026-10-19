@@ -25,7 +25,8 @@ namespace AorinEQ.UI;
 /// It draws itself two ways, one visible at a time. A plate is a rounded border that grows with
 /// the name (the host caps it, and the name trims beyond that). Art is a skin's notice image at
 /// its own size, with the glyph and the name placed on it where the skin says; the name is boxed
-/// to the skin's text width so a long one trims inside the art instead of running off it.
+/// to the skin's text width so a long one trims inside the art instead of running off it. The name
+/// is drawn as every skin text is (<see cref="SkinTextView"/>), outline and shadow included.
 ///
 /// Everything a skin wrote is untrusted: a colour that does not parse falls back to the default
 /// plate's, and art that does not decode falls back to the default plate entirely.</summary>
@@ -47,11 +48,7 @@ public sealed class NoticeView : UserControl
         Effect = new DropShadowEffect { Opacity = 0.4, BlurRadius = 16, ShadowDepth = 0 },
     };
 
-    internal TextBlock NoticeText { get; } = new()
-    {
-        TextTrimming = TextTrimming.CharacterEllipsis,
-        IsHitTestVisible = false,
-    };
+    internal SkinTextView NoticeText { get; } = new() { IsHitTestVisible = false };
 
     internal TextBlock NoticeGlyph { get; } = new()
     {
@@ -128,7 +125,8 @@ public sealed class NoticeView : UserControl
     private void ApplyPlate(SkinNotice look, double scale)
     {
         var d = SkinLoader.DefaultNotice;
-        StyleText(look, scale);
+        // A plate lays the name out by its padding: it starts at the left, whatever the align.
+        StyleText(look, look.Text with { Align = "left" }, scale);
 
         PlateBorder.Background = Paint(look.Background, d.Background);
         PlateBorder.BorderBrush = Paint(look.Border, d.Border);
@@ -142,7 +140,6 @@ public sealed class NoticeView : UserControl
         NoticeGlyph.VerticalAlignment = VAlign.Center;
         NoticeText.Margin = new Thickness(0);
         NoticeText.Width = double.NaN;
-        NoticeText.TextAlignment = TextAlignment.Left;
         NoticeText.HorizontalAlignment = HAlign.Stretch;
         NoticeText.VerticalAlignment = VAlign.Center;
         Grid.SetColumn(NoticeText, 1);
@@ -159,7 +156,7 @@ public sealed class NoticeView : UserControl
 
     private void ApplyArt(SkinNotice look, double scale, BitmapSource frame)
     {
-        StyleText(look, scale);
+        StyleText(look, look.Text, scale);
 
         _art.Width = look.Width * scale;
         _art.Height = look.Height * scale;
@@ -170,12 +167,6 @@ public sealed class NoticeView : UserControl
         NoticeGlyph.VerticalAlignment = VAlign.Top;
         NoticeText.Margin = new Thickness(look.Text.X * scale, look.Text.Y * scale, 0, 0);
         NoticeText.Width = look.TextWidth * scale;
-        NoticeText.TextAlignment = look.Text.Align switch
-        {
-            "center" => TextAlignment.Center,
-            "right" => TextAlignment.Right,
-            _ => TextAlignment.Left,
-        };
         NoticeText.HorizontalAlignment = HAlign.Left;
         NoticeText.VerticalAlignment = VAlign.Top;
         Grid.SetColumn(NoticeText, 0);
@@ -190,22 +181,19 @@ public sealed class NoticeView : UserControl
         _art.Visibility = Visibility.Visible;
     }
 
-    /// <summary>The name and the glyph, which look the same on a plate and on art. The glyph takes
-    /// the text's colour unless the look names its own that parses.</summary>
-    private void StyleText(SkinNotice look, double scale)
+    /// <summary>The name, drawn in <paramref name="text"/> (the look's text as this layout places
+    /// it), and the glyph, which look the same on a plate and on art. The glyph takes the text's
+    /// colour unless the look names its own that parses.</summary>
+    private void StyleText(SkinNotice look, SkinText text, double scale)
     {
         var d = SkinLoader.DefaultNotice;
-        NoticeText.Foreground = Paint(look.Text.Color, d.Text.Color);
+        NoticeText.Apply(text, scale);
         // The default family is left unset so the name inherits the window's AppFontFamily, whose
         // fallback chain carries CJK names; only a family a skin chose is set outright.
-        if (look.Text.FontFamily == d.Text.FontFamily) NoticeText.ClearValue(TextBlock.FontFamilyProperty);
-        else NoticeText.FontFamily = new FontFamily(look.Text.FontFamily);
-        NoticeText.FontSize = look.Text.FontSize * scale;
-        // SemiBold rather than Normal for a look that is not bold: the weight the notice name
-        // has always had.
-        NoticeText.FontWeight = look.Text.Bold ? FontWeights.Bold : FontWeights.SemiBold;
+        if (text.FontFamily == d.Text.FontFamily) NoticeText.ClearValue(SkinTextView.FontFamilyProperty);
+        else NoticeText.FontFamily = new FontFamily(text.FontFamily);
 
-        NoticeGlyph.Foreground = PercentTextRenderer.Brush(look.Glyph.Color) ?? NoticeText.Foreground;
+        NoticeGlyph.Foreground = PercentTextRenderer.Brush(look.Glyph.Color) ?? Paint(text.Color, d.Text.Color);
         NoticeGlyph.FontSize = look.Glyph.Size * scale;
         NoticeGlyph.Visibility = look.Glyph.Show ? Visibility.Visible : Visibility.Collapsed;
     }

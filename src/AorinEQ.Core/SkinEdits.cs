@@ -145,34 +145,27 @@ public static class SkinEdits
         _ => null,
     };
 
+    /// <summary>The hidden text carrying nothing that a text layer holds as no text: the AirPlay
+    /// labels' is at their own default weight.</summary>
+    public static SkinText HiddenTextOf(SkinLayer layer) =>
+        layer is SkinLayer.AirPlayName or SkinLayer.AirPlayLevel ? SkinText.HiddenLabel : SkinText.Hidden;
+
     /// <summary>Replaces a text layer's text, clamped. A hidden text carrying nothing becomes no
-    /// text; the notice text keeps only what a notice reads (no outline or shadow, always shown).</summary>
+    /// text; the notice text is placed by the loader's rules and is always shown.</summary>
     public static SkinDocument SetText(SkinDocument doc, SkinLayer layer, SkinText? text, ImageProbe probe)
     {
         var c = doc.Config;
+        var none = HiddenTextOf(layer);
         switch (layer)
         {
             case SkinLayer.PercentText:
-                return With(doc, c with { Text = SkinClamps.OptionalText(text) });
+                return With(doc, c with { Text = SkinClamps.OptionalText(text, none) });
             case SkinLayer.AirPlayName when c.AirPlay is { } strip:
-                return With(doc, c with { AirPlay = strip with { Name = SkinClamps.OptionalText(text) } });
+                return With(doc, c with { AirPlay = strip with { Name = SkinClamps.OptionalText(text, none) } });
             case SkinLayer.AirPlayLevel when c.AirPlay is { } strip:
-                return With(doc, c with { AirPlay = strip with { Percent = SkinClamps.OptionalText(text) } });
+                return With(doc, c with { AirPlay = strip with { Percent = SkinClamps.OptionalText(text, none) } });
             case SkinLayer.NoticeText when c.Notice is { } notice && text is not null:
-            {
-                var d = SkinLoader.DefaultNotice.Text;
-                var noticeText = d with
-                {
-                    X = text.X,
-                    Y = text.Y,
-                    Color = SkinClamps.OrDefault(text.Color, d.Color),
-                    FontFamily = SkinClamps.OrDefault(text.FontFamily, d.FontFamily),
-                    FontSize = text.FontSize,
-                    Bold = text.Bold,
-                    Align = SkinClamps.Align(text.Align),
-                };
-                return With(doc, c with { Notice = SkinDocument.PlaceNotice(notice with { Text = noticeText }, probe, out _) });
-            }
+                return With(doc, c with { Notice = SkinDocument.PlaceNotice(notice with { Text = text }, probe, out _) });
             default:
                 return doc;
         }
@@ -206,8 +199,8 @@ public static class SkinEdits
         int labelY = Math.Max(0, (strip.Height - (int)Math.Round(SkinClamps.DefaultFontSize * SkinClamps.LineHeightRatio)) / 2);
         strip = strip with
         {
-            Name = new SkinText(true, Math.Min(10, strip.Width), labelY),
-            Percent = new SkinText(true, Math.Max(0, strip.Width - 10), labelY, Align: "right"),
+            Name = SkinText.HiddenLabel with { Show = true, X = Math.Min(10, strip.Width), Y = labelY },
+            Percent = SkinText.HiddenLabel with { Show = true, X = Math.Max(0, strip.Width - 10), Y = labelY, Align = "right" },
         };
         // A strip added over one that failed to load replaces it: the issue is resolved.
         return doc with { AirPlayError = null, Config = doc.Config with { AirPlay = strip } };

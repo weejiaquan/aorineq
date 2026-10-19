@@ -44,4 +44,15 @@ public static class SkinMath
         "right" => x - textWidth,
         _ => x,
     };
+
+    /// <summary>The text's elements - grapheme clusters - in order: what letter spacing goes
+    /// between, so a surrogate pair, an emoji sequence or a letter with combining marks is never
+    /// pulled apart.</summary>
+    public static IReadOnlyList<string> TextElements(string text)
+    {
+        var elements = new List<string>();
+        var e = System.Globalization.StringInfo.GetTextElementEnumerator(text);
+        while (e.MoveNext()) elements.Add(e.GetTextElement());
+        return elements;
+    }
 }

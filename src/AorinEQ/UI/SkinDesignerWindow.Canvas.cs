@@ -183,7 +183,7 @@ public partial class SkinDesignerWindow
             boards.Add(Board(SkinLayer.VolumeBar, VolumeBoard, _info.Scale, _info.Width, _info.Height, _info.FillStartX, _info.FillEndX));
             if (_info.Text is { Show: true } text)
                 elements.Add(new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar,
-                    TextBounds(text, PreviewPercent.ToString(CultureInfo.CurrentCulture), ppd, FontWeights.SemiBold), [SkinHandle.Move]));
+                    TextBounds(text, PreviewPercent.ToString(CultureInfo.CurrentCulture), ppd), [SkinHandle.Move]));
         }
 
         if (_stripSkinned && _info.AirPlay is { } strip)
@@ -194,10 +194,10 @@ public partial class SkinDesignerWindow
                 elements.Add(new SceneElement(SkinLayer.AirPlayPower, SkinLayer.AirPlay, Rectangle(power), AreaHandles));
             if (strip.Name is { Show: true } name)
                 elements.Add(new SceneElement(SkinLayer.AirPlayName, SkinLayer.AirPlay,
-                    TextBounds(name, AirPlayPreview.DisplayName, ppd, FontWeights.Normal), [SkinHandle.Move]));
+                    TextBounds(name, AirPlayPreview.DisplayName, ppd), [SkinHandle.Move]));
             if (strip.Percent is { Show: true } level)
                 elements.Add(new SceneElement(SkinLayer.AirPlayLevel, SkinLayer.AirPlay,
-                    TextBounds(level, AirPlayPreview.State.VolumePercent.ToString(CultureInfo.CurrentCulture), ppd, FontWeights.Normal), [SkinHandle.Move]));
+                    TextBounds(level, AirPlayPreview.State.VolumePercent.ToString(CultureInfo.CurrentCulture), ppd), [SkinHandle.Move]));
         }
         else
         {
@@ -238,10 +238,10 @@ public partial class SkinDesignerWindow
     private SceneBoard Board(SkinLayer layer, FrameworkElement host, double scale, int width, int height, int? fillStart, int? fillEnd) =>
         new(layer, host.TranslatePoint(new Point(0, 0), Overlay), scale, width, height, fillStart, fillEnd);
 
-    /// <summary>A text's outline on the canvas, measured at the weight its renderer draws it at.</summary>
-    private static Rect TextBounds(SkinText text, string sample, double pixelsPerDip, FontWeight unboldWeight)
+    /// <summary>A text's outline on the canvas, measured as its renderer draws it.</summary>
+    private static Rect TextBounds(SkinText text, string sample, double pixelsPerDip)
     {
-        var size = PercentTextRenderer.Measure(text, sample, pixelsPerDip, unboldWeight);
+        var size = PercentTextRenderer.Measure(text, sample, pixelsPerDip);
         return new Rect(SkinMath.AlignedTextX(text.X, size.Width, text.Align), text.Y, size.Width, size.Height);
     }
 

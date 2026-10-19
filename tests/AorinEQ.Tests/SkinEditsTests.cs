@@ -295,17 +295,66 @@ public class SkinEditsTests : IDisposable
     }
 
     [Fact]
-    public void Notice_text_keeps_only_what_a_notice_reads()
+    public void Notice_text_keeps_its_styling_clamped_and_is_always_shown()
     {
         var doc = Loaded("ntext", """{"notice":{}}""");
         var next = SkinEdits.SetText(doc, SkinLayer.NoticeText,
-            new SkinText(false, 5, 6, FontSize: 15, OutlineColor: "#FF000000", OutlineWidth: 3, Align: "RIGHT"), _probe);
+            new SkinText(false, 5, 6, FontSize: 15, OutlineColor: "#FF000000", OutlineWidth: 30, Align: "RIGHT"), _probe);
         // A plate keeps its text position (the writer writes it, the loader reads it back).
-        var expected = SkinLoader.DefaultNotice.Text with { X = 5, Y = 6, FontSize = 15, Align = "right" };
+        var expected = SkinLoader.DefaultNotice.Text with
+        {
+            X = 5, Y = 6, FontSize = 15, OutlineColor = "#FF000000", OutlineWidth = SkinClamps.MaxOutlineWidth, Align = "right",
+        };
         _out.WriteLine($"expected {expected}");
         _out.WriteLine($"actual   {next.Config.Notice!.Text}");
         Assert.Equal(expected, next.Config.Notice.Text);
         AssertRoundTrips(next);
+    }
+
+    /// <summary>Weight, italic, letter spacing, outline and shadow reach every text the same way:
+    /// clamped as the loader clamps them, and saved and reloaded as they are.</summary>
+    [Theory]
+    [InlineData(SkinLayer.PercentText)]
+    [InlineData(SkinLayer.AirPlayName)]
+    [InlineData(SkinLayer.AirPlayLevel)]
+    [InlineData(SkinLayer.NoticeText)]
+    public void SetText_carries_every_type_field_on_every_text(SkinLayer layer)
+    {
+        var doc = Loaded("style-" + layer, """{"notice":{}}""", strip: true, noticeArt: true);
+        var start = SkinEdits.TextOf(doc, layer) ?? SkinEdits.HiddenTextOf(layer) with { Show = true, X = 4, Y = 2 };
+        var next = SkinEdits.SetText(doc, layer, start with
+        {
+            Weight = 449, Italic = true, LetterSpacing = 250,
+            OutlineColor = "#FF112233", OutlineWidth = 1.5, ShadowColor = "#80445566", ShadowBlur = 7, ShadowDepth = 99,
+        }, _probe);
+        var got = SkinEdits.TextOf(next, layer)!;
+        _out.WriteLine($"{layer}: from {start}");
+        _out.WriteLine($"{layer}: to   {got}");
+        _out.WriteLine("expected weight 400 (449 rounded), italic, spacing 100 (clamped), outline #FF112233 1.5, shadow #80445566 blur 7 depth 50 (clamped)");
+        Assert.Equal((400, true, 100.0), (got.Weight, got.Italic, got.LetterSpacing));
+        Assert.Equal(("#FF112233", 1.5), (got.OutlineColor, got.OutlineWidth));
+        Assert.Equal(("#80445566", 7.0, 50.0), (got.ShadowColor, got.ShadowBlur, got.ShadowDepth));
+        AssertRoundTrips(next);
+    }
+
+    /// <summary>A hidden text carrying nothing is no text - and "nothing" includes the text's own
+    /// default weight, which for the AirPlay labels is Normal, not the number's SemiBold.</summary>
+    [Fact]
+    public void A_hidden_text_at_its_own_default_weight_is_no_text()
+    {
+        var doc = Loaded("hidden", """{"percentText":{"show":true,"x":3,"y":4},"airplay":{"nameText":{"show":true,"x":3,"y":4}}}""", strip: true);
+        var r = (Number: SkinEdits.SetText(doc, SkinLayer.PercentText, SkinEdits.HiddenTextOf(SkinLayer.PercentText), _probe).Config.Text,
+            Label: SkinEdits.SetText(doc, SkinLayer.AirPlayName, SkinEdits.HiddenTextOf(SkinLayer.AirPlayName), _probe).Config.AirPlay!.Name,
+            LabelAtNumberWeight: SkinEdits.SetText(doc, SkinLayer.AirPlayName, SkinText.Hidden, _probe).Config.AirPlay!.Name);
+        _out.WriteLine($"HiddenTextOf: number {SkinEdits.HiddenTextOf(SkinLayer.PercentText)}, label {SkinEdits.HiddenTextOf(SkinLayer.AirPlayLevel)}");
+        _out.WriteLine($"expected (null, null, a hidden label at 600); actual {r}");
+        Assert.Equal(SkinText.Hidden, SkinEdits.HiddenTextOf(SkinLayer.PercentText));
+        Assert.Equal(SkinText.HiddenLabel, SkinEdits.HiddenTextOf(SkinLayer.AirPlayName));
+        Assert.Equal(SkinText.HiddenLabel, SkinEdits.HiddenTextOf(SkinLayer.AirPlayLevel));
+        Assert.Null(r.Number);
+        Assert.Null(r.Label);
+        Assert.Equal(SkinText.Hidden, r.LabelAtNumberWeight); // 600 is not a label's default: it is kept
+        AssertRoundTrips(SkinEdits.SetText(doc, SkinLayer.AirPlayName, SkinText.Hidden, _probe));
     }
 
     [Fact]
@@ -363,8 +412,9 @@ public class SkinEditsTests : IDisposable
         _out.WriteLine($"{a}");
         Assert.Equal((300, 30, 0, 300), (a.Width, a.Height, a.FillStartX, a.FillEndX));
         Assert.Equal(new SkinHitRect(0, 0, 300, 30), a.DropdownHit);
-        Assert.Equal(new SkinText(true, 10, 5), a.Name);
-        Assert.Equal(new SkinText(true, 290, 5, Align: "right"), a.Percent);
+        // The labels start at their own default weight, Normal, as the loader reads a label without one.
+        Assert.Equal(new SkinText(true, 10, 5, Weight: SkinClamps.DefaultLabelWeight), a.Name);
+        Assert.Equal(new SkinText(true, 290, 5, Weight: SkinClamps.DefaultLabelWeight, Align: "right"), a.Percent);
         Assert.Null(a.ConnectHit);
         AssertRoundTrips(added);
         var removed = SkinEdits.RemoveAirPlay(added);

@@ -177,7 +177,7 @@ public class SkinWriterTests : IDisposable
     public void Save_text_styling_roundtrips_and_plain_text_omits_style_fields()
     {
         var styled = new SkinText(true, 10, 5,
-            Color: "#FF00FF00", FontFamily: "Consolas", FontSize: 28, Bold: false,
+            Color: "#FF00FF00", FontFamily: "Consolas", FontSize: 28, Weight: 300, Italic: true, LetterSpacing: 2.5,
             OutlineColor: "#FF000000", OutlineWidth: 3,
             ShadowColor: "#80000000", ShadowBlur: 6, ShadowDepth: 4);
         var folder = SkinWriter.Save(_root, "styled", _emptySrc, _fullSrc, new SkinConfig(styled, 1.0));
@@ -194,6 +194,10 @@ public class SkinWriterTests : IDisposable
         Assert.DoesNotContain("fontFamily", json);
         Assert.DoesNotContain("outlineColor", json);
         Assert.DoesNotContain("shadowColor", json);
+        Assert.DoesNotContain("weight", json);
+        Assert.DoesNotContain("bold", json);
+        Assert.DoesNotContain("italic", json);
+        Assert.DoesNotContain("letterSpacing", json);
         var back = SkinLoader.Load(plainFolder).Text;
         Assert.Equal(new SkinText(true, 12, 8), back); // defaults reconstruct the plain text
     }

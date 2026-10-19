@@ -270,9 +270,8 @@ public sealed class SkinView : UserControl
 
         if (_info.Text is { Show: true } text)
         {
-            // SemiBold is the unbold look the number has always had (plain {show,x,y} skins).
             double textWidth = PercentTextRenderer.Update(_percentPath, text, percent.ToString(),
-                scale, VisualTreeHelper.GetDpi(this).PixelsPerDip, FontWeights.SemiBold);
+                scale, VisualTreeHelper.GetDpi(this).PixelsPerDip);
             // X is the anchor (left edge / centre / right edge per align); recomputed on every
             // update since the measured width changes with the digit count.
             _percentPath.Margin = new Thickness(

@@ -27,6 +27,19 @@ public static class SkinClamps
     public const double DefaultMutedDim = 0.6; // the pre-1.8 hardcoded mute dim opacity
     public const double MaxCornerRadius = 64;
     public const double MaxPadding = 64;
+    public const int MinWeight = 100;
+    public const int MaxWeight = 900;
+    public const double MinLetterSpacing = -20;
+    public const double MaxLetterSpacing = 100;
+
+    /// <summary>The OpenType weight a text has when its skin names none - each text's look from
+    /// before weights could be chosen: SemiBold for the percent number and the notice name,
+    /// Normal for the AirPlay labels.</summary>
+    public const int DefaultWeight = 600;
+    public const int DefaultLabelWeight = 400;
+
+    /// <summary>What the legacy "bold": true reads as.</summary>
+    public const int BoldWeight = 700;
 
     /// <summary>The line box of a text line as a multiple of its em size: what the loader centres
     /// notice text and the AirPlay power glyph with, and what the designer outlines text with.</summary>
@@ -55,6 +68,13 @@ public static class SkinClamps
     public static double ShadowBlur(double value) => Clamp(value, 0, MaxShadow, DefaultShadowBlur);
 
     public static double ShadowDepth(double value) => Clamp(value, 0, MaxShadow, DefaultShadowDepth);
+
+    /// <summary>A weight on the OpenType scale: rounded to the nearest 100 (half away from zero)
+    /// and pulled into 100..900.</summary>
+    public static int Weight(int value) =>
+        Math.Clamp((int)Math.Round(value / 100.0, MidpointRounding.AwayFromZero) * 100, MinWeight, MaxWeight);
+
+    public static double LetterSpacing(double value) => Clamp(value, MinLetterSpacing, MaxLetterSpacing, 0);
 
     public static double CornerRadius(double value) => Clamp(value, 0, MaxCornerRadius, 0);
 
@@ -101,12 +121,14 @@ public static class SkinClamps
     }
 
     /// <summary>One text overlay with every blank defaulted and every number clamped. The volume
-    /// bar's percent text and both AirPlay labels share it.</summary>
+    /// bar's percent text, both AirPlay labels and the notice name share it.</summary>
     public static SkinText Text(SkinText text) => text with
     {
         Color = OrDefault(text.Color, DefaultTextColor),
         FontFamily = OrDefault(text.FontFamily, DefaultFontFamily),
         FontSize = FontSize(text.FontSize),
+        Weight = Weight(text.Weight),
+        LetterSpacing = LetterSpacing(text.LetterSpacing),
         OutlineColor = NullIfBlank(text.OutlineColor),
         OutlineWidth = OutlineWidth(text.OutlineWidth),
         ShadowColor = NullIfBlank(text.ShadowColor),
@@ -115,14 +137,15 @@ public static class SkinClamps
         Align = Align(text.Align),
     };
 
-    /// <summary><see cref="Text"/>, except that a text which clamps to <see cref="SkinText.Hidden"/>
+    /// <summary><see cref="Text"/>, except that a text which clamps to <paramref name="hidden"/> -
+    /// <see cref="SkinText.Hidden"/>, or <see cref="SkinText.HiddenLabel"/> for an AirPlay label -
     /// is no text: the writer omits it and the loader reads it back as null, so the document must
     /// hold null too, or a save and a reload would disagree.</summary>
-    public static SkinText? OptionalText(SkinText? text)
+    public static SkinText? OptionalText(SkinText? text, SkinText hidden)
     {
         if (text is null) return null;
         var clamped = Text(text);
-        return clamped == SkinText.Hidden ? null : clamped;
+        return clamped == hidden ? null : clamped;
     }
 
     internal static string OrDefault(string? value, string fallback) =>

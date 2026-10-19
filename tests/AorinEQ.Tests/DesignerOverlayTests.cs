@@ -177,28 +177,32 @@ public class DesignerOverlayTests
     }
 
     /// <summary>The canvas outlines a text with the size the renderer lays it out at: the width
-    /// <see cref="PercentTextRenderer.Update"/> reports at scale 1, at the caller's unbold weight.</summary>
+    /// <see cref="PercentTextRenderer.Update(System.Windows.Shapes.Path,SkinText,string,double,double)"/>
+    /// reports at scale 1, at the style's own weight and letter spacing.</summary>
     [Fact]
     public void Text_is_measured_as_the_renderer_draws_it()
     {
         var r = _sta.Run(() =>
         {
             var style = new SkinText(true, 0, 0) { FontSize = 20 };
+            var spaced = style with { LetterSpacing = 6 };
             double dip = VisualTreeHelper.GetDpi(new System.Windows.Controls.Border()).PixelsPerDip;
-            var semiBold = PercentTextRenderer.Measure(style, "88", dip, FontWeights.SemiBold);
-            var normal = PercentTextRenderer.Measure(style, "88", dip, FontWeights.Normal);
-            var boldStyle = PercentTextRenderer.Measure(style with { Bold = true }, "88", dip, FontWeights.Normal);
-            var boldAtSemiBold = PercentTextRenderer.Measure(style with { Bold = true }, "88", dip, FontWeights.SemiBold);
-            double drawn = PercentTextRenderer.Update(new System.Windows.Shapes.Path(), style, "88", 1.0, dip, FontWeights.SemiBold);
-            double drawnAt2 = PercentTextRenderer.Update(new System.Windows.Shapes.Path(), style, "88", 2.0, dip, FontWeights.SemiBold);
-            return (semiBold, normal, boldStyle, boldAtSemiBold, drawn, drawnAt2);
+            var measured = PercentTextRenderer.Measure(style, "88", dip);
+            var heavy = PercentTextRenderer.Measure(style with { Weight = 900 }, "88", dip);
+            var measuredSpaced = PercentTextRenderer.Measure(spaced, "88", dip);
+            double drawn = PercentTextRenderer.Update(new System.Windows.Shapes.Path(), style, "88", 1.0, dip);
+            double drawnAt2 = PercentTextRenderer.Update(new System.Windows.Shapes.Path(), style, "88", 2.0, dip);
+            double drawnSpacedAt2 = PercentTextRenderer.Update(new System.Windows.Shapes.Path(), spaced, "88", 2.0, dip);
+            return (measured, heavy, measuredSpaced, drawn, drawnAt2, drawnSpacedAt2);
         });
-        _out.WriteLine($"measured SemiBold {r.semiBold}, Normal {r.normal}, bold style {r.boldStyle} / {r.boldAtSemiBold}; drawn at 1 {r.drawn}, at 2 {r.drawnAt2}");
-        Assert.Equal(r.drawn, r.semiBold.Width, 6);
-        Assert.Equal(r.drawnAt2, 2 * r.semiBold.Width, 1);   // measured at scale 1, whatever the skin's scale
-        Assert.True(r.semiBold.Height > 20 && r.semiBold.Height < 40);
-        Assert.True(Math.Abs(r.semiBold.Width - r.normal.Width) > 0.01, "the caller's unbold weight was ignored");
-        Assert.Equal(r.boldStyle, r.boldAtSemiBold); // a bold style is Bold whatever the caller's weight
+        _out.WriteLine($"measured {r.measured}, at weight 900 {r.heavy}, spaced 6 {r.measuredSpaced}; " +
+                       $"drawn at 1 {r.drawn}, at 2 {r.drawnAt2}, spaced at 2 {r.drawnSpacedAt2}");
+        Assert.Equal(r.drawn, r.measured.Width, 6);
+        Assert.Equal(r.drawnAt2, 2 * r.measured.Width, 1);   // measured at scale 1, whatever the skin's scale
+        Assert.True(r.measured.Height > 20 && r.measured.Height < 40);
+        Assert.True(r.heavy.Width - r.measured.Width > 0.01, "the style's weight did not reach the measurement");
+        Assert.Equal(r.drawnSpacedAt2, 2 * r.measuredSpaced.Width, 1); // the spacing scales with the skin too
+        Assert.Equal(r.measured.Width + 6, r.measuredSpaced.Width, 1);  // two digits, one gap
     }
 
     /// <summary>Every step of a drag rebuilds the scene, so the dragged layer's last position comes

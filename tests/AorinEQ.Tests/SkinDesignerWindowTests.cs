@@ -307,6 +307,86 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.Contains("\"percentText\":{\"show\":false,\"x\":0,\"y\":0,\"fontSize\":30}", json);
     }
 
+    private static ChoiceField Choice(SkinDesignerWindow d, string label) =>
+        Fields<ChoiceField>(d.PropertiesHost).First(f => f.Children.OfType<TextBlock>().First().Text == label);
+
+    private static Expander PropertySection(SkinDesignerWindow d, string header) =>
+        Fields<Expander>(d.PropertiesHost).First(e => (string)e.Header == header);
+
+    /// <summary>Every text's Type section has a Weight choice (no Bold toggle), Italic and Letter
+    /// spacing, each one undo step, showing the text's own default weight, and what they set is
+    /// what a save and a reload give back.</summary>
+    [Theory]
+    [InlineData(SkinLayer.PercentText, false, 600)]
+    [InlineData(SkinLayer.AirPlayName, false, 400)]
+    [InlineData(SkinLayer.AirPlayLevel, false, 400)]
+    [InlineData(SkinLayer.NoticeText, false, 600)]
+    [InlineData(SkinLayer.NoticeText, true, 600)]
+    public void Every_text_takes_a_weight_italic_and_letter_spacing_that_save(SkinLayer layer, bool art, int defaultWeight)
+    {
+        string name = $"type-{layer}-{art}";
+        var folder = MakeSkin(name,
+            """{"percentText":{"show":true,"x":5,"y":5},"airplay":{"nameText":{"show":true,"x":5,"y":2},"percentText":{"show":true,"x":190,"y":2}},"notice":{}}""",
+            strip: true, noticeArt: art ? (280, 48) : null);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin(name);
+            d.Select(layer);
+            var weight = Choice(d, Loc.T("designer.weight.label"));
+            var shown = ((ComboBoxItem)weight.Combo.SelectedItem).Content;
+            bool bold = Fields<ToggleField>(d.PropertiesHost).Any(f => (string)f.Switch.Content == "Bold");
+            weight.Combo.SelectedIndex = 8;                                   // Black 900
+            Toggle(d, Loc.T("designer.italic.label")).Switch.IsChecked = true;
+            Type(Number(d, Loc.T("designer.letter-spacing.label")).Box, N(2.5));
+            var edited = SkinEdits.TextOf(d.Document, layer)!;
+            d.History.Undo();
+            var undoneOnce = SkinEdits.TextOf(d.Document, layer)!;
+            d.History.Redo();
+            bool saved = d.Save();
+            return (shown, bold, edited, undoneOnce, saved);
+        });
+        var info = SkinLoader.Load(folder);
+        var reloaded = SkinEdits.TextOf(SkinDocument.FromInfo(info), layer)!;
+        _out.WriteLine($"{layer} (art {art}): weight shown {r.shown}; a Bold toggle present: {r.bold}");
+        _out.WriteLine($"edited   {r.edited}");
+        _out.WriteLine($"one undo {r.undoneOnce}");
+        _out.WriteLine($"reloaded {reloaded}");
+        _out.WriteLine(File.ReadAllText(Path.Combine(folder, "skin.json")));
+        Assert.Equal(Loc.T(defaultWeight == 600 ? "designer.weight.semi-bold" : "designer.weight.regular"), r.shown);
+        Assert.False(r.bold, "the Bold toggle is still there");
+        Assert.Equal((900, true, 2.5), (r.edited.Weight, r.edited.Italic, r.edited.LetterSpacing));
+        Assert.Equal((900, true, 0.0), (r.undoneOnce.Weight, r.undoneOnce.Italic, r.undoneOnce.LetterSpacing)); // spacing was one step
+        Assert.True(r.saved);
+        Assert.Equal(r.edited, reloaded);
+    }
+
+    /// <summary>The notice text has the same Outline and Shadow sections as the other texts, and
+    /// what they switch on is drawn on the notice preview.</summary>
+    [Fact]
+    public void The_notice_text_has_outline_and_shadow_and_the_preview_draws_them()
+    {
+        MakeSkin("notice-fx", """{"notice":{}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("notice-fx");
+            d.Select(SkinLayer.NoticeText);
+            var outline = PropertySection(d, Loc.T("designer.outline.label"));
+            var shadow = PropertySection(d, Loc.T("designer.shadow.label"));
+            Fields<ToggleField>(outline).First().Switch.IsChecked = true;
+            Fields<ToggleField>(shadow).First().Switch.IsChecked = true;
+            d.UpdateLayout();
+            var glyphs = d.NoticePreview.NoticeText.Glyphs;
+            var text = d.Document.Config.Notice!.Text;
+            return (text.OutlineColor, text.OutlineWidth, text.ShadowColor, Stroke: glyphs.Stroke, glyphs.StrokeThickness, glyphs.Effect);
+        });
+        _out.WriteLine($"notice text outline {r.OutlineColor} {r.OutlineWidth}, shadow {r.ShadowColor}; preview stroke {r.Stroke} {r.StrokeThickness}, effect {r.Effect}");
+        Assert.Equal((SkinClamps.DefaultOutlineColor, SkinClamps.DefaultOutlineWidth, SkinClamps.DefaultShadowColor),
+            (r.OutlineColor, r.OutlineWidth, r.ShadowColor));
+        Assert.NotNull(r.Stroke);
+        Assert.Equal(SkinClamps.DefaultOutlineWidth, r.StrokeThickness);
+        Assert.IsType<System.Windows.Media.Effects.DropShadowEffect>(r.Effect);
+    }
+
     [Fact]
     public void The_notice_can_be_switched_on_bordered_and_its_icon_freed_from_the_text_colour()
     {

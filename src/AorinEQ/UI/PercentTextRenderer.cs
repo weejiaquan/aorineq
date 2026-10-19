@@ -35,19 +35,23 @@ internal static class PercentTextRenderer
 {
     /// <summary>Rebuilds <paramref name="path"/> to show <paramref name="text"/> styled per
     /// <paramref name="style"/> at <paramref name="scale"/> (font size, outline width, shadow
-    /// blur/depth are all multiplied by scale so the number tracks the skin's zoom). An unbold
-    /// style is drawn at <paramref name="unboldWeight"/>, which the caller owns: the percent
-    /// number's historical SemiBold, the AirPlay labels' Normal - so moving a text onto this
-    /// renderer never changes how an existing skin looks. Returns the measured text width (already
+    /// blur/depth and letter spacing are all multiplied by scale so the number tracks the skin's
+    /// zoom), at the style's own weight and slant. Returns the measured text width (already
     /// scale-multiplied) so callers can place the Path's margin per the style's alignment — the
     /// width changes with the digit count, so the margin must be recomputed on every update.</summary>
-    public static double Update(Path path, SkinText style, string text, double scale, double pixelsPerDip,
-        FontWeight unboldWeight)
+    public static double Update(Path path, SkinText style, string text, double scale, double pixelsPerDip) =>
+        Update(path, style, text, scale, pixelsPerDip, null, double.PositiveInfinity).Width;
+
+    /// <summary><see cref="Update(Path,SkinText,string,double,double)"/> for a text laid out in a
+    /// box (the notice name): drawn in <paramref name="family"/> when one is given instead of the
+    /// style's, and trimmed with an ellipsis to <paramref name="maxWidth"/>. Returns the size drawn.</summary>
+    internal static System.Windows.Size Update(Path path, SkinText style, string text, double scale, double pixelsPerDip,
+        System.Windows.Media.FontFamily? family, double maxWidth)
     {
-        var formatted = Format(style, text, scale, pixelsPerDip, unboldWeight);
+        var (geometry, size) = Layout(style, text, scale, pixelsPerDip, family, maxWidth);
 
         // Geometry origin at (0,0); the Path is positioned by its Margin by the caller.
-        path.Data = formatted.BuildGeometry(new System.Windows.Point(0, 0));
+        path.Data = geometry;
         path.Fill = Brush(style.Color) ?? System.Windows.Media.Brushes.White;
 
         var outline = style.OutlineColor is null ? null : Brush(style.OutlineColor);
@@ -73,31 +77,75 @@ internal static class PercentTextRenderer
             }
             : null;
 
-        return formatted.WidthIncludingTrailingWhitespace;
+        return size;
     }
 
-    /// <summary>The size <see cref="Update"/> draws <paramref name="text"/> at in skin pixels (scale
-    /// 1), before outline and shadow - what the designer's canvas outlines the text with.</summary>
-    internal static System.Windows.Size Measure(SkinText style, string text, double pixelsPerDip, FontWeight unboldWeight)
-    {
-        var formatted = Format(style, text, 1.0, pixelsPerDip, unboldWeight);
-        return new System.Windows.Size(formatted.WidthIncludingTrailingWhitespace, formatted.Height);
-    }
+    /// <summary>The size <see cref="Update(Path,SkinText,string,double,double)"/> draws
+    /// <paramref name="text"/> at in skin pixels (scale 1), before outline and shadow - what the
+    /// designer's canvas outlines the text with.</summary>
+    internal static System.Windows.Size Measure(SkinText style, string text, double pixelsPerDip) =>
+        Layout(style, text, 1.0, pixelsPerDip, null, double.PositiveInfinity).Size;
 
-    /// <summary>The text as both <see cref="Update"/> and <see cref="Measure"/> lay it out; an
-    /// unbold style takes the caller's weight.</summary>
-    private static FormattedText Format(SkinText style, string text, double scale, double pixelsPerDip, FontWeight unboldWeight)
+    /// <summary>The text as both Update and <see cref="Measure"/> lay it out: one line, its height
+    /// the font's line height. Without letter spacing it is one FormattedText; with it, each text
+    /// element (<see cref="SkinMath.TextElements"/>) is laid out on its own with the spacing between
+    /// them, never after the last, and the width counts exactly that. Wider than
+    /// <paramref name="maxWidth"/>, the text is trimmed as a TextBlock trims, ending in an ellipsis;
+    /// a box with no room draws nothing.</summary>
+    private static (Geometry Geometry, System.Windows.Size Size) Layout(SkinText style, string text, double scale,
+        double pixelsPerDip, System.Windows.Media.FontFamily? family, double maxWidth)
     {
         var typeface = new Typeface(
-            new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? SkinClamps.DefaultFontFamily : style.FontFamily),
-            FontStyles.Normal,
-            style.Bold ? FontWeights.Bold : unboldWeight,
+            family ?? new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? SkinClamps.DefaultFontFamily : style.FontFamily),
+            style.Italic ? FontStyles.Italic : FontStyles.Normal,
+            FontWeight.FromOpenTypeWeight(style.Weight),
             FontStretches.Normal);
-        return new FormattedText(
-            text, CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
+        FormattedText Format(string s) => new(
+            s, CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight,
             typeface, Math.Max(1.0, style.FontSize * scale),
             System.Windows.Media.Brushes.Black, pixelsPerDip);
+
+        var whole = Format(text);
+        if (maxWidth <= 0) return (Geometry.Empty, new System.Windows.Size(0, whole.Height));
+
+        double spacing = style.LetterSpacing * scale;
+        var elements = SkinMath.TextElements(text);
+        if (spacing == 0 || elements.Count < 2)
+        {
+            if (whole.WidthIncludingTrailingWhitespace > maxWidth)
+            {
+                whole.MaxTextWidth = maxWidth;
+                whole.MaxLineCount = 1;
+                whole.Trimming = TextTrimming.CharacterEllipsis;
+            }
+            return (whole.BuildGeometry(new System.Windows.Point(0, 0)),
+                new System.Windows.Size(whole.WidthIncludingTrailingWhitespace, whole.Height));
+        }
+
+        var pieces = elements.Select(Format).ToList();
+        if (Spaced(pieces, pieces.Count, spacing) > maxWidth)
+        {
+            // Whole elements come off the end until what is left, the spacing and an ellipsis fit.
+            var ellipsis = Format("…");
+            int keep = pieces.Count - 1;
+            while (keep > 0 && Spaced(pieces, keep, spacing) + spacing + ellipsis.WidthIncludingTrailingWhitespace > maxWidth) keep--;
+            pieces = [.. pieces.Take(keep), ellipsis];
+        }
+
+        // Nonzero: with a negative spacing neighbours overlap, and their overlap stays filled.
+        var group = new GeometryGroup { FillRule = FillRule.Nonzero };
+        double x = 0;
+        foreach (var piece in pieces)
+        {
+            group.Children.Add(piece.BuildGeometry(new System.Windows.Point(x, 0)));
+            x += piece.WidthIncludingTrailingWhitespace + spacing;
+        }
+        return (group, new System.Windows.Size(Math.Max(0, Spaced(pieces, pieces.Count, spacing)), whole.Height));
     }
+
+    /// <summary>The width of the first <paramref name="count"/> pieces with the spacing between them.</summary>
+    private static double Spaced(List<FormattedText> pieces, int count, double spacing) =>
+        pieces.Take(count).Sum(p => p.WidthIncludingTrailingWhitespace) + spacing * Math.Max(0, count - 1);
 
     /// <summary>A frozen brush for a user-authored colour, or null when it does not parse. Every
     /// skin colour in the app goes through here (and so through <see cref="SkinColor"/>): the

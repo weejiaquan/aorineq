@@ -117,21 +117,67 @@ public class SkinClampsTests
     [Fact]
     public void Text_takes_defaults_for_blanks_and_clamps_every_number()
     {
-        var raw = new SkinText(true, 3, 4, Color: " ", FontFamily: "", FontSize: 1, Bold: true,
+        var raw = new SkinText(true, 3, 4, Color: " ", FontFamily: "", FontSize: 1, Weight: 1234, Italic: true, LetterSpacing: 500,
             OutlineColor: "  ", OutlineWidth: 50, ShadowColor: "", ShadowBlur: 99, ShadowDepth: -1, Align: "RIGHT");
-        var expected = new SkinText(true, 3, 4, "#FFFFFFFF", "Segoe UI", 4, true, null, 20, null, 50, 0, "right");
+        var expected = new SkinText(true, 3, 4, "#FFFFFFFF", "Segoe UI", 4, 900, true, 100, null, 20, null, 50, 0, "right");
         Check("Text(raw)", expected, SkinClamps.Text(raw));
     }
+
+    [Theory]
+    [InlineData(0, 100)]       // below the scale: the lightest
+    [InlineData(-300, 100)]
+    [InlineData(149, 100)]
+    [InlineData(150, 200)]     // half way rounds up, away from zero
+    [InlineData(449, 400)]
+    [InlineData(450, 500)]
+    [InlineData(600, 600)]
+    [InlineData(949, 900)]
+    [InlineData(950, 900)]     // rounds to 1000, then clamps
+    [InlineData(int.MaxValue, 900)]
+    public void Weight_rounds_to_the_nearest_hundred_inside_100_to_900(int input, int expected) =>
+        Check($"Weight({input})", expected, SkinClamps.Weight(input));
+
+    [Theory]
+    [InlineData(-50, -20)]
+    [InlineData(-20, -20)]
+    [InlineData(2.5, 2.5)]
+    [InlineData(100, 100)]
+    [InlineData(250, 100)]
+    [InlineData(double.NaN, 0)]
+    [InlineData(double.PositiveInfinity, 0)]
+    public void Letter_spacing_is_clamped_to_minus_20_through_100(double input, double expected) =>
+        Check($"LetterSpacing({input})", expected, SkinClamps.LetterSpacing(input));
 
     [Fact]
     public void A_hidden_text_carrying_nothing_is_no_text_at_all()
     {
         var styled = new SkinText(false, 5, 0);
-        _out.WriteLine($"null -> {SkinClamps.OptionalText(null)?.ToString() ?? "(null)"}; " +
-                       $"blank hidden -> {SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "))?.ToString() ?? "(null)"}; " +
-                       $"styled -> {SkinClamps.OptionalText(styled)}");
-        Assert.Null(SkinClamps.OptionalText(null));
-        Assert.Null(SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " ")));
-        Assert.Equal(styled, SkinClamps.OptionalText(styled));
+        _out.WriteLine($"null -> {SkinClamps.OptionalText(null, SkinText.Hidden)?.ToString() ?? "(null)"}; " +
+                       $"blank hidden -> {SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "), SkinText.Hidden)?.ToString() ?? "(null)"}; " +
+                       $"styled -> {SkinClamps.OptionalText(styled, SkinText.Hidden)}");
+        Assert.Null(SkinClamps.OptionalText(null, SkinText.Hidden));
+        Assert.Null(SkinClamps.OptionalText(new SkinText(false, 0, 0, Color: " "), SkinText.Hidden));
+        Assert.Equal(styled, SkinClamps.OptionalText(styled, SkinText.Hidden));
+    }
+
+    /// <summary>"Nothing" depends on the text: an AirPlay label's default weight is Normal, so a
+    /// hidden label at Normal carries nothing, while the same text as the percent number carries a
+    /// weight that is not its default - and the other way round.</summary>
+    [Fact]
+    public void A_hidden_text_is_nothing_only_at_its_own_default_weight()
+    {
+        var label = SkinText.HiddenLabel;
+        var number = SkinText.Hidden;
+        var r = (LabelAsLabel: SkinClamps.OptionalText(label, SkinText.HiddenLabel),
+            LabelAsNumber: SkinClamps.OptionalText(label, SkinText.Hidden),
+            NumberAsLabel: SkinClamps.OptionalText(number, SkinText.HiddenLabel),
+            WeightOffScale: SkinClamps.OptionalText(label with { Weight = 420 }, SkinText.HiddenLabel));
+        _out.WriteLine($"label weight {label.Weight}, number weight {number.Weight}: {r}");
+        Assert.Equal(400, label.Weight);
+        Assert.Equal(600, number.Weight);
+        Assert.Null(r.LabelAsLabel);
+        Assert.Equal(label, r.LabelAsNumber);
+        Assert.Equal(number, r.NumberAsLabel);
+        Assert.Null(r.WeightOffScale); // 420 rounds to the label's 400: still nothing
     }
 }

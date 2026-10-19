@@ -81,33 +81,29 @@ public class AirPlayBarViewTests : IDisposable
         Assert.Equal((System.Windows.Visibility.Collapsed, System.Windows.Visibility.Collapsed), visibility);
     }
 
-    /// <summary>The labels were TextBlocks at Normal weight unless bold; moving them onto the
-    /// percent number's renderer must not make every existing skin's labels heavier.</summary>
+    /// <summary>The labels were TextBlocks at Normal weight; a label at its default weight must
+    /// still be Normal, and one with a weight of its own is drawn at that weight.</summary>
     [Fact]
-    public void An_unbold_label_keeps_its_normal_weight_and_a_bold_one_is_bold()
+    public void A_label_at_its_default_weight_is_normal_and_a_weighted_one_takes_its_weight()
     {
-        var plain = new SkinText(true, 10, 5, FontSize: 20);
-        var bold = plain with { Bold = true };
+        var plain = SkinText.HiddenLabel with { Show = true, X = 10, Y = 5, FontSize = 20 };
+        var bold = plain with { Weight = 700 };
         var r = _sta.Run(() =>
         {
             var view = new AirPlayBarView();
             double dip = VisualTreeHelper.GetDpi(view).PixelsPerDip;
-            double WidthAt(SkinText spec, System.Windows.FontWeight weight)
-            {
-                var path = new System.Windows.Shapes.Path();
-                PercentTextRenderer.Update(path, spec, Live.DeviceName, 1.0, dip, weight);
-                return path.Data.Bounds.Width;
-            }
+            double InkAt(System.Windows.FontWeight weight) =>
+                TextInk.Width(plain.FontFamily, 20, weight, System.Windows.FontStyles.Normal, Live.DeviceName, dip);
             view.SetSkin(Strip(plain, null), 1.0);
             view.SetState(Live);
             double drawnPlain = view.SkinNameText.Data.Bounds.Width;
             view.SetSkin(Strip(bold, null), 1.0);
             double drawnBold = view.SkinNameText.Data.Bounds.Width;
-            return (drawnPlain, drawnBold, Normal: WidthAt(plain, System.Windows.FontWeights.Normal),
-                SemiBold: WidthAt(plain, System.Windows.FontWeights.SemiBold), Bold: WidthAt(bold, System.Windows.FontWeights.Normal));
+            return (drawnPlain, drawnBold, Normal: InkAt(System.Windows.FontWeights.Normal),
+                SemiBold: InkAt(System.Windows.FontWeights.SemiBold), Bold: InkAt(System.Windows.FontWeights.Bold));
         });
-        _out.WriteLine($"plain label: drawn {r.drawnPlain:0.###}, expected Normal {r.Normal:0.###} (SemiBold would be {r.SemiBold:0.###})");
-        _out.WriteLine($"bold label : drawn {r.drawnBold:0.###}, expected Bold {r.Bold:0.###}");
+        _out.WriteLine($"label at default weight {SkinText.HiddenLabel.Weight}: drawn {r.drawnPlain:0.###}, expected Normal {r.Normal:0.###} (SemiBold would be {r.SemiBold:0.###})");
+        _out.WriteLine($"label at weight 700: drawn {r.drawnBold:0.###}, expected Bold {r.Bold:0.###}");
         Assert.Equal(r.Normal, r.drawnPlain, 3);
         Assert.True(Math.Abs(r.SemiBold - r.drawnPlain) > 0.01, "the label was drawn SemiBold, heavier than it has always been");
         Assert.Equal(r.Bold, r.drawnBold, 3);

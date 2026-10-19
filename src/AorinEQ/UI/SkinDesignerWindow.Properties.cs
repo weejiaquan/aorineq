@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -167,7 +168,7 @@ public partial class SkinDesignerWindow
         double Width() => layer == SkinLayer.PercentText ? _info.Width : _history.Current.Config.AirPlay?.Width ?? 0;
         double Height() => layer == SkinLayer.PercentText ? _info.Height : _history.Current.Config.AirPlay?.Height ?? 0;
 
-        SkinText Current(SkinDocument d) => SkinEdits.TextOf(d, layer) ?? SkinText.Hidden;
+        SkinText Current(SkinDocument d) => SkinEdits.TextOf(d, layer) ?? SkinEdits.HiddenTextOf(layer);
         SkinDocument Change(SkinDocument d, Func<SkinText, SkinText> change) =>
             SkinEdits.SetText(d, layer, change(Current(d)), _probe);
 
@@ -179,29 +180,49 @@ public partial class SkinDesignerWindow
                 NumberEntry(Loc.T("designer.text.y"), 0, Height, d => Current(d).Y, (d, v) => Change(d, t => t with { Y = (int)v })),
                 AlignEntry(d => Current(d).Align, (d, v) => Change(d, t => t with { Align = v }))),
             Section(Loc.T("designer.section.type"),
+            [
                 FontEntry(Loc.T("designer.text.font"), d => Current(d).FontFamily, (d, v) => Change(d, t => t with { FontFamily = v })),
                 NumberEntry(Loc.T("designer.text.size"), SkinClamps.MinFontSize, SkinClamps.MaxFontSize, d => Current(d).FontSize,
                     (d, v) => Change(d, t => t with { FontSize = v }), decimals: 1),
-                ToggleEntry(Loc.T("designer.bold.label"), d => Current(d).Bold, (d, on) => Change(d, t => t with { Bold = on })),
-                ColorEntry(Loc.T("designer.text.color"), d => Current(d).Color, (d, v) => Change(d, t => t with { Color = v }))),
-            Section(Loc.T("designer.outline.label"),
-                ToggleEntry(Loc.T("designer.prop.on"), d => Current(d).OutlineColor is not null,
-                    (d, on) => Change(d, t => on ? Outlined(t, OutlineColor(t)) : t with { OutlineColor = null })),
-                // Choosing a colour switches the outline on, as the old tick box did.
-                ColorEntry(Loc.T("designer.text.color"), d => OutlineColor(Current(d)), (d, v) => Change(d, t => Outlined(t, v))),
-                NumberEntry(Loc.T("designer.text.width"), 0, SkinClamps.MaxOutlineWidth, d => Current(d).OutlineWidth,
-                    (d, v) => Change(d, t => t with { OutlineWidth = v }), decimals: 1)),
-            Section(Loc.T("designer.shadow.label"),
-                ToggleEntry(Loc.T("designer.prop.on"), d => Current(d).ShadowColor is not null,
-                    (d, on) => Change(d, t => t with { ShadowColor = on ? ShadowColor(t) : null })),
-                ColorEntry(Loc.T("designer.text.color"), d => ShadowColor(Current(d)),
-                    (d, v) => Change(d, t => t with { ShadowColor = v })),
-                NumberEntry(Loc.T("designer.text.blur"), 0, SkinClamps.MaxShadow, d => Current(d).ShadowBlur,
-                    (d, v) => Change(d, t => t with { ShadowBlur = v }), decimals: 1),
-                NumberEntry(Loc.T("designer.text.depth"), 0, SkinClamps.MaxShadow, d => Current(d).ShadowDepth,
-                    (d, v) => Change(d, t => t with { ShadowDepth = v }), decimals: 1)),
+                .. StyleEntries(Current, Change),
+                ColorEntry(Loc.T("designer.text.color"), d => Current(d).Color, (d, v) => Change(d, t => t with { Color = v })),
+            ]),
+            OutlineSection(Current, Change),
+            ShadowSection(Current, Change),
         ];
     }
+
+    /// <summary>The rows every text's Type section has besides its font, size and colour: weight,
+    /// italic and letter spacing.</summary>
+    private UIElement[] StyleEntries(Func<SkinDocument, SkinText> current, Func<SkinDocument, Func<SkinText, SkinText>, SkinDocument> change) =>
+    [
+        WeightEntry(d => current(d).Weight, (d, v) => change(d, t => t with { Weight = v })),
+        ToggleEntry(Loc.T("designer.italic.label"), d => current(d).Italic, (d, on) => change(d, t => t with { Italic = on })),
+        NumberEntry(Loc.T("designer.letter-spacing.label"), SkinClamps.MinLetterSpacing, SkinClamps.MaxLetterSpacing,
+            d => current(d).LetterSpacing, (d, v) => change(d, t => t with { LetterSpacing = v }), decimals: 1),
+    ];
+
+    /// <summary>A text's Outline section: on/off, colour and width.</summary>
+    private Expander OutlineSection(Func<SkinDocument, SkinText> current, Func<SkinDocument, Func<SkinText, SkinText>, SkinDocument> change) =>
+        Section(Loc.T("designer.outline.label"),
+            ToggleEntry(Loc.T("designer.prop.on"), d => current(d).OutlineColor is not null,
+                (d, on) => change(d, t => on ? Outlined(t, OutlineColor(t)) : t with { OutlineColor = null })),
+            // Choosing a colour switches the outline on, as the old tick box did.
+            ColorEntry(Loc.T("designer.text.color"), d => OutlineColor(current(d)), (d, v) => change(d, t => Outlined(t, v))),
+            NumberEntry(Loc.T("designer.text.width"), 0, SkinClamps.MaxOutlineWidth, d => current(d).OutlineWidth,
+                (d, v) => change(d, t => t with { OutlineWidth = v }), decimals: 1));
+
+    /// <summary>A text's Shadow section: on/off, colour, blur and depth.</summary>
+    private Expander ShadowSection(Func<SkinDocument, SkinText> current, Func<SkinDocument, Func<SkinText, SkinText>, SkinDocument> change) =>
+        Section(Loc.T("designer.shadow.label"),
+            ToggleEntry(Loc.T("designer.prop.on"), d => current(d).ShadowColor is not null,
+                (d, on) => change(d, t => t with { ShadowColor = on ? ShadowColor(t) : null })),
+            ColorEntry(Loc.T("designer.text.color"), d => ShadowColor(current(d)),
+                (d, v) => change(d, t => t with { ShadowColor = v })),
+            NumberEntry(Loc.T("designer.text.blur"), 0, SkinClamps.MaxShadow, d => current(d).ShadowBlur,
+                (d, v) => change(d, t => t with { ShadowBlur = v }), decimals: 1),
+            NumberEntry(Loc.T("designer.text.depth"), 0, SkinClamps.MaxShadow, d => current(d).ShadowDepth,
+                (d, v) => change(d, t => t with { ShadowDepth = v }), decimals: 1));
 
     private static string OutlineColor(SkinText t) => t.OutlineColor ?? SkinClamps.DefaultOutlineColor;
 
@@ -316,13 +337,17 @@ public partial class SkinDesignerWindow
             SkinEdits.SetText(d, SkinLayer.NoticeText, change(Text(d)), _probe);
 
         var type = Section(Loc.T("designer.section.type"),
+        [
             ColorEntry(Loc.T("designer.text.color"), d => Text(d).Color, (d, v) => Change(d, t => t with { Color = v })),
             FontEntry(Loc.T("designer.text.font"), d => Text(d).FontFamily, (d, v) => Change(d, t => t with { FontFamily = v })),
             NumberEntry(Loc.T("designer.text.size"), SkinClamps.MinFontSize, SkinClamps.MaxFontSize, d => Text(d).FontSize,
                 (d, v) => Change(d, t => t with { FontSize = v }), decimals: 1),
-            ToggleEntry(Loc.T("designer.bold.label"), d => Text(d).Bold, (d, on) => Change(d, t => t with { Bold = on })),
-            AlignEntry(d => Text(d).Align, (d, v) => Change(d, t => t with { Align = v })));
-        if (!notice.HasArt) return [type, Hint(Loc.T("designer.notice.positions-art-only"))];
+            .. StyleEntries(Text, Change),
+            AlignEntry(d => Text(d).Align, (d, v) => Change(d, t => t with { Align = v })),
+        ]);
+        var outline = OutlineSection(Text, Change);
+        var shadow = ShadowSection(Text, Change);
+        if (!notice.HasArt) return [type, outline, shadow, Hint(Loc.T("designer.notice.positions-art-only"))];
         return
         [
             type,
@@ -331,6 +356,8 @@ public partial class SkinDesignerWindow
                 NumberEntry(Loc.T("designer.text.y"), 0, NoticeHeight, d => Text(d).Y, (d, v) => Change(d, t => t with { Y = (int)v })),
                 NumberEntry(Loc.T("designer.prop.width"), 0, NoticeWidth, d => d.Config.Notice?.TextWidth ?? 0,
                     (d, v) => SkinEdits.SetNoticeTextWidth(d, (int)v))),
+            outline,
+            shadow,
         ];
     }
 
@@ -596,15 +623,10 @@ public partial class SkinDesignerWindow
         return field;
     }
 
-    private ChoiceField AlignEntry(Func<SkinDocument, string> get, Func<SkinDocument, string, SkinDocument> set)
+    private ChoiceField ChoiceEntry(string label, IReadOnlyList<(string Label, string Value)> choices,
+        Func<SkinDocument, string> get, Func<SkinDocument, string, SkinDocument> set)
     {
-        var field = new ChoiceField(Loc.T("designer.text.align"),
-        [
-            (Loc.T("designer.align.left"), "left"),
-            (Loc.T("designer.align.center"), "center"),
-            (Loc.T("designer.align.right"), "right"),
-        ]);
-        field.ToolTip = Loc.T("designer.text-style.tooltip");
+        var field = new ChoiceField(label, choices);
         field.ValueChanged += v =>
         {
             EndMerge();
@@ -613,6 +635,33 @@ public partial class SkinDesignerWindow
         _propertyRefreshers.Add(() => field.ShowValue(get(_history.Current)));
         return field;
     }
+
+    private ChoiceField AlignEntry(Func<SkinDocument, string> get, Func<SkinDocument, string, SkinDocument> set)
+    {
+        var field = ChoiceEntry(Loc.T("designer.text.align"),
+        [
+            (Loc.T("designer.align.left"), "left"),
+            (Loc.T("designer.align.center"), "center"),
+            (Loc.T("designer.align.right"), "right"),
+        ], get, set);
+        field.ToolTip = Loc.T("designer.text-style.tooltip");
+        return field;
+    }
+
+    /// <summary>The nine OpenType weights by name, each stored as its number.</summary>
+    private ChoiceField WeightEntry(Func<SkinDocument, int> get, Func<SkinDocument, int, SkinDocument> set) =>
+        ChoiceEntry(Loc.T("designer.weight.label"),
+        [
+            (Loc.T("designer.weight.thin"), "100"),
+            (Loc.T("designer.weight.extra-light"), "200"),
+            (Loc.T("designer.weight.light"), "300"),
+            (Loc.T("designer.weight.regular"), "400"),
+            (Loc.T("designer.weight.medium"), "500"),
+            (Loc.T("designer.weight.semi-bold"), "600"),
+            (Loc.T("designer.weight.bold"), "700"),
+            (Loc.T("designer.weight.extra-bold"), "800"),
+            (Loc.T("designer.weight.black"), "900"),
+        ], d => get(d).ToString(CultureInfo.InvariantCulture), (d, v) => set(d, int.Parse(v, CultureInfo.InvariantCulture)));
 
     private static Expander Section(string header, params UIElement[] rows)
     {

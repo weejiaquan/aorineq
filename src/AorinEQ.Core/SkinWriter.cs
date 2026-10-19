@@ -107,7 +107,7 @@ public static class SkinWriter
                     version = meta.Version,
                     tags = meta.Tags.Count == 0 ? null : meta.Tags,
                     sourceUrl = meta.SourceUrl,
-                    percentText = hasText ? BuildText(config.Text!) : null,
+                    percentText = hasText ? BuildText(config.Text!, SkinClamps.DefaultWeight) : null,
                     scale = config.Scale,
                     fps = config.Fps,
                     emptyFrames = config.EmptyFrames,
@@ -163,23 +163,29 @@ public static class SkinWriter
     /// <summary>Serializes one text overlay (the percent number, either AirPlay label) with only
     /// the styling fields that differ from the loader's defaults, so a plainly positioned number
     /// round-trips as {show,x,y}. "show" is written as it is: a hidden text that reaches here has
-    /// something to keep. Null-valued members are dropped by <see cref="JsonWriteOptions"/>.</summary>
-    private static object BuildText(SkinText t) => new
+    /// something to keep. <paramref name="defaultWeight"/> is the text's own default weight.</summary>
+    private static Dictionary<string, object?> BuildText(SkinText t, int defaultWeight) =>
+        TextMembers(new Dictionary<string, object?> { ["show"] = t.Show, ["x"] = t.X, ["y"] = t.Y }, t, defaultWeight)!;
+
+    /// <summary><paramref name="placement"/> followed by the styling members every text writes,
+    /// each only where it differs from the loader's default; null when none is set. The legacy
+    /// "bold" is never written: a bold text is "weight": 700.</summary>
+    private static Dictionary<string, object?>? TextMembers(Dictionary<string, object?> placement, SkinText t, int defaultWeight)
     {
-        show = t.Show,
-        x = t.X,
-        y = t.Y,
-        color = t.Color == SkinClamps.DefaultTextColor ? null : t.Color,
-        fontFamily = t.FontFamily == SkinClamps.DefaultFontFamily ? null : t.FontFamily,
-        fontSize = t.FontSize == SkinClamps.DefaultFontSize ? (double?)null : t.FontSize,
-        bold = t.Bold ? (bool?)true : null,
-        outlineColor = t.OutlineColor,
-        outlineWidth = t.OutlineColor is null || t.OutlineWidth == 0 ? (double?)null : t.OutlineWidth,
-        shadowColor = t.ShadowColor,
-        shadowBlur = t.ShadowColor is null || t.ShadowBlur == SkinClamps.DefaultShadowBlur ? (double?)null : t.ShadowBlur,
-        shadowDepth = t.ShadowColor is null || t.ShadowDepth == SkinClamps.DefaultShadowDepth ? (double?)null : t.ShadowDepth,
-        align = t.Align == "left" ? null : t.Align,
-    };
+        placement["color"] = t.Color == SkinClamps.DefaultTextColor ? null : t.Color;
+        placement["fontFamily"] = t.FontFamily == SkinClamps.DefaultFontFamily ? null : t.FontFamily;
+        placement["fontSize"] = t.FontSize == SkinClamps.DefaultFontSize ? null : t.FontSize;
+        placement["weight"] = t.Weight == defaultWeight ? null : t.Weight;
+        placement["italic"] = t.Italic ? true : null;
+        placement["letterSpacing"] = t.LetterSpacing == 0 ? null : t.LetterSpacing;
+        placement["outlineColor"] = t.OutlineColor;
+        placement["outlineWidth"] = t.OutlineColor is null || t.OutlineWidth == 0 ? null : t.OutlineWidth;
+        placement["shadowColor"] = t.ShadowColor;
+        placement["shadowBlur"] = t.ShadowColor is null || t.ShadowBlur == SkinClamps.DefaultShadowBlur ? null : t.ShadowBlur;
+        placement["shadowDepth"] = t.ShadowColor is null || t.ShadowDepth == SkinClamps.DefaultShadowDepth ? null : t.ShadowDepth;
+        placement["align"] = t.Align == "left" ? null : t.Align;
+        return NonNullMembers(placement);
+    }
 
     /// <summary>Serializes the AirPlay strip with every field at the loader's default omitted:
     /// fill range at the strip's edges, single frames, the dropdown covering the whole strip, no
@@ -191,8 +197,8 @@ public static class SkinWriter
         ["fillEndX"] = a.FillEndX == a.Width ? null : a.FillEndX,
         ["emptyFrames"] = a.EmptyFrames == 1 ? null : a.EmptyFrames,
         ["fullFrames"] = a.FullFrames == 1 ? null : a.FullFrames,
-        ["nameText"] = a.Name is { } name && name != SkinText.Hidden ? BuildText(name) : null,
-        ["percentText"] = a.Percent is { } level && level != SkinText.Hidden ? BuildText(level) : null,
+        ["nameText"] = a.Name is { } name && name != SkinText.HiddenLabel ? BuildText(name, SkinClamps.DefaultLabelWeight) : null,
+        ["percentText"] = a.Percent is { } level && level != SkinText.HiddenLabel ? BuildText(level, SkinClamps.DefaultLabelWeight) : null,
         ["dropdownHit"] = a.DropdownHit == new SkinHitRect(0, 0, a.Width, a.Height) ? null : BuildHit(a.DropdownHit),
         ["connectHit"] = a.ConnectHit is { } connect ? BuildHit(connect) : null,
         ["connectColor"] = a.ConnectColor,
@@ -215,16 +221,11 @@ public static class SkinWriter
             border = n.Border,
             cornerRadius = n.CornerRadius == d.CornerRadius ? (double?)null : n.CornerRadius,
             padding = n.PadX == d.PadX && n.PadY == d.PadY ? null : new { x = n.PadX, y = n.PadY },
-            text = NonNullMembers(new Dictionary<string, object?>
+            text = TextMembers(new Dictionary<string, object?>
             {
                 ["x"] = n.HasArt || n.Text.X != d.Text.X ? n.Text.X : null,
                 ["y"] = n.HasArt || n.Text.Y != d.Text.Y ? n.Text.Y : null,
-                ["color"] = n.Text.Color == d.Text.Color ? null : n.Text.Color,
-                ["fontFamily"] = n.Text.FontFamily == d.Text.FontFamily ? null : n.Text.FontFamily,
-                ["fontSize"] = n.Text.FontSize == d.Text.FontSize ? null : n.Text.FontSize,
-                ["bold"] = n.Text.Bold == d.Text.Bold ? null : n.Text.Bold,
-                ["align"] = n.Text.Align == "left" ? null : n.Text.Align,
-            }),
+            }, n.Text, d.Text.Weight),
             textWidth = n.HasArt ? n.TextWidth : (int?)null,
             glyph = NonNullMembers(new Dictionary<string, object?>
             {
