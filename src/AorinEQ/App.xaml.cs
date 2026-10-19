@@ -448,7 +448,7 @@ public partial class App : System.Windows.Application
             _tray.HudModeToggled += OnHudModeToggled;
             _tray.HudWidgetToggled += OnHudWidgetToggled;
             _tray.HudWidgetAdded += OnHudWidgetAdded;
-            _tray.ExitRequested += BeginShutdown;
+            _tray.ExitRequested += OnTrayExit;
 
             ApplyOsdConfig(settings); // needs _tray to exist first (skin-load failure balloons a warning)
 
@@ -660,7 +660,36 @@ public partial class App : System.Windows.Application
     private void BeginShutdown()
     {
         _showEvent?.Dispose();
+        // Disposed before Shutdown() closes every window, so the designer really closes then
+        // instead of asking in a box that a shutting-down app can never show.
+        CloseSkinDesigner();
         Shutdown();
+    }
+
+    private async void OnTrayExit()
+    {
+        if (await ConfirmQuitAsync()) BeginShutdown();
+    }
+
+    /// <summary>Every exit the app starts itself asks about the skin designer's unsaved edits
+    /// first (Save / Don't save / Cancel). False when the user stays: Cancel, or a Save that failed.</summary>
+    private async Task<bool> ConfirmQuitAsync() => _skinDesigner is null || await _skinDesigner.ConfirmLeaveAsync();
+
+    /// <summary>The designer outlives its hidden window: its scratch sprite sheets, test OSD folder
+    /// and static language subscription go with it, and after Dispose, Close really closes it.</summary>
+    private void CloseSkinDesigner()
+    {
+        _skinDesigner?.Dispose();
+        _skinDesigner?.Close();
+        _skinDesigner = null;
+    }
+
+    /// <summary>Windows is logging off or shutting down: there is no asking then, and WPF closes
+    /// every window next, so the designer is let go first (its unsaved edits with it).</summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        CloseSkinDesigner();
+        base.OnSessionEnding(e);
     }
 
     /// <summary>Shown when a named single-instance object (mutex/event) already exists but is
@@ -816,7 +845,7 @@ public partial class App : System.Windows.Application
                 {
                     var choice = System.Windows.MessageBox.Show(
                         Loc.T("app.restart-aorineq-elevated-now"), "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                    if (choice == MessageBoxResult.Yes && TryRelaunchElevatedAndShutdown())
+                    if (choice == MessageBoxResult.Yes && await ConfirmQuitAsync() && TryRelaunchElevatedAndShutdown())
                         return;
                 }
 
@@ -2141,9 +2170,9 @@ public partial class App : System.Windows.Application
     /// <summary>Ends this session so the staged update can be applied on the way out, and marks
     /// the successor as wanted. Everything else is <see cref="ApplyPendingUpdateOnExit"/>'s job:
     /// the swap cannot happen before the process is finished with its own image.</summary>
-    private void RestartForUpdate()
+    private async void RestartForUpdate()
     {
-        if (_pendingUpdate is null) return;
+        if (_pendingUpdate is null || !await ConfirmQuitAsync()) return;
         _relaunchAfterUpdate = true;
         BeginShutdown();
     }
@@ -3256,10 +3285,7 @@ public partial class App : System.Windows.Application
         // which raises on a system thread, and a theme change arriving mid-teardown must not find
         // a dispatcher that has begun shutting down.
         _appTheme?.Dispose();
-        // The designer outlives its hidden window: its scratch sprite sheets, test OSD folder and
-        // static language subscription go with the app, and after Dispose, Close really closes it.
-        _skinDesigner?.Dispose();
-        _skinDesigner?.Close();
+        CloseSkinDesigner();
         // Before the pipeline for the same ordering reason the HUD is: this owns a WASAPI client
         // and a live network session, and a TEARDOWN sent while the dispatcher drains is better
         // than leaving the receiver holding a session nobody is feeding.

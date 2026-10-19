@@ -272,11 +272,34 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         ClosePicker();
     }
 
-    /// <summary>True when the caller may go on: nothing unsaved, or the user chose.</summary>
-    private async Task<bool> ConfirmLeaveAsync()
+    /// <summary>True when the caller - a skin switch, New, Import, a close, or the app quitting -
+    /// may go on: nothing unsaved (and then the user is not asked), or the user's answer from
+    /// <paramref name="ask"/> let it.</summary>
+    internal async Task<bool> ConfirmLeaveAsync(Func<Task<UnsavedChoice>> ask)
     {
         EndInteractions();
-        return !NeedsUnsavedPrompt || ApplyUnsavedChoice(await AskUnsavedAsync());
+        return !NeedsUnsavedPrompt || ApplyUnsavedChoice(await ask());
+    }
+
+    /// <summary><see cref="ConfirmLeaveAsync(Func{Task{UnsavedChoice}})"/> asking with the real box.</summary>
+    internal Task<bool> ConfirmLeaveAsync() => ConfirmLeaveAsync(AskUnsavedAsync);
+
+    /// <summary>The unsaved-changes box. While the document has issues its Save cannot happen, so
+    /// the button is disabled and the box says what blocks it.</summary>
+    internal Wpf.Ui.Controls.MessageBox CreateUnsavedBox()
+    {
+        var message = Loc.T("designer.unsaved.message", _history.Current.Name);
+        return new Wpf.Ui.Controls.MessageBox
+        {
+            Owner = this,
+            Title = "AorinEQ",
+            Content = _issues.Count == 0 ? message : message + Environment.NewLine + Environment.NewLine + BlockedMessage(),
+            PrimaryButtonText = Loc.T("designer.save.label"),
+            SecondaryButtonText = Loc.T("designer.unsaved.discard"),
+            CloseButtonText = Loc.T("designer.unsaved.cancel"),
+            IsPrimaryButtonEnabled = _issues.Count == 0,
+            IsSecondaryButtonEnabled = true,
+        };
     }
 
     private async Task<UnsavedChoice> AskUnsavedAsync()
@@ -285,17 +308,11 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _asking = true;
         try
         {
-            var box = new Wpf.Ui.Controls.MessageBox
-            {
-                Owner = this,
-                Title = "AorinEQ",
-                Content = Loc.T("designer.unsaved.message", _history.Current.Name),
-                PrimaryButtonText = Loc.T("designer.save.label"),
-                SecondaryButtonText = Loc.T("designer.unsaved.discard"),
-                CloseButtonText = Loc.T("designer.unsaved.cancel"),
-                IsSecondaryButtonEnabled = true,
-            };
-            return await box.ShowDialogAsync(true, System.Threading.CancellationToken.None) switch
+            OnDocumentChanged(); // art changed on disk since the last edit counts, as in Save
+            // Asked from the tray's Exit, the designer may be minimised or behind other windows.
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+            Activate();
+            return await CreateUnsavedBox().ShowDialogAsync(true, System.Threading.CancellationToken.None) switch
             {
                 Wpf.Ui.Controls.MessageBoxResult.Primary => UnsavedChoice.Save,
                 Wpf.Ui.Controls.MessageBoxResult.Secondary => UnsavedChoice.Discard,
@@ -309,17 +326,28 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     }
 
     /// <summary>After "Don't save" on close the designer must reopen on what is on disk, not on
-    /// the edits that were just thrown away.</summary>
+    /// the edits that were just thrown away. A skin that no longer loads leaves a new document,
+    /// with the loader's reason kept in the status line.</summary>
     internal void RevertToSaved()
     {
-        if (_loadedName is null || !LoadSkin(_loadedName)) NewDocument();
+        if (_loadedName is null)
+        {
+            NewDocument();
+            return;
+        }
+        if (LoadSkin(_loadedName)) return;
+        var reason = StatusText.Text;
+        NewDocument();
+        StatusText.Text = reason;
     }
 
-    private async void CloseAfterAsking()
+    /// <summary>A close: hides once the user may leave - after "Don't save" back on what is on
+    /// disk, so the next show does not carry the discarded edits; a Cancel or a failed Save keeps
+    /// the window open and dirty.</summary>
+    internal async void CloseAfterAsking(Func<Task<UnsavedChoice>> ask)
     {
-        var choice = await AskUnsavedAsync();
-        if (!ApplyUnsavedChoice(choice)) return;
-        if (choice == UnsavedChoice.Discard) RevertToSaved();
+        if (!await ConfirmLeaveAsync(ask)) return;
+        if (NeedsUnsavedPrompt) RevertToSaved(); // still dirty after going on: "Don't save"
         CleanupTestOsd();
         Hide();
     }
@@ -581,22 +609,17 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        // Disposed (app exit, test teardown): really close, without asking. Otherwise App owns the
-        // lifetime and a close only hides, like SettingsWindow - after asking about unsaved edits.
+        // Disposed, it really closes without asking: App asks before any exit it starts itself,
+        // and disposes the designer before Windows ends the session and before Shutdown() closes
+        // every window - a box shown then would never be answered. Test teardown disposes too.
+        // Otherwise App owns the lifetime and a close only hides, like SettingsWindow.
         if (_disposed)
         {
             base.OnClosing(e);
             return;
         }
         e.Cancel = true;
-        EndInteractions();
-        if (NeedsUnsavedPrompt)
-        {
-            CloseAfterAsking();
-            return;
-        }
-        CleanupTestOsd();
-        Hide();
+        CloseAfterAsking(AskUnsavedAsync);
     }
 
     /// <summary>Releases what outlives a hidden window: the static language subscription, the test

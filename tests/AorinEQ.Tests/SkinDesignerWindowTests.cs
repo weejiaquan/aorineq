@@ -2150,7 +2150,7 @@ public class SkinDesignerWindowTests : IDisposable
             d.Save();
             d.Commit(SkinEdits.SetScale(d.Document, 3));
             d.RevertToSaved();
-            var reverted = (d.Document, d.NeedsUnsavedPrompt);
+            var reverted = (d.Document, d.NeedsUnsavedPrompt, d.History.CanUndo);
             d.NewDocument();
             d.Commit(SkinEdits.SetName(d.Document, "never saved"));
             d.RevertToSaved();
@@ -2160,6 +2160,7 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.Equal(SkinDocument.FromInfo(SkinLoader.Load(folder)), r.reverted.Document);
         Assert.Equal(2.0, r.reverted.Document.Config.Scale);
         Assert.False(r.reverted.NeedsUnsavedPrompt);
+        Assert.False(r.reverted.CanUndo); // the discarded edits are not one undo away
         Assert.Equal(SkinDocument.New(Loc.T("designer.untitled")), r.Fresh);
     }
 
@@ -2194,5 +2195,164 @@ public class SkinDesignerWindowTests : IDisposable
         _out.WriteLine($"actual  : drag {r.drag}; picker {r.picker}");
         Assert.Equal((50, true), r.drag);
         Assert.Equal(("#FF654321", false, true, false, false), r.picker);
+    }
+
+    /// <summary>The user's answer, as the box would give it, counting how often it was asked.</summary>
+    private sealed class Answer(SkinDesignerWindow.UnsavedChoice choice)
+    {
+        public int Asked { get; private set; }
+
+        public Task<SkinDesignerWindow.UnsavedChoice> Ask()
+        {
+            Asked++;
+            return Task.FromResult(choice);
+        }
+    }
+
+    /// <summary>What ConfirmLeaveAsync (App's quit, a skin switch, New, Import) lets through. The
+    /// answer completes at once, so the whole decision runs before the call returns.</summary>
+    private static (bool Completed, bool Go, int Asked) Leave(SkinDesignerWindow d, SkinDesignerWindow.UnsavedChoice choice)
+    {
+        var answer = new Answer(choice);
+        var task = d.ConfirmLeaveAsync(answer.Ask);
+        return (task.IsCompleted, task.IsCompleted && task.Result, answer.Asked);
+    }
+
+    [Fact]
+    public void Leaving_goes_on_only_when_clean_saved_or_discarded()
+    {
+        var folder = MakeSkin("quit", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("quit");
+            var clean = Leave(d, SkinDesignerWindow.UnsavedChoice.Cancel);
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            var before = Snapshot(folder);
+            var cancel = Leave(d, SkinDesignerWindow.UnsavedChoice.Cancel);
+            var discard = Leave(d, SkinDesignerWindow.UnsavedChoice.Discard);
+            var after = Snapshot(folder);
+            bool diskUnchanged = after.Count == before.Count && before.All(kv => after[kv.Key].SequenceEqual(kv.Value));
+            d.NewDocument();
+            d.Commit(SkinEdits.SetScale(d.Document, 2)); // no art: Save cannot happen
+            var failedSave = Leave(d, SkinDesignerWindow.UnsavedChoice.Save);
+            return (clean, cancel, discard, diskUnchanged, failedSave, StillDirty: d.NeedsUnsavedPrompt);
+        });
+        _out.WriteLine("expected (completed, go, asked): clean (T,T,0), cancel (T,F,1), discard (T,T,1) with the disk unchanged, failed save (T,F,1) still dirty");
+        _out.WriteLine($"actual  : {r}");
+        Assert.Equal((true, true, 0), r.clean);
+        Assert.Equal((true, false, 1), r.cancel);
+        Assert.Equal((true, true, 1), r.discard);
+        Assert.True(r.diskUnchanged);
+        Assert.Equal((true, false, 1), r.failedSave);
+        Assert.True(r.StillDirty);
+    }
+
+    /// <summary>App exit and Windows shutdown dispose the designer first: a close then must never
+    /// put up the box, which a shutting-down app could never show or answer. A box that did come
+    /// up runs a nested message loop, so the queued check below would find it and answer Cancel.</summary>
+    [Fact]
+    public void A_disposed_designer_closes_with_unsaved_edits_without_asking()
+    {
+        MakeSkin("exit", "{}");
+        var r = _sta.Run(() =>
+        {
+            Application.Current.Resources["AppFontFamily"] = new System.Windows.Media.FontFamily("Segoe UI");
+            var designer = new SkinDesignerWindow(() => Settings.Default, _root);
+            int closed = 0, boxes = 0;
+            designer.Closed += (_, _) => closed++;
+            designer.Show();
+            designer.LoadSkin("exit");
+            designer.Commit(SkinEdits.SetScale(designer.Document, 2));
+            bool dirty = designer.NeedsUnsavedPrompt;
+            designer.Dispose();
+            designer.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+            {
+                foreach (var box in Application.Current.Windows.OfType<Wpf.Ui.Controls.MessageBox>().ToList())
+                {
+                    boxes++;
+                    box.TemplateButtonCommand.Execute(Wpf.Ui.Controls.MessageBoxButton.Close); // its Cancel, as a click
+                }
+            });
+            designer.Close();
+            StaWpf.Pump();
+            return (dirty, Boxes: boxes, Closed: closed);
+        });
+        _out.WriteLine($"expected dirty, no box, closed once; actual {r}");
+        Assert.Equal((true, 0, 1), r);
+    }
+
+    /// <summary>While the document has issues the box does not offer a Save that cannot happen:
+    /// the button is disabled and the box lists what blocks it.</summary>
+    [Fact]
+    public void The_box_offers_save_only_when_it_can_happen()
+    {
+        MakeSkin("box", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.NewDocument(); // no art: blocked
+            var blockedBox = d.CreateUnsavedBox();
+            var blocked = (blockedBox.IsPrimaryButtonEnabled, Content: (string)blockedBox.Content, d.SaveButton.ToolTip);
+            d.LoadSkin("box");
+            var okBox = d.CreateUnsavedBox();
+            var ok = (okBox.IsPrimaryButtonEnabled, Content: (string)okBox.Content, okBox.IsSecondaryButtonEnabled);
+            return (blocked, ok);
+        });
+        _out.WriteLine($"expected: blocked box Save off with the blocked list; loaded box Save on, just the question. actual {r}");
+        Assert.False(r.blocked.IsPrimaryButtonEnabled);
+        Assert.StartsWith(Loc.T("designer.unsaved.message", Loc.T("designer.untitled")), r.blocked.Content);
+        Assert.EndsWith((string)r.blocked.ToolTip!, r.blocked.Content); // the same list Save's tooltip shows
+        Assert.True(r.ok.IsPrimaryButtonEnabled);
+        Assert.Equal(Loc.T("designer.unsaved.message", "box"), r.ok.Content);
+        Assert.True(r.ok.IsSecondaryButtonEnabled);
+    }
+
+    /// <summary>"Don't save" for a skin that no longer loads leaves a new document, and the status
+    /// line still says why the skin could not be opened.</summary>
+    [Fact]
+    public void Reverting_to_a_skin_that_no_longer_loads_keeps_the_reason()
+    {
+        var folder = MakeSkin("unloadable", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("unloadable");
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            File.Delete(Path.Combine(folder, "full.png"));
+            d.RevertToSaved();
+            return (d.Document, d.StatusText.Text, Reason: SkinLoader.Load(folder).Error);
+        });
+        _out.WriteLine($"expected a new document and the status '{r.Reason}'; actual status '{r.Text}', document {r.Document}");
+        Assert.False(string.IsNullOrEmpty(r.Reason));
+        Assert.Equal(r.Reason, r.Text);
+        Assert.Equal(SkinDocument.New(Loc.T("designer.untitled")), r.Document);
+    }
+
+    /// <summary>A close answered with Save that fails on I/O (skin.json held open by another
+    /// process) keeps the window open and dirty; answered "Don't save" it hides and comes back on
+    /// what is on disk.</summary>
+    [Fact]
+    public void A_close_whose_save_fails_on_io_stays_open_and_dirty()
+    {
+        var folder = MakeSkin("locked", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("locked");
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            (bool Visible, bool Dirty, string Status) locked;
+            using (new FileStream(Path.Combine(folder, "skin.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                d.CloseAfterAsking(new Answer(SkinDesignerWindow.UnsavedChoice.Save).Ask);
+                locked = (d.IsVisible, d.NeedsUnsavedPrompt, d.StatusText.Text);
+            }
+            double disk = SkinLoader.Load(folder).Scale;
+            d.CloseAfterAsking(new Answer(SkinDesignerWindow.UnsavedChoice.Discard).Ask);
+            var discarded = (d.IsVisible, d.NeedsUnsavedPrompt, d.Document.Config.Scale);
+            return (locked, disk, discarded);
+        });
+        _out.WriteLine($"expected: locked save stays visible and dirty with the I/O error, disk scale 1; discard hides, clean, scale 1. actual {r}");
+        Assert.True(r.locked.Visible);
+        Assert.True(r.locked.Dirty);
+        Assert.Contains("'locked'", r.locked.Status); // "Failed to save skin 'locked': ..."
+        Assert.Equal(1.0, r.disk);
+        Assert.Equal((false, false, 1.0), r.discarded);
     }
 }
