@@ -122,11 +122,13 @@ public static class AudioEndpoint
 
     /// <summary>Whether Windows still has this endpoint at all — attached, disabled, or with its
     /// jack unplugged. NOT-PRESENT is deliberately outside the mask: it is what an endpoint
-    /// becomes when a driver update replaces it under a new GUID, which is the one state the
-    /// repair's backup guard must read as "gone" (see <see cref="EapoRepair.Repair"/>).
+    /// becomes when a driver update replaces it under a new GUID, and an endpoint in that state is
+    /// gone for every purpose here.
     ///
-    /// An unreadable device list answers TRUE: this gates overwriting the user's only undo
-    /// record, and a COM failure is not evidence the device left.</summary>
+    /// Its product caller is the elevated repair helper's <c>--endpoint</c> check
+    /// (App.RepairEndpointFrom), which also requires the endpoint to be the default or VB-Cable. An
+    /// unreadable device list answers TRUE: a COM failure is not evidence the device left, and the
+    /// repair's own verification then fails on a device that really is missing.</summary>
     public static bool IsEndpointPresent(string endpointGuid) =>
         Enumerate(DeviceStateActive | DeviceStateDisabled | DeviceStateUnplugged) is not { } endpoints
         || endpoints.Any(e => string.Equals(e.Guid, endpointGuid, StringComparison.OrdinalIgnoreCase));

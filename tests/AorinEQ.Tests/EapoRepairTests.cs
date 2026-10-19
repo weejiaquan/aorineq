@@ -697,20 +697,6 @@ public class EapoRepairTests
     }
 
     [Fact]
-    [Trait(Requires.Key, Requires.AudioEndpoint)]
-    public void Verification_refuses_to_accept_evidence_about_a_different_device()
-    {
-        // The playback probe opens the DEFAULT endpoint, so it only says anything about the
-        // repaired one while they are the same device. A repair verified against a device nobody
-        // touched is not verified. (The real default passes; anything else cannot.)
-        var real = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId())!;
-        _out.WriteLine("default: " + real);
-        Assert.NotEqual(NoSuchDevice, real);
-        // The guard's own input, asserted directly: the two are compared, and they differ.
-        Assert.False(string.Equals(real, NoSuchDevice, StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
     public void The_confirmation_says_what_it_will_actually_do()
     {
         var text = EapoRepair.ConfirmationText;

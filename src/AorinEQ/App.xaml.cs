@@ -227,7 +227,7 @@ public partial class App : System.Windows.Application
         if (e.Args.Contains("--repair-eapo") || e.Args.Contains("--undo-eapo-repair"))
         {
             Shutdown(RunElevatedEapoRepair(
-                undo: e.Args.Contains("--undo-eapo-repair"), token: RepairTokenFrom(e.Args)));
+                undo: e.Args.Contains("--undo-eapo-repair"), token: RepairTokenFrom(e.Args), args: e.Args));
             return;
         }
 
@@ -1617,11 +1617,15 @@ public partial class App : System.Windows.Application
     /// state the design exists to prevent. The verdict is left in a file the launching process
     /// consumes, because an exit code cannot carry the sentence the user needs to read.
     ///
-    /// TARGETING. The endpoint is resolved HERE, from the current default render device, and never
-    /// taken from the command line: an elevated process must not accept the identity of the thing
-    /// it is about to modify from its own arguments. The consequence is that changing the default
-    /// device between clicking and answering the prompt repairs the device you are listening
-    /// through now, which is also the device the whole feature is about.</summary>
+    /// TARGETING. Without <c>--endpoint</c> the endpoint is resolved HERE, from the current default
+    /// render device. With it (AirPlay's "EQ the AirPlay stream", aimed at VB-Cable) the GUID is the
+    /// one thing besides the token taken from the command line, and it is held to the strictest
+    /// reading available: it must parse as a GUID — never used as a path or a command — name a
+    /// render endpoint Windows has right now, AND be either the current default render device or
+    /// VB-Cable. So the helper still never accepts an arbitrary target from its own arguments: the
+    /// argument can only choose between the two devices AorinEQ would repair anyway. Changing the
+    /// default between clicking and answering the prompt still repairs the device you are listening
+    /// through now. See <see cref="RepairEndpointFrom"/>.</summary>
     /// <summary>The run identifier the launching process passed, or "" when there is none or it is
     /// not one. The ONLY thing taken from the command line, and it is never used as a path, a
     /// device id or a command — only echoed back so the launcher can tell this run's verdict from
@@ -1634,7 +1638,44 @@ public partial class App : System.Windows.Application
         return EapoRepair.IsValidToken(token) ? token : "";
     }
 
-    private static int RunElevatedEapoRepair(bool undo, string token)
+    /// <summary>What the elevated helper's <c>--endpoint</c> argument allows.</summary>
+    internal enum RepairEndpointVerdict
+    {
+        /// <summary>No argument (repair the default device), or one naming a device the helper may
+        /// change.</summary>
+        Accepted,
+        /// <summary>Not a GUID, or no render endpoint Windows has right now.</summary>
+        NotFound,
+        /// <summary>A real device, but neither the current default nor VB-Cable.</summary>
+        NotAllowed,
+    }
+
+    /// <summary>The endpoint a <c>--endpoint &lt;guid&gt;</c> argument names, normalised to
+    /// <c>{guid}</c>. No such argument: <see cref="RepairEndpointVerdict.Accepted"/> with null (repair
+    /// the default device). Otherwise the GUID must parse, name a present render endpoint, and be the
+    /// current default or the cable <see cref="VirtualCable.Find"/> returns — anything else is
+    /// refused outright, and nothing is written.</summary>
+    internal static RepairEndpointVerdict RepairEndpointFrom(string[] args, out string? endpointGuid)
+    {
+        endpointGuid = null;
+        int index = Array.IndexOf(args, "--endpoint");
+        if (index < 0) return RepairEndpointVerdict.Accepted;
+        if (index + 1 >= args.Length || !Guid.TryParse(args[index + 1], out var named))
+            return RepairEndpointVerdict.NotFound;
+        var normalized = named.ToString("B");
+        if (!AudioEndpoint.IsEndpointPresent(normalized))
+            return RepairEndpointVerdict.NotFound;
+        bool isDefault = Guid.TryParse(
+            AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()), out var current)
+            && current == named;
+        bool isCable = Guid.TryParse(VirtualCable.Find()?.Guid, out var cable) && cable == named;
+        if (!isDefault && !isCable)
+            return RepairEndpointVerdict.NotAllowed;
+        endpointGuid = normalized;
+        return RepairEndpointVerdict.Accepted;
+    }
+
+    private static int RunElevatedEapoRepair(bool undo, string token, string[] args)
     {
         // ONE privileged repair at a time, machine-wide. Without this, two helpers can both pass
         // the "is there already a backup?" check before either has written one, and the second's
@@ -1668,35 +1709,48 @@ public partial class App : System.Windows.Application
             // now that this process is the only one that can write the locked directory.
             EapoRepair.MigrateLegacyBackup();
 
-            var guid = AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId());
             EapoRepairResult result;
-            if (guid is null)
+            var target = RepairEndpointFrom(args, out var named);
+            if (target == RepairEndpointVerdict.NotFound)
             {
-                result = new EapoRepairResult(EapoRepairOutcome.Refused,
-                    Loc.T("app.windows-isn-t-reporting-a-playback"));
+                result = new EapoRepairResult(EapoRepairOutcome.Refused, Loc.T("app.repair-endpoint-not-found"));
             }
-            else if (undo)
+            else if (target == RepairEndpointVerdict.NotAllowed)
             {
-                // A backup an unelevated process could have authored is not a record of what this
-                // program did — it is somebody else's instructions for an elevated write into HKLM.
-                // Refused rather than sanitised: there is no safe subset of "arbitrary values into
-                // an arbitrary endpoint". Nor is a record naming a different device than its slot
-                // is for: LoadSlotFor reads that as no record, so the write can only ever go to
-                // the device the slot belongs to.
-                var slot = EapoRepair.BackupPathFor(guid);
-                result = !EapoRepair.IsTrustworthyStateFile(slot)
-                    ? new EapoRepairResult(EapoRepairOutcome.Refused,
-                        File.Exists(slot)
-                            ? Loc.T("app.aorineq-won-t-undo-from-a")
-                            : Loc.T("app.there-s-nothing-to-undo-aorineq"))
-                    : EapoRepair.LoadSlotFor(guid) is { } backup
-                        ? EapoRepair.Undo(backup, Restart, slot)
-                        : new EapoRepairResult(EapoRepairOutcome.Refused,
-                            Loc.T("app.there-s-nothing-to-undo-aorineq"));
+                result = new EapoRepairResult(EapoRepairOutcome.Refused, Loc.T("app.repair-endpoint-not-allowed"));
             }
             else
             {
-                result = EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid));
+                bool repairingDefault = named is null;
+                var guid = named ?? AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId());
+                if (guid is null)
+                {
+                    result = new EapoRepairResult(EapoRepairOutcome.Refused,
+                        Loc.T("app.windows-isn-t-reporting-a-playback"));
+                }
+                else if (undo)
+                {
+                    // A backup an unelevated process could have authored is not a record of what
+                    // this program did — it is somebody else's instructions for an elevated write
+                    // into HKLM. Refused rather than sanitised: there is no safe subset of
+                    // "arbitrary values into an arbitrary endpoint". Nor is a record naming a
+                    // different device than its slot is for: LoadSlotFor reads that as no record,
+                    // so the write can only ever go to the device the slot belongs to.
+                    var slot = EapoRepair.BackupPathFor(guid);
+                    result = !EapoRepair.IsTrustworthyStateFile(slot)
+                        ? new EapoRepairResult(EapoRepairOutcome.Refused,
+                            File.Exists(slot)
+                                ? Loc.T("app.aorineq-won-t-undo-from-a")
+                                : Loc.T("app.there-s-nothing-to-undo-aorineq"))
+                        : EapoRepair.LoadSlotFor(guid) is { } backup
+                            ? EapoRepair.Undo(backup, Restart, slot)
+                            : new EapoRepairResult(EapoRepairOutcome.Refused,
+                                Loc.T("app.there-s-nothing-to-undo-aorineq"));
+                }
+                else
+                {
+                    result = EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid, repairingDefault));
+                }
             }
 
             EapoRepair.SaveResult(result with { Token = token });
@@ -1718,33 +1772,29 @@ public partial class App : System.Windows.Application
     }
 
     /// <summary>The independent half of the verification — independent because it does not read
-    /// back anything the repair wrote. The endpoint has to still be there, and it has to still
-    /// OPEN for playback: an endpoint whose effect chain cannot load is one that fails here, which
-    /// is the failure mode that would otherwise cost the user their sound.</summary>
-    private static bool IsEndpointUsable(string endpointGuid)
+    /// back anything the repair wrote. The endpoint has to still be there, and it has to still OPEN
+    /// for capture: an endpoint whose effect chain cannot load fails here, which is the failure mode
+    /// that would otherwise cost the user their sound. The probe is pinned to the repaired endpoint
+    /// itself. Only when repairing THE DEFAULT is the default also required to stay put throughout:
+    /// a switch mid-repair (headphones unplugged at the prompt) means the user is now listening to
+    /// something nobody verified, so it counts as a failure and the repair is put back.</summary>
+    internal static bool IsEndpointUsable(string endpointGuid, bool repairingDefault)
     {
-        if (!AudioEndpoint.GetRenderEndpoints().Any(
-                e => string.Equals(e.Guid, endpointGuid, StringComparison.OrdinalIgnoreCase)))
+        var endpoint = AudioEndpoint.GetRenderEndpoints().FirstOrDefault(
+            e => string.Equals(e.Guid, endpointGuid, StringComparison.OrdinalIgnoreCase));
+        if (endpoint is null)
             return false;
-        // The playback probe below opens the DEFAULT render endpoint, so it only says anything
-        // about the repaired one while they are still the same device. If Windows switched
-        // defaults during the repair (headphones unplugged mid-prompt), a passing probe would be
-        // evidence about a device nobody touched — so that is a verification FAILURE, and the
-        // repair is put back rather than accepted on someone else's evidence.
-        if (!string.Equals(AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
-                endpointGuid, StringComparison.OrdinalIgnoreCase))
+        bool StillDefault() => string.Equals(
+            AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
+            endpointGuid, StringComparison.OrdinalIgnoreCase);
+        if (repairingDefault && !StillDefault())
             return false;
         try
         {
             using var probe = new LoopbackCapture();
-            if (!probe.Start()) return false;
+            if (!probe.Start(endpoint.Id)) return false;
             probe.Stop();
-            // LoopbackCapture resolves the default render endpoint ITSELF, so a switch between the
-            // check above and this probe would have it reporting on a device nobody touched. The
-            // same equality is therefore asserted again afterwards: the evidence counts only if the
-            // repaired endpoint was the default for the whole of it.
-            return string.Equals(AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
-                endpointGuid, StringComparison.OrdinalIgnoreCase);
+            return !repairingDefault || StillDefault();
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException
             or InvalidCastException or InvalidOperationException)
@@ -1761,7 +1811,7 @@ public partial class App : System.Windows.Application
         if (System.Windows.MessageBox.Show(EapoRepair.ConfirmationText, "AorinEQ",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
-        await RunEapoRepairHelperAsync("--repair-eapo", "Repairing…");
+        await RunEapoRepairHelperAsync("--repair-eapo", Loc.T("app.repairing"));
     }
 
     /// <summary>The user asked to undo a repair AorinEQ made.</summary>
@@ -1771,7 +1821,7 @@ public partial class App : System.Windows.Application
                 Loc.T("app.aorineq-will-put-this-playback-device"),
                 "AorinEQ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
-        await RunEapoRepairHelperAsync("--undo-eapo-repair", "Undoing…");
+        await RunEapoRepairHelperAsync("--undo-eapo-repair", Loc.T("app.undoing"));
     }
 
     /// <summary>The repair <see cref="EapoAutoRepair"/> started, with no confirmation dialog of its
@@ -1780,7 +1830,7 @@ public partial class App : System.Windows.Application
     /// so it is never prompted for unasked again; the Settings button still repairs it.</summary>
     private async Task AutoRepairEapoAsync(string endpointGuid)
     {
-        if (await RunEapoRepairHelperAsync("--repair-eapo", "Repairing…")) return;
+        if (await RunEapoRepairHelperAsync("--repair-eapo", Loc.T("app.repairing"))) return;
         _settings = _settings with
         {
             EapoAutoRepairDeclined = [.. _settings.EapoAutoRepairDeclined ?? [], endpointGuid],
@@ -1793,8 +1843,9 @@ public partial class App : System.Windows.Application
     /// that could not start, a helper that crashed — ends in a sentence rather than an exception.
     /// Returns whether the helper reported success. One at a time: a second request while one is
     /// running (the button clicked during an automatic repair) would be a second UAC prompt for
-    /// the same job, so it is dropped.</summary>
-    private async Task<bool> RunEapoRepairHelperAsync(string flag, string busyText)
+    /// the same job, so it is dropped. <paramref name="endpointGuid"/> aims it at a named endpoint
+    /// (VB-Cable) instead of the default.</summary>
+    private async Task<bool> RunEapoRepairHelperAsync(string flag, string busyText, string? endpointGuid = null)
     {
         if (_eapoRepairRunning) return false;
         _eapoRepairRunning = true;
@@ -1802,7 +1853,9 @@ public partial class App : System.Windows.Application
         var token = EapoRepair.NewToken();
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo(ExePath, $"{flag} --repair-token {token}")
+            var arguments = $"{flag} --repair-token {token}"
+                + (endpointGuid is null ? "" : $" --endpoint {endpointGuid}");
+            var psi = new System.Diagnostics.ProcessStartInfo(ExePath, arguments)
             {
                 UseShellExecute = true,
                 Verb = "runas",
@@ -1824,12 +1877,17 @@ public partial class App : System.Windows.Application
                 _settingsWindow?.SetEapoRepairStatus(Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
                 return false;
             }
-            await proc.WaitForExitAsync();
+            int exitCode;
+            using (proc)
+            {
+                await proc.WaitForExitAsync();
+                exitCode = proc.ExitCode;
+            }
 
             // Matched on this run's token, so a verdict left behind by an earlier run can never be
             // shown as this one's outcome.
             var result = EapoRepair.ReadResult(token);
-            var message = result?.Message ?? NoVerdictMessage(proc.ExitCode);
+            var message = result?.Message ?? NoVerdictMessage(exitCode, endpointGuid);
             _settingsWindow?.SetEapoRepairStatus(message, busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
                 _tray?.ShowInfo(Loc.T("app.equalizer-apo-is-switched-on-for"));
@@ -1868,9 +1926,9 @@ public partial class App : System.Windows.Application
     /// helper writes it before its first registry write and removes it only after a clean revert,
     /// so a backup still on disk means settings may have been changed. Saying "nothing may have
     /// changed" in that case would understate it at the one moment the user needs to know.</summary>
-    private static string NoVerdictMessage(int exitCode)
+    private static string NoVerdictMessage(int exitCode, string? endpointGuid)
     {
-        var backup = DefaultEndpointBackup();
+        var backup = endpointGuid is null ? DefaultEndpointBackup() : EapoRepair.LoadBackupFor(endpointGuid);
         if (backup is null)
             return Loc.T("app.the-repair-stopped-before-it-reported", exitCode);
         return Loc.T("app.the-repair-stopped-before-it-reported-2", exitCode);
