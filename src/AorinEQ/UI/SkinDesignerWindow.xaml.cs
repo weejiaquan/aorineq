@@ -182,17 +182,27 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         RedoButton.IsEnabled = _history.CanRedo;
         SaveButton.IsEnabled = _issues.Count == 0;
         SaveButton.ToolTip = _issues.Count == 0 ? null : BlockedMessage();
-        TestButton.IsEnabled = _info.IsValid;
-        ShowNoticeButton.IsEnabled = _info.IsValid;
+        // Test and Show notice write a temp copy under a fresh name, so only the name cannot block them.
+        var testBlocked = TestBlockers().Count > 0;
+        TestButton.IsEnabled = _info.IsValid && !testBlocked;
+        TestButton.ToolTip = testBlocked ? TestBlockedMessage() : null;
+        ShowNoticeButton.IsEnabled = _info.IsValid && !testBlocked;
+        ShowNoticeButton.ToolTip = testBlocked ? TestBlockedMessage() : Loc.T("designer.show-notice.tooltip");
         ExportZipButton.IsEnabled = _loadedName is not null;
         ShareButton.IsEnabled = _loadedName is not null;
     }
 
-    private string BlockedMessage() => Loc.T("designer.save.blocked", IssueLines());
+    private string BlockedMessage() => Loc.T("designer.save.blocked", IssueLines(_issues));
+
+    /// <summary>The issues that stop a test copy being written: all but the name, which the copy
+    /// does not use (it is saved under a fresh one).</summary>
+    private List<SkinIssue> TestBlockers() => _issues.Where(i => i.Kind != SkinIssueKind.InvalidName).ToList();
+
+    private string TestBlockedMessage() => Loc.T("designer.test.blocked", IssueLines(TestBlockers()));
 
     /// <summary>The issues, one per line, each named by its layer.</summary>
-    private string IssueLines() =>
-        string.Join(Environment.NewLine, _issues.Select(i => LayerName(i.Layer) + ": " + i.Message));
+    private string IssueLines(IEnumerable<SkinIssue> issues) =>
+        string.Join(Environment.NewLine, issues.Select(i => LayerName(i.Layer) + ": " + i.Message));
 
     /// <summary>Writes the document with <see cref="SkinWriter"/>. Saving under the name of a
     /// DIFFERENT existing skin overwrites it, so that is confirmed first; re-saving the skin being
@@ -417,12 +427,12 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     /// <summary>Saves the document under a fresh name in %TEMP%\aorineq-skin-preview and loads it
     /// back - the test OSD shows exactly what a save would load. As for <see cref="Save"/>, the art
-    /// is looked at again first and a document with issues is not written: the writer is only
-    /// handed a clean one.</summary>
+    /// is looked at again first, and a document with issues is not written (SaveConfig would drop a
+    /// broken strip or notice). Its name alone cannot block it: the copy is saved under a fresh one.</summary>
     private SkinInfo SaveTestCopy()
     {
         OnDocumentChanged();
-        if (_issues.Count > 0) throw new InvalidOperationException(Loc.T("designer.test.blocked", IssueLines()));
+        if (TestBlockers().Count > 0) throw new InvalidOperationException(TestBlockedMessage());
         var doc = _history.Current;
         var root = Path.Combine(Path.GetTempPath(), "aorineq-skin-preview");
         _testFolder = SkinWriter.Save(root, Guid.NewGuid().ToString("N"), doc.EmptyPath, doc.FullPath,
@@ -459,7 +469,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     private void CleanupTestOsd()
     {
-        _testNotice?.Hide();
+        _testNotice?.HideNow();
         _testOsd?.Close();
         _testOsd = null;
         if (_testFolder is null) return;

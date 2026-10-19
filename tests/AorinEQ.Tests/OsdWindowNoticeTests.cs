@@ -421,30 +421,45 @@ public class OsdWindowNoticeTests
     }
 
     /// <summary>App owns its OSD's lifetime, so Close only hides it and the window can be shown
-    /// again; CloseForGood (the designer's notice preview, at its Dispose) really closes it.</summary>
+    /// again; CloseForGood (the designer's notice preview, at its Dispose) really closes it, its
+    /// hide timer stopped.</summary>
     [Fact]
     public void Close_only_hides_the_osd_and_close_for_good_really_closes_it()
     {
-        // Not With: its teardown hides the window, which a closed window refuses.
-        var r = _sta.Run(() =>
+        var r = With(osd =>
         {
-            Application.Current.Resources["AppFontFamily"] = new System.Windows.Media.FontFamily("Segoe UI");
-            var osd = new OsdWindow();
-            osd.ApplyConfig(Settings.Default);
             int closed = 0;
             osd.Closed += (_, _) => closed++;
             osd.ShowNotice("Speakers", light: false);
             osd.Close();
             var afterClose = (osd.IsVisible, Closed: closed);
             osd.ShowNotice("Speakers", light: false);
-            bool reshown = osd.IsVisible;
+            var reshown = (osd.IsVisible, Timer: osd.HideTimerRunning);
             osd.CloseForGood();
-            return (afterClose, reshown, AfterCloseForGood: (osd.IsVisible, Closed: closed));
+            return (afterClose, reshown, AfterCloseForGood: (osd.IsVisible, Closed: closed, Timer: osd.HideTimerRunning));
         });
-        _out.WriteLine($"expected: Close hides without closing, the notice shows again, CloseForGood closes once; actual {r}");
+        _out.WriteLine("expected: Close hides without closing; the notice shows again with its hide timer running; " +
+                       $"CloseForGood closes once with the timer stopped; actual {r}");
         Assert.Equal((false, 0), r.afterClose);
-        Assert.True(r.reshown);
-        Assert.Equal((false, 1), r.AfterCloseForGood);
+        Assert.Equal((true, true), r.reshown);
+        Assert.Equal((false, 1, false), r.AfterCloseForGood);
+    }
+
+    /// <summary>HideNow takes a shown notice down at once and stops its hide timer, so nothing
+    /// ticks for a window that is already hidden (the designer's notice preview between uses).</summary>
+    [Fact]
+    public void Hide_now_hides_the_notice_and_stops_its_timer()
+    {
+        var r = With(osd =>
+        {
+            osd.ShowNotice("Speakers", light: false);
+            var shown = (osd.IsVisible, Timer: osd.HideTimerRunning);
+            osd.HideNow();
+            return (shown, Hidden: (osd.IsVisible, Timer: osd.HideTimerRunning));
+        });
+        _out.WriteLine($"expected shown with the timer running, then hidden with it stopped; actual {r}");
+        Assert.Equal((true, true), r.shown);
+        Assert.Equal((false, false), r.Hidden);
     }
 }
 

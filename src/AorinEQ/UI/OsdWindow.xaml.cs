@@ -427,10 +427,20 @@ public partial class OsdWindow : Window
     internal void CloseForGood()
     {
         _closingForGood = true;
-        _hideTimer.Stop();
-        CancelFade();
+        HideNow();
         Close();
     }
+
+    /// <summary>Hides at once - no fade - with the hide timer stopped, so nothing ticks for a
+    /// window already down. The Skin Designer's notice preview, between uses.</summary>
+    internal void HideNow()
+    {
+        _hideTimer.Stop();
+        CancelFade();
+        Hide();
+    }
+
+    internal bool HideTimerRunning => _hideTimer.IsEnabled;
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {

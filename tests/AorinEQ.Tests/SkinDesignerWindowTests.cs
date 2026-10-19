@@ -1973,37 +1973,126 @@ public class SkinDesignerWindowTests : IDisposable
     }
 
     /// <summary>Test on desktop and Show notice write the draft through the writer, which is only
-    /// handed a clean document: with an issue they write nothing, show nothing and say why.</summary>
+    /// handed a clean document: SaveConfig would drop a broken strip. With such an issue both
+    /// buttons are disabled and say why, as Save is, and a call anyway writes nothing, shows
+    /// nothing and puts the reason on the status line.</summary>
     [Fact]
     public void Test_on_desktop_and_show_notice_refuse_a_document_with_issues()
     {
-        MakeSkin("issues-test", "{}");
+        MakeSkin("issues-test", "{}", strip: true);
         var r = WithDesigner(d =>
         {
             d.LoadSkin("issues-test");
-            d.Commit(SkinEdits.SetName(d.Document, ""));
+            d.Commit(SkinEdits.SetFillRange(d.Document, SkinLayer.AirPlay, 150, 50, new ImageProbe()));
             var issues = d.Issues.ToArray();
-            var enabled = (d.TestButton.IsEnabled, d.ShowNoticeButton.IsEnabled);
+            var buttons = (Valid: d.Info.IsValid, Test: d.TestButton.IsEnabled, Notice: d.ShowNoticeButton.IsEnabled,
+                TestTip: d.TestButton.ToolTip as string, NoticeTip: d.ShowNoticeButton.ToolTip as string);
             bool tested = d.TestOnDesktop();
             var afterTest = (d.TestOsd, d.TestFolder, d.StatusText.Text);
             bool noticed = d.ShowTestNotice();
-            return (issues, enabled, tested, afterTest, noticed, Notice: d.TestNotice, d.TestFolder, d.StatusText.Text);
+            return (issues, buttons, tested, afterTest, noticed, Notice: d.TestNotice, d.TestFolder, d.StatusText.Text);
         });
-        var message = r.issues.Single().Message;
-        _out.WriteLine($"expected one issue, both buttons enabled (the skin draws), both refused with no window or folder and '{message}' in the status");
-        _out.WriteLine($"actual  : issues [{string.Join("; ", r.issues.AsEnumerable())}] enabled {r.enabled}; test {r.tested} {r.afterTest}; " +
+        var issue = r.issues.Single();
+        var blocked = Loc.T("designer.test.blocked", "");
+        _out.WriteLine($"expected one AirPlay FillRangeInverted issue; the skin draws but both buttons are disabled with '{issue.Message}' " +
+                       "in their tooltips; both calls refused with no window or folder and the reason in the status");
+        _out.WriteLine($"actual  : issues [{string.Join("; ", r.issues.AsEnumerable())}] buttons {r.buttons}; test {r.tested} {r.afterTest}; " +
                        $"notice {r.noticed} window {r.Notice?.ToString() ?? "(none)"} folder {r.TestFolder ?? "(none)"} status '{r.Text}'");
-        Assert.Equal(SkinIssueKind.InvalidName, r.issues.Single().Kind);
-        Assert.Equal((true, true), r.enabled);
+        Assert.Equal((SkinLayer.AirPlay, SkinIssueKind.FillRangeInverted), (issue.Layer, issue.Kind));
+        Assert.Equal((true, false, false), (r.buttons.Valid, r.buttons.Test, r.buttons.Notice));
+        foreach (var tip in new[] { r.buttons.TestTip, r.buttons.NoticeTip })
+        {
+            Assert.StartsWith(blocked, tip);
+            Assert.Contains(issue.Message, tip);
+        }
         Assert.False(r.tested);
         Assert.Null(r.afterTest.TestOsd);
         Assert.Null(r.afterTest.TestFolder);
-        Assert.Contains(message, r.afterTest.Text);
-        Assert.StartsWith(Loc.T("designer.test.blocked", ""), r.afterTest.Text);
+        Assert.StartsWith(blocked, r.afterTest.Text);
+        Assert.Contains(issue.Message, r.afterTest.Text);
         Assert.False(r.noticed);
         Assert.Null(r.Notice);
         Assert.Null(r.TestFolder);
-        Assert.Contains(message, r.Text);
-        Assert.StartsWith(Loc.T("designer.test.blocked", ""), r.Text);
+        Assert.StartsWith(blocked, r.Text);
+        Assert.Contains(issue.Message, r.Text);
+    }
+
+    /// <summary>The test copy is saved under a fresh name, so a name that cannot be saved - the
+    /// name box cleared while typing - blocks Save but not Test on desktop or Show notice.</summary>
+    [Fact]
+    public void A_bad_name_alone_still_tests_and_shows_the_notice()
+    {
+        MakeSkin("name-test", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("name-test");
+            d.Commit(SkinEdits.SetName(d.Document, ""));
+            var issues = d.Issues.ToArray();
+            var buttons = (Save: d.SaveButton.IsEnabled, Test: d.TestButton.IsEnabled, Notice: d.ShowNoticeButton.IsEnabled,
+                TestTip: d.TestButton.ToolTip as string, NoticeTip: d.ShowNoticeButton.ToolTip as string);
+            bool tested = d.TestOnDesktop();
+            bool osdShown = d.TestOsd?.IsVisible == true;
+            bool noticed = d.ShowTestNotice();
+            return (issues, buttons, tested, osdShown, noticed, NoticeShown: d.TestNotice?.IsVisible == true, d.StatusText.Text);
+        });
+        _out.WriteLine($"expected one InvalidName issue; Save disabled, Test and Show notice enabled with no blocked tooltip " +
+                       $"('{Loc.T("designer.show-notice.tooltip")}' on Show notice); both shown; status '{Loc.T("designer.status.showing-notice")}'");
+        _out.WriteLine($"actual  : issues [{string.Join("; ", r.issues.AsEnumerable())}] buttons {r.buttons}; test {r.tested} shown {r.osdShown}; " +
+                       $"notice {r.noticed} shown {r.NoticeShown}; status '{r.Text}'");
+        Assert.Equal(SkinIssueKind.InvalidName, r.issues.Single().Kind);
+        Assert.Equal((false, true, true), (r.buttons.Save, r.buttons.Test, r.buttons.Notice));
+        Assert.Null(r.buttons.TestTip);
+        Assert.Equal(Loc.T("designer.show-notice.tooltip"), r.buttons.NoticeTip);
+        Assert.True(r.tested && r.osdShown, "Test on desktop was blocked by the name alone");
+        Assert.True(r.noticed && r.NoticeShown, "Show notice was blocked by the name alone");
+        Assert.Equal(Loc.T("designer.status.showing-notice"), r.Text);
+    }
+
+    /// <summary>The notice preview is hidden - its hide timer stopped - when Test on desktop
+    /// takes over and when the designer is closed (which only hides it), not left on the desktop.</summary>
+    [Fact]
+    public void Test_on_desktop_and_closing_the_designer_hide_the_test_notice()
+    {
+        MakeSkin("notice-hide", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("notice-hide");
+            d.ShowTestNotice();
+            var notice = d.TestNotice!;
+            var shown = (notice.IsVisible, Timer: notice.HideTimerRunning);
+            d.TestOnDesktop();
+            var afterTest = (notice.IsVisible, Timer: notice.HideTimerRunning, Osd: d.TestOsd?.IsVisible == true);
+            d.ShowTestNotice();
+            var reshown = (notice.IsVisible, Same: ReferenceEquals(notice, d.TestNotice));
+            d.Close();
+            var afterClose = (notice.IsVisible, Timer: notice.HideTimerRunning, Designer: d.IsVisible);
+            return (shown, afterTest, reshown, afterClose);
+        });
+        _out.WriteLine("expected: notice shown with its timer running; Test on desktop hides it, timer stopped, the test OSD up; " +
+                       $"shown again in the same window; closing the designer hides it, timer stopped, designer hidden; actual {r}");
+        Assert.Equal((true, true), r.shown);
+        Assert.Equal((false, false, true), r.afterTest);
+        Assert.Equal((true, true), r.reshown);
+        Assert.Equal((false, false, false), r.afterClose);
+    }
+
+    /// <summary>Until the skin draws (a new document, no art yet) there is nothing to test:
+    /// both buttons are disabled and Show notice opens no window.</summary>
+    [Fact]
+    public void Show_notice_is_disabled_until_the_skin_draws()
+    {
+        MakeSkin("draws", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.NewDocument();
+            var empty = (Valid: d.Info.IsValid, Test: d.TestButton.IsEnabled, Notice: d.ShowNoticeButton.IsEnabled,
+                Shown: d.ShowTestNotice(), Window: d.TestNotice is not null);
+            d.LoadSkin("draws");
+            var loaded = (Valid: d.Info.IsValid, Test: d.TestButton.IsEnabled, Notice: d.ShowNoticeButton.IsEnabled);
+            return (empty, loaded);
+        });
+        _out.WriteLine($"expected: new document invalid, both disabled, no notice shown or window made; loaded skin valid, both enabled; actual {r}");
+        Assert.Equal((false, false, false, false, false), r.empty);
+        Assert.Equal((true, true, true), r.loaded);
     }
 }
