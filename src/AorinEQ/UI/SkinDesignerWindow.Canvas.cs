@@ -6,7 +6,6 @@ using System.Windows.Media;
 using AorinEQ.Core;
 // WPF and WinForms are both referenced by this project, so the names below are
 // ambiguous without an explicit alias. Every one of these is the WPF type.
-using ComboBox = System.Windows.Controls.ComboBox;
 using Cursors = System.Windows.Input.Cursors;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using Point = System.Windows.Point;
@@ -408,7 +407,7 @@ public partial class SkinDesignerWindow
     /// <summary>Who a key is for when <paramref name="focused"/> has the keyboard.</summary>
     internal KeyboardTarget TargetOf(object? focused) => focused switch
     {
-        TextBoxBase or ComboBox { IsEditable: true } => KeyboardTarget.Text,
+        TextBoxBase => KeyboardTarget.Text, // an editable combo box's own text box included
         null => KeyboardTarget.Canvas,
         _ when ReferenceEquals(focused, Overlay) || ReferenceEquals(focused, this) => KeyboardTarget.Canvas,
         _ => KeyboardTarget.Other,
@@ -449,6 +448,7 @@ public partial class SkinDesignerWindow
 
         if (key == Key.Escape && target != KeyboardTarget.Text)
         {
+            Overlay.FinishDrag(); // as for Undo: the drag ends as one step, not carried on deselected
             Select(SkinLayer.SkinInfo);
             return true;
         }

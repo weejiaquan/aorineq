@@ -1207,6 +1207,7 @@ public class SkinDesignerWindowTests : IDisposable
             d.HandleShortcut(Key.Delete, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
             var mutedAfterDelete = d.Document.MutedPath;
             d.HandleShortcut(Key.Escape, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            d.SetZoom(3); // off 100 %, so Ctrl+1 has something to do
             d.HandleShortcut(Key.D1, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Text);
             bool saved = d.HandleShortcut(Key.S, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Text);
             return (nudged, typedArrow, undone, redone, undoInText, mutedAfterDelete, d.Selection, d.Zoom, saved, Dirty: d.History.IsDirty);
@@ -1458,5 +1459,144 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.True(r.near.Right > 0, "text past the bar's right edge got no room");
         Assert.True(r.far.Right > r.near.Right, "the handle room did not grow as the canvas zoomed out");
         Assert.Equal(r.Expected, r.far.Right);
+    }
+
+    /// <summary>A key pressed on <paramref name="target"/> the way WPF's input manager delivers it:
+    /// PreviewKeyDown tunnels from the window down to it, then - unless that was handled - KeyDown
+    /// bubbles back up. Modifiers are the real keyboard's (none held). Whether the key was handled.</summary>
+    private static bool Press(UIElement target, Key key)
+    {
+        var source = PresentationSource.FromVisual(target)!;
+        var preview = new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        target.RaiseEvent(preview);
+        if (preview.Handled) return true;
+        var down = new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key) { RoutedEvent = Keyboard.KeyDownEvent };
+        target.RaiseEvent(down);
+        return down.Handled;
+    }
+
+    /// <summary>Gives <paramref name="element"/> the keyboard focus for real, activating the window
+    /// first; false (and why) when the desktop will not let the test window have it.</summary>
+    private bool TakeKeyboardFocus(SkinDesignerWindow d, UIElement element)
+    {
+        d.Activate();
+        StaWpf.Pump();
+        Keyboard.Focus(element);
+        if (element.IsKeyboardFocused) return true;
+        _out.WriteLine($"keyboard focus refused: window active {d.IsActive}, focused {Keyboard.FocusedElement?.GetType().Name ?? "(none)"}");
+        return false;
+    }
+
+    /// <summary>A clicked toolbar or zoom button does not keep the keyboard: the canvas keeps it, so
+    /// Space held for a pan is not a second click of the button, and the arrows still nudge.</summary>
+    [Fact]
+    public void Clicked_buttons_leave_the_keyboard_with_the_canvas()
+    {
+        MakeSkin("buttons", """{"scale":2,"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("buttons");
+            d.Select(SkinLayer.PercentText);
+            var buttons = new ButtonBase[] { d.NewButton, d.ImportZipButton, d.ExportZipButton, d.UndoButton, d.RedoButton,
+                d.ShareButton, d.TestButton, d.SaveButton, d.ZoomOutButton, d.ZoomInButton, d.ZoomFitButton, d.ZoomActualButton };
+            var focusable = buttons.Where(b => b.Focusable).Select(b => b.Name).ToList();
+            bool focused = TakeKeyboardFocus(d, d.Overlay);
+            d.ZoomInButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            double zoomed = d.Zoom;
+            bool buttonTookFocus = d.ZoomInButton.Focus();
+            var after = (OnButton: d.ZoomInButton.IsKeyboardFocused, OnCanvas: d.Overlay.IsKeyboardFocused,
+                Target: d.TargetOf(Keyboard.FocusedElement));
+            bool nudgeTaken = Press(d.Overlay, Key.Right);
+            int x = d.Document.Config.Text!.X;
+            d.UpdateLayout();
+            bool panned = d.BeginPan(MouseButton.Left, spaceHeld: true, new Point(100, 100));
+            d.CanvasScroll.ReleaseMouseCapture();
+            return (focusable, focused, zoomed, buttonTookFocus, after, nudgeTaken, x, panned);
+        });
+        _out.WriteLine($"expected no focusable buttons, the canvas focused before and after the click, zoom 1.5, nudge to 11, a pan; actual " +
+                       $"focusable [{string.Join(", ", r.focusable)}], {r.focused}, {r.zoomed}, button took focus {r.buttonTookFocus}, " +
+                       $"{r.after}, nudge taken {r.nudgeTaken}, x {r.x}, panned {r.panned}");
+        Assert.Empty(r.focusable);
+        Assert.True(r.focused, "the test window could not take the keyboard focus (see output)");
+        Assert.Equal(1.5, r.zoomed);
+        Assert.False(r.buttonTookFocus);
+        Assert.Equal((false, true, SkinDesignerWindow.KeyboardTarget.Canvas), r.after);
+        Assert.True(r.nudgeTaken);
+        Assert.Equal(11, r.x);
+        Assert.True(r.panned);
+    }
+
+    /// <summary>Esc during a canvas drag ends the drag before deselecting: one undo step, and the
+    /// pointer moving on edits nothing.</summary>
+    [Fact]
+    public void Esc_during_a_canvas_drag_ends_it_before_deselecting()
+    {
+        MakeSkin("esc-drag", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("esc-drag");
+            var start = Centre(d, SkinLayer.PercentText);
+            d.Overlay.BeginDragAt(() => start);
+            d.Overlay.DragTo(start + new Vector(10, 0), snap: false);
+            bool taken = d.HandleShortcut(Key.Escape, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var afterEsc = (d.Document.Config.Text!.X, d.Selection, d.Overlay.IsMouseCaptured);
+            d.Overlay.DragTo(start + new Vector(20, 0), snap: false); // the mouse moving on
+            int afterMove = d.Document.Config.Text!.X;
+            d.History.Undo();
+            return (taken, afterEsc, afterMove, Undone: d.Document.Config.Text!.X, d.History.CanUndo);
+        });
+        _out.WriteLine($"expected taken, (50, SkinInfo, no capture), 50 after the move, one undo back to 40; actual {r}");
+        Assert.True(r.taken);
+        Assert.Equal((50, SkinLayer.SkinInfo, false), r.afterEsc);
+        Assert.Equal(50, r.afterMove);
+        Assert.Equal(40, r.Undone);
+        Assert.False(r.CanUndo);
+    }
+
+    /// <summary>Keys through the real window: a number box's Up steps the box and not the canvas,
+    /// Esc during a scrub cancels the scrub (the selection stays), a text box keeps its arrows and
+    /// Esc, and an arrow with the canvas focused nudges. (Ctrl+Z in a text box cannot be raised
+    /// here: modifiers are read from the real keyboard, which a raised event cannot hold down.)</summary>
+    [Fact]
+    public void Keys_reach_the_field_that_has_them_and_the_canvas_otherwise()
+    {
+        MakeSkin("route", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("route");
+            d.Select(SkinLayer.PercentText);
+            StaWpf.Pump();
+            var field = Number(d, "Y");
+            bool boxFocused = TakeKeyboardFocus(d, field.Box);
+            bool upTaken = Press(field.Box, Key.Up);
+            var afterUp = (Box: field.Box.Text, Y: d.Document.Config.Text!.Y, X: d.Document.Config.Text.X);
+            field = Number(d, "Y"); // a commit may have rebuilt the panel
+            bool labelFocused = TakeKeyboardFocus(d, field.Label);
+            bool scrubbing = field.BeginScrub(0);
+            field.ScrubTo(10 * NumberField.ScrubPixelsPerStep);
+            int scrubbed = d.Document.Config.Text!.Y;
+            bool escTaken = Press(field.Label, Key.Escape);
+            var afterEsc = (Y: d.Document.Config.Text!.Y, d.Selection, Captured: field.Label.IsMouseCaptured);
+            bool textFocused = TakeKeyboardFocus(d, d.PreviewDevice);
+            Press(d.PreviewDevice, Key.Left);
+            Press(d.PreviewDevice, Key.Escape);
+            var inText = (X: d.Document.Config.Text!.X, d.Selection, d.History.CanUndo);
+            bool canvasFocused = TakeKeyboardFocus(d, d.Overlay);
+            bool rightTaken = Press(d.Overlay, Key.Right);
+            return (boxFocused, upTaken, afterUp, labelFocused, scrubbing, scrubbed, escTaken, afterEsc,
+                textFocused, inText, canvasFocused, rightTaken, NudgedX: d.Document.Config.Text!.X);
+        });
+        _out.WriteLine($"expected box focused, Up taken, box/Y 6 with x 10; label focused, scrub to 16, Esc taken, back to 6 with " +
+                       $"PercentText still selected; in a text box Left and Esc are the box's (x 10, PercentText); canvas focused, Right nudges x to 11; actual {r}");
+        Assert.True(r.boxFocused && r.labelFocused && r.textFocused && r.canvasFocused, "the test window could not take the keyboard focus (see output)");
+        Assert.True(r.upTaken);
+        Assert.Equal(("6", 6, 10), r.afterUp);      // the field stepped; the canvas did not nudge the text
+        Assert.True(r.scrubbing);
+        Assert.Equal(16, r.scrubbed);
+        Assert.True(r.escTaken);
+        Assert.Equal((6, SkinLayer.PercentText, false), r.afterEsc);
+        Assert.Equal((10, SkinLayer.PercentText), (r.inText.X, r.inText.Selection));
+        Assert.True(r.rightTaken);
+        Assert.Equal(11, r.NudgedX);
     }
 }

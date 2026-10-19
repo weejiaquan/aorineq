@@ -22,22 +22,24 @@
                      Icon="{ui:ImageIcon '/AorinEQ;component/AorinEQ.ico'}" />
 
         <!-- Top bar: which skin, the file actions, history - and, on the right, what uses the skin. -->
+        <!-- The toolbar and zoom buttons never take the focus: a clicked button keeping it would take the
+             canvas's keys - Space (held to pan) would click it again, and the arrows would stop nudging. -->
         <DockPanel Grid.Row="1" Margin="12,0,12,8" LastChildFill="False">
             <TextBlock Text="{loc:T designer.text.skin}" VerticalAlignment="Center" Margin="0,0,6,0" />
             <ComboBox x:Name="SkinSelect" Width="220" SelectionChanged="OnSkinSelected" />
-            <Button x:Name="NewButton" Content="{loc:T designer.new.label}" Padding="10,4" Margin="12,0,0,0" Click="OnNew" />
-            <Button x:Name="ImportZipButton" Content="{loc:T designer.import-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnImportZip" />
-            <Button x:Name="ExportZipButton" Content="{loc:T designer.export-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnExportZip" />
-            <ui:Button x:Name="UndoButton" Icon="{ui:SymbolIcon ArrowUndo24}" Margin="16,0,0,0" Click="OnUndo"
+            <Button x:Name="NewButton" Focusable="False" Content="{loc:T designer.new.label}" Padding="10,4" Margin="12,0,0,0" Click="OnNew" />
+            <Button x:Name="ImportZipButton" Focusable="False" Content="{loc:T designer.import-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnImportZip" />
+            <Button x:Name="ExportZipButton" Focusable="False" Content="{loc:T designer.export-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnExportZip" />
+            <ui:Button x:Name="UndoButton" Focusable="False" Icon="{ui:SymbolIcon ArrowUndo24}" Margin="16,0,0,0" Click="OnUndo"
                        ToolTip="{loc:T designer.undo.tooltip}" ToolTipService.ShowOnDisabled="True" />
-            <ui:Button x:Name="RedoButton" Icon="{ui:SymbolIcon ArrowRedo24}" Margin="6,0,0,0" Click="OnRedo"
+            <ui:Button x:Name="RedoButton" Focusable="False" Icon="{ui:SymbolIcon ArrowRedo24}" Margin="6,0,0,0" Click="OnRedo"
                        ToolTip="{loc:T designer.redo.tooltip}" ToolTipService.ShowOnDisabled="True" />
             <StackPanel x:Name="SkinActions" DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button x:Name="ShareButton" Content="{loc:T designer.share.label}" Padding="10,4" Click="OnShare"
+                <Button x:Name="ShareButton" Focusable="False" Content="{loc:T designer.share.label}" Padding="10,4" Click="OnShare"
                         ToolTip="{loc:T designer.share.tooltip}" />
-                <Button x:Name="TestButton" Content="{loc:T designer.test.label}" Padding="10,4" Margin="6,0,0,0"
+                <Button x:Name="TestButton" Focusable="False" Content="{loc:T designer.test.label}" Padding="10,4" Margin="6,0,0,0"
                         Click="OnTestOnDesktop" />
-                <ui:Button x:Name="SaveButton" Content="{loc:T designer.save.label}" Appearance="Primary" Padding="16,4"
+                <ui:Button x:Name="SaveButton" Focusable="False" Content="{loc:T designer.save.label}" Appearance="Primary" Padding="16,4"
                            Margin="6,0,0,0" Click="OnSave" ToolTipService.ShowOnDisabled="True" />
             </StackPanel>
         </DockPanel>
@@ -113,14 +115,14 @@
 
                 <!-- View state only: none of this is part of the skin or of its history. -->
                 <WrapPanel x:Name="PreviewStrip" Grid.Row="1" Margin="0,8,0,0">
-                    <Button x:Name="ZoomOutButton" Content="-" Width="28" Padding="0,4" Click="OnZoomOut"
+                    <Button x:Name="ZoomOutButton" Focusable="False" Content="-" Width="28" Padding="0,4" Click="OnZoomOut"
                             ToolTip="{loc:T designer.zoom.out.tooltip}" />
                     <TextBlock x:Name="ZoomText" Width="48" TextAlignment="Center" VerticalAlignment="Center" />
-                    <Button x:Name="ZoomInButton" Content="+" Width="28" Padding="0,4" Click="OnZoomIn"
+                    <Button x:Name="ZoomInButton" Focusable="False" Content="+" Width="28" Padding="0,4" Click="OnZoomIn"
                             ToolTip="{loc:T designer.zoom.in.tooltip}" />
-                    <Button Content="{loc:T designer.zoom.fit.label}" Padding="10,4" Margin="6,0,0,0" Click="OnZoomFit"
+                    <Button x:Name="ZoomFitButton" Focusable="False" Content="{loc:T designer.zoom.fit.label}" Padding="10,4" Margin="6,0,0,0" Click="OnZoomFit"
                             ToolTip="{loc:T designer.zoom.fit.tooltip}" />
-                    <Button Content="100%" Padding="10,4" Margin="6,0,24,0" Click="OnZoomActual"
+                    <Button x:Name="ZoomActualButton" Focusable="False" Content="100%" Padding="10,4" Margin="6,0,24,0" Click="OnZoomActual"
                             ToolTip="{loc:T designer.zoom.actual.tooltip}" />
                     <TextBlock Text="{loc:T designer.text.fill-preview}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <Slider x:Name="PreviewFill" Width="140" Minimum="0" Maximum="100" Value="62"
