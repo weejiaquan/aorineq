@@ -242,7 +242,9 @@ static skin with no number.
     "color": "#FFF47F9E",        // #AARRGGBB or #RRGGBB (default opaque white)
     "fontFamily": "Segoe UI",    // any installed font
     "fontSize": 80,              // clamped 4–200 (default 14)
-    "bold": false,
+    "weight": 700,               // OpenType weight, rounded to 100s, clamped 100–900 (default 600)
+    "italic": false,
+    "letterSpacing": 2,          // extra px between characters, scales with the skin; −20–100 (default 0)
     "outlineColor": "#FF000000", // omit for no outline
     "outlineWidth": 2,           // clamped 0–20
     "shadowColor": "#80000000",  // omit for no shadow
@@ -265,7 +267,7 @@ static skin with no number.
   "notice": {
     "background": "#F2202020",   // plate colour (no notice.png)
     "cornerRadius": 12,
-    "text": { "color": "#FFFFFFFF", "fontSize": 14, "bold": false },
+    "text": { "color": "#FFFFFFFF", "fontSize": 14, "weight": 600 },
     "glyph": { "show": true, "size": 18 }
   },
 
@@ -282,8 +284,15 @@ static skin with no number.
 A `percentText` with `"show": false` hides the number but keeps its position and styling, so
 turning it back on is not starting over. `nameText` and `percentText` in the `airplay` block take
 every field the volume bar's `percentText` takes — outline and shadow included — and are drawn by
-the same renderer; an unbold label is drawn at normal weight, as it always has been (the number's
-own unbold weight stays semibold).
+the same renderer; their default `weight` is 400 (normal), as the labels have always been drawn,
+where the number's is 600 (semibold).
+
+`weight` replaces the older `"bold"`: a skin that says `"bold": true` and no `weight` loads as 700,
+and `"bold": false` (or neither) as the text's default; when both are there, `weight` wins. The
+Skin Designer writes `weight`, only when it differs from the default, and never `bold`. Letter
+spacing goes between characters (a character with combining marks, or an emoji, stays whole),
+never after the last, so alignment still measures the text as drawn. The gallery preview draws
+weights 600 and up bold and lighter ones regular — the most its renderer can say.
 
 ### The AirPlay strip
 
@@ -348,7 +357,11 @@ Every field is optional; field names are case-insensitive.
 | `text.color` | white | unparseable falls back to white |
 | `text.fontFamily` | Segoe UI | left at the default, it inherits AorinEQ's own font chain, so CJK device names still draw |
 | `text.fontSize` | 14 | clamped 4–200 |
-| `text.bold` | false | the default text is SemiBold; `true` makes it Bold |
+| `text.weight` | 600 | OpenType weight, rounded to 100s and clamped 100–900; the legacy `text.bold: true` reads as 700 |
+| `text.italic` | false | |
+| `text.letterSpacing` | 0 | extra pixels between characters, scaled with the art; clamped −20–100 |
+| `text.outlineColor`, `text.outlineWidth` | none, 0 | as `percentText`'s: omit the colour for no outline; width clamped 0–20 |
+| `text.shadowColor`, `text.shadowBlur`, `text.shadowDepth` | none, 4, 2 | as `percentText`'s: omit the colour for no shadow; blur and depth clamped 0–50 |
 | `text.align` | `left` | art only; `left`, `center` or `right`: aligns the name inside the `textWidth` box that starts at `text.x` |
 | `text.x`, `text.y` | 48, centred | art only; image pixels, clamped into the art |
 | `textWidth` | to the art's right edge less 12 | art only; bounds the line so a long name cannot run off the art, clamped to what is left right of `text.x` |
@@ -358,8 +371,9 @@ Every field is optional; field names are case-insensitive.
 | `glyph.x`, `glyph.y` | 16, centred | art only; image pixels, clamped into the art |
 | `frames` | 1 | art only; sprite-sheet frames in `notice.png`, so the height must divide evenly |
 
-The notice text has **no outline and no shadow** — those belong to `percentText` and the AirPlay
-labels, and are not read here. Put contrast in the artwork.
+The notice text is drawn by the same renderer as `percentText` and the AirPlay labels, so its
+outline, shadow, weight, italic and letter spacing look the same as theirs; a name too long for
+its box still ends in an ellipsis.
 
 A skin with neither a `notice` block nor `notice.*` art gets the dark pill. A `notice` block with
 no art is simply a plate. Art that exists but is not a valid image, or whose height does not match
@@ -415,7 +429,10 @@ resize the side panels; the designer remembers their widths.
   icon. Layers not in use are dimmed, and a layer with a problem carries ⚠ — hover it for the
   reason. A skin without a strip offers **Add AirPlay strip…**, which asks for its empty and full
   art.
-- **Properties** shows only what the selected layer has. Number boxes scrub when you drag their
+- **Properties** shows only what the selected layer has. Every text — the percent number, the
+  AirPlay labels and the notice name — has the same type controls: font, size, weight (Thin 100
+  to Black 900), italic, letter spacing and colour, and its own Outline and Shadow sections.
+  Number boxes scrub when you drag their
   label, step with ↑/↓ (Shift: 10) and pull out-of-range values into range; anything that is not
   a number turns the box red and puts the last value back. Colours open a picker with opacity, hex
   (`#RGB`, `#RRGGBB`, `#AARRGGBB`), your twelve recent colours — shared with the HUD widget menu —
