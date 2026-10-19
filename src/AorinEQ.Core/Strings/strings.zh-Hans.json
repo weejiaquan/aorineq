@@ -433,6 +433,7 @@
   "app.details-were-written-to": "详细信息已写入：\n{0}",
   "app.not-elevated-volume-keys-won-t": "未以管理员权限运行——在管理员权限的游戏里音量键不会生效。",
   "app.airplay-not-found": "在你的网络上找不到“{0}”。请确认它已开启并连接到同一个 Wi-Fi，然后再试一次“重新扫描”。",
+  "app.vbcable.ready": "VB-Cable 已就绪——要用它来播 AirPlay 吗？",
   "app.updated-to-aorineq": "已更新到 AorinEQ {0}。",
   "app.aorineq-appears-to-be-running-under": "本次会话中，AorinEQ 似乎在另一个账户或安全上下文下运行。",
   "app.restart-aorineq-elevated-now": "现在就以管理员权限重启 AorinEQ 吗？",

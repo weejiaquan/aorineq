@@ -211,4 +211,18 @@ public static class VirtualCableInstaller
         int counted = starts + 1;
         return counted >= PendingStartLimit ? new(false, 0, false) : new(true, counted, false);
     }
+
+    /// <summary>One app start's step, as the settings to keep: <see cref="NextPendingState"/>
+    /// applied to <paramref name="settings"/>' pending fields, nothing else touched, and whether to
+    /// announce the cable. With nothing pending the result EQUALS the input (records compare by
+    /// value), so the caller can tell there is nothing to save.</summary>
+    public static (Settings Settings, bool AnnounceReady) ResolvePendingAtStart(Settings settings, bool cableFound)
+    {
+        var next = NextPendingState(settings.VirtualCablePendingReboot, settings.VirtualCablePendingStarts, cableFound);
+        return (settings with
+        {
+            VirtualCablePendingReboot = next.Pending,
+            VirtualCablePendingStarts = next.Starts,
+        }, next.AnnounceReady);
+    }
 }

@@ -441,6 +441,47 @@ public class VirtualCableInstallerTests
         Assert.Equal(new VirtualCablePending(expectPending, expectStarts, expectAnnounce), next);
     }
 
+    [Theory]
+    [InlineData(false, 0, false, false, 0, false)] // nothing pending
+    [InlineData(false, 0, true, false, 0, false)]  // a cable that was always there is not news
+    [InlineData(true, 0, true, false, 0, true)]    // first start after the reboot: announce
+    [InlineData(true, 1, false, true, 2, false)]   // still waiting, one more start counted
+    [InlineData(true, 2, false, false, 0, false)]  // third start without it: give up, card shows again
+    public void Each_start_moves_a_pending_install_on_and_touches_nothing_else(
+        bool pending, int starts, bool found, bool expectPending, int expectStarts, bool expectAnnounce)
+    {
+        var before = Settings.Default with
+        {
+            Percent = 37,
+            VirtualCablePendingReboot = pending,
+            VirtualCablePendingStarts = starts,
+            AirPlay = AirPlaySetting.Default with { AirPlayOnly = true },
+        };
+        var (after, announce) = VirtualCableInstaller.ResolvePendingAtStart(before, found);
+        _out.WriteLine($"pending={pending} starts={starts} found={found} -> pending={after.VirtualCablePendingReboot} "
+            + $"starts={after.VirtualCablePendingStarts} announce={announce}");
+        Assert.Equal(expectPending, after.VirtualCablePendingReboot);
+        Assert.Equal(expectStarts, after.VirtualCablePendingStarts);
+        Assert.Equal(expectAnnounce, announce);
+        Assert.Equal(before with
+        {
+            VirtualCablePendingReboot = expectPending,
+            VirtualCablePendingStarts = expectStarts,
+        }, after);
+    }
+
+    [Fact]
+    public void A_start_with_nothing_pending_hands_back_settings_equal_to_the_ones_it_was_given()
+    {
+        // App compares and writes nothing in this case — the common one, every start for everyone
+        // who never installed VB-Cable through AorinEQ.
+        var settings = Settings.Default with { Percent = 37 };
+        var (after, announce) = VirtualCableInstaller.ResolvePendingAtStart(settings, cableFound: true);
+        _out.WriteLine($"nothing pending -> equal={after == settings} announce={announce}");
+        Assert.Equal(settings, after);
+        Assert.False(announce);
+    }
+
     [Fact]
     public void Work_folders_are_unique_under_temp_and_deleting_one_removes_everything_in_it()
     {

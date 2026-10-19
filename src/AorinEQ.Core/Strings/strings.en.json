@@ -433,6 +433,7 @@
   "app.details-were-written-to": "Details were written to:\n{0}",
   "app.not-elevated-volume-keys-won-t": "Not elevated — volume keys won't work in elevated games.",
   "app.airplay-not-found": "“{0}” wasn’t found on your network. Check it is switched on and on the same Wi-Fi, then try Rescan.",
+  "app.vbcable.ready": "VB-Cable is ready — use it for AirPlay?",
   "app.updated-to-aorineq": "Updated to AorinEQ {0}.",
   "app.aorineq-appears-to-be-running-under": "AorinEQ appears to be running under a different account or security context in this session.",
   "app.restart-aorineq-elevated-now": "Restart AorinEQ elevated now?",

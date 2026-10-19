@@ -433,6 +433,7 @@
   "app.details-were-written-to": "자세한 내용을 다음 위치에 기록했습니다:\n{0}",
   "app.not-elevated-volume-keys-won-t": "관리자 권한으로 실행되고 있지 않습니다. 관리자 권한 게임에서는 음량 키가 동작하지 않습니다.",
   "app.airplay-not-found": "네트워크에서 “{0}”을(를) 찾지 못했습니다. 전원이 켜져 있고 같은 Wi-Fi에 연결되어 있는지 확인한 뒤 “다시 검색”을 눌러 보세요.",
+  "app.vbcable.ready": "VB-Cable이 준비되었습니다. AirPlay에 사용할까요?",
   "app.updated-to-aorineq": "AorinEQ {0}(으)로 업데이트했습니다.",
   "app.aorineq-appears-to-be-running-under": "이번 세션에서 AorinEQ가 다른 계정이나 보안 컨텍스트로 실행되고 있는 것 같습니다.",
   "app.restart-aorineq-elevated-now": "AorinEQ를 관리자 권한으로 지금 다시 시작할까요?",

@@ -433,6 +433,7 @@
   "app.details-were-written-to": "詳細は次の場所に書き出しました:\n{0}",
   "app.not-elevated-volume-keys-won-t": "管理者権限で動いていません。管理者権限のゲームでは音量キーが効きません。",
   "app.airplay-not-found": "「{0}」がネットワーク上に見つかりませんでした。電源が入っていて同じ Wi-Fi につながっているか確認し、「再スキャン」をお試しください。",
+  "app.vbcable.ready": "VB-Cable の準備ができました。AirPlay に使いますか？",
   "app.updated-to-aorineq": "AorinEQ {0} に更新しました。",
   "app.aorineq-appears-to-be-running-under": "このセッションでは、AorinEQ が別のアカウントまたはセキュリティコンテキストで動作しているようです。",
   "app.restart-aorineq-elevated-now": "AorinEQ を管理者権限で今すぐ再起動しますか？",

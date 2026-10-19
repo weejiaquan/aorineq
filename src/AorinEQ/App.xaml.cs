@@ -574,6 +574,7 @@ public partial class App : System.Windows.Application
         }
         SetupAutoUpdate();
         NudgeToDiscoverOnce();
+        ResolveVirtualCablePending();
         if (e.Args.Contains("--updated"))
             _tray!.ShowInfo(Loc.T("app.updated-to-aorineq", GetVersionString()));
 
