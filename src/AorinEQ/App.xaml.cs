@@ -1145,11 +1145,20 @@ public partial class App : System.Windows.Application
     {
         if (_skinDesigner is null)
         {
-            _skinDesigner = new SkinDesignerWindow(() => _settings);
+            _skinDesigner = new SkinDesignerWindow(() => _settings, ApoPaths.GetSkinsRoot());
             _skinDesigner.SkinSaved += OnSkinSaved;
+            _skinDesigner.RecentColorsChanged += OnRecentColorsChanged;
+            _skinDesigner.PanelWidthsChanged += OnDesignerPanelsResized;
         }
         _skinDesigner.Show();
         _skinDesigner.Activate();
+    }
+
+    /// <summary>The designer's side panels were resized; their widths outlive the session.</summary>
+    private void OnDesignerPanelsResized(double layers, double properties)
+    {
+        _settings = _settings with { DesignerLayersWidth = layers, DesignerPropertiesWidth = properties };
+        SaveSettings();
     }
 
     /// <summary>A designer save refreshes the Settings picker, and — when the saved skin is the
@@ -3247,6 +3256,10 @@ public partial class App : System.Windows.Application
         // which raises on a system thread, and a theme change arriving mid-teardown must not find
         // a dispatcher that has begun shutting down.
         _appTheme?.Dispose();
+        // The designer outlives its hidden window: its scratch sprite sheets, test OSD folder and
+        // static language subscription go with the app, and after Dispose, Close really closes it.
+        _skinDesigner?.Dispose();
+        _skinDesigner?.Close();
         // Before the pipeline for the same ordering reason the HUD is: this owns a WASAPI client
         // and a live network session, and a TEARDOWN sent while the dispatcher drains is better
         // than leaving the receiver holding a session nobody is feeding.

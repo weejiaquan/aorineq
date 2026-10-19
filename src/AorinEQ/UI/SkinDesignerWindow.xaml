@@ -4,9 +4,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-        xmlns:core="clr-namespace:AorinEQ.Core;assembly=AorinEQ.Core"
-        Title="{loc:T designer.window-title.aorineq-skin-designer}" Icon="/AorinEQ;component/AorinEQ.ico" Width="880" Height="640"
-        MinWidth="720" MinHeight="520"
+        Title="{loc:T designer.window-title.aorineq-skin-designer}" Icon="/AorinEQ;component/AorinEQ.ico"
+        Width="1180" Height="720" MinWidth="900" MinHeight="560"
         WindowStartupLocation="CenterScreen" ShowInTaskbar="True"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica"
@@ -14,514 +13,146 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <ui:TitleBar Grid.Row="0" Title="{loc:T designer.title.aorineq-skin-designer}"
+        <!-- The title is set in code as well: it gains a "•" while the skin has unsaved changes. -->
+        <ui:TitleBar x:Name="DesignerTitleBar" Grid.Row="0" Title="{loc:T designer.title.aorineq-skin-designer}"
                      Icon="{ui:ImageIcon '/AorinEQ;component/AorinEQ.ico'}" />
-        <Grid Grid.Row="1" Margin="12">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
 
-            <!-- top bar: skin selector, name, zip sharing, save -->
-            <Grid Grid.Row="0" Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="200" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="{loc:T designer.text.skin}" VerticalAlignment="Center" Margin="0,0,6,0" />
-                <ComboBox x:Name="SkinSelect" Grid.Column="1" SelectionChanged="OnSkinSelected" />
-                <TextBlock Grid.Column="2" Text="{loc:T designer.text.name}" VerticalAlignment="Center" Margin="12,0,6,0" />
-                <TextBox x:Name="NameBox" Grid.Column="3" VerticalContentAlignment="Center" TextChanged="OnControlChanged" />
-                <Button x:Name="ImportZipButton" Grid.Column="4" Content="{loc:T designer.import-zip.label}" Padding="10,4" Margin="12,0,0,0" Click="OnImportZip" />
-                <Button x:Name="ExportZipButton" Grid.Column="5" Content="{loc:T designer.export-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnExportZip" />
-                <Button x:Name="SaveButton" Grid.Column="6" Content="{loc:T designer.save.label}" Padding="16,4" Margin="6,0,0,0" Click="OnSave" />
-            </Grid>
+        <!-- Top bar: which skin, the file actions, history - and, on the right, what uses the skin. -->
+        <DockPanel Grid.Row="1" Margin="12,0,12,8" LastChildFill="False">
+            <TextBlock Text="{loc:T designer.text.skin}" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox x:Name="SkinSelect" Width="220" SelectionChanged="OnSkinSelected" />
+            <Button x:Name="NewButton" Content="{loc:T designer.new.label}" Padding="10,4" Margin="12,0,0,0" Click="OnNew" />
+            <Button x:Name="ImportZipButton" Content="{loc:T designer.import-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnImportZip" />
+            <Button x:Name="ExportZipButton" Content="{loc:T designer.export-zip.label}" Padding="10,4" Margin="6,0,0,0" Click="OnExportZip" />
+            <ui:Button x:Name="UndoButton" Icon="{ui:SymbolIcon ArrowUndo24}" Margin="16,0,0,0" Click="OnUndo"
+                       ToolTip="{loc:T designer.undo.tooltip}" ToolTipService.ShowOnDisabled="True" />
+            <ui:Button x:Name="RedoButton" Icon="{ui:SymbolIcon ArrowRedo24}" Margin="6,0,0,0" Click="OnRedo"
+                       ToolTip="{loc:T designer.redo.tooltip}" ToolTipService.ShowOnDisabled="True" />
+            <StackPanel x:Name="SkinActions" DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="ShareButton" Content="{loc:T designer.share.label}" Padding="10,4" Click="OnShare"
+                        ToolTip="{loc:T designer.share.tooltip}" />
+                <Button x:Name="TestButton" Content="{loc:T designer.test.label}" Padding="10,4" Margin="6,0,0,0"
+                        Click="OnTestOnDesktop" />
+                <ui:Button x:Name="SaveButton" Content="{loc:T designer.save.label}" Appearance="Primary" Padding="16,4"
+                           Margin="6,0,0,0" Click="OnSave" ToolTipService.ShowOnDisabled="True" />
+            </StackPanel>
+        </DockPanel>
 
-            <!-- main: preview + controls -->
-            <Grid Grid.Row="1">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <!-- Wide enough that no row in the options panel has to ellipsize its primary
-                         content at the default window size: the widest row (Shadow + swatch + Blur
-                         + Depth) needs ~285px, and the scrollbar and its gutter take 24 of the
-                         370. The preview keeps the rest and never depends on it — PreviewCanvas is
-                         sized in code from the image size and scale, so the split cannot change a
-                         rendered pixel. -->
-                    <ColumnDefinition Width="370" />
-                </Grid.ColumnDefinitions>
+        <Grid Grid.Row="2" Margin="12,0,12,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LayersColumn" Width="220" MinWidth="160" MaxWidth="520" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="320" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="160" MaxWidth="520" />
+            </Grid.ColumnDefinitions>
 
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="{loc:T designer.layers.title}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <TreeView x:Name="LayersTree" SelectedItemChanged="OnLayerSelected" />
+            </DockPanel>
+            <GridSplitter x:Name="LayersSplitter" Grid.Column="1" Width="6" HorizontalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext" Background="Transparent" DragCompleted="OnSplitterDragCompleted" />
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                        <ScrollViewer.Resources>
-                            <!-- Checkerboard sits behind the artwork so transparency is visible. -->
-                            <DrawingBrush x:Key="Checkerboard" TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
-                                <DrawingBrush.Drawing>
-                                    <DrawingGroup>
-                                        <GeometryDrawing Brush="#FFF0F0F0">
-                                            <GeometryDrawing.Geometry>
-                                                <RectangleGeometry Rect="0,0,16,16" />
-                                            </GeometryDrawing.Geometry>
-                                        </GeometryDrawing>
-                                        <GeometryDrawing Brush="#FFD4D4D4">
-                                            <GeometryDrawing.Geometry>
-                                                <GeometryGroup>
-                                                    <RectangleGeometry Rect="0,0,8,8" />
-                                                    <RectangleGeometry Rect="8,8,8,8" />
-                                                </GeometryGroup>
-                                            </GeometryDrawing.Geometry>
-                                        </GeometryDrawing>
-                                    </DrawingGroup>
-                                </DrawingBrush.Drawing>
-                            </DrawingBrush>
-                        </ScrollViewer.Resources>
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <!-- UseLayoutRounding/SnapsToDevicePixels are turned OFF for the whole
-                                 preview subtree, and must stay off. FluentWindow switches both ON at
-                                 the window, and they inherit: with rounding on, a skin whose scaled
-                                 size lands on a half pixel (seia-bar-shadow is 525 x 262.5 at scale
-                                 0.35) is snapped, and the preview stops being a pixel-exact model of
-                                 the OSD. SkinOsdWindow is deliberately NOT a FluentWindow, so it has
-                                 no rounding — matching it here is what keeps "what you see in the
-                                 designer is what the OSD draws" true, including where the v1.7.1
-                                 aliased fill-boundary clip falls. -->
-                            <Grid x:Name="PreviewHost" HorizontalAlignment="Center" Margin="24"
-                                  UseLayoutRounding="False" SnapsToDevicePixels="False"
-                                  Background="{StaticResource Checkerboard}">
-                                <!-- Same composition as SkinOsdWindow: empty under clipped full, text on top. -->
-                                <Grid x:Name="PreviewCanvas"
-                                      MouseLeftButtonDown="OnPreviewMouseDown" MouseMove="OnPreviewMouseMove"
-                                      MouseLeftButtonUp="OnPreviewMouseUp">
-                                    <!-- EdgeMode=Aliased: same seam fix as SkinOsdWindow — AA'd
-                                         complementary clips leak the backdrop through the boundary column. -->
-                                    <Image x:Name="EmptyImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased" />
-                                    <Image x:Name="FullImage" Stretch="Fill" RenderOptions.EdgeMode="Aliased">
-                                        <Image.Clip>
-                                            <RectangleGeometry x:Name="FillClip" />
-                                        </Image.Clip>
-                                    </Image>
-                                    <!-- Optional muted artwork, shown alone in mute preview (mirrors SkinOsdWindow). -->
-                                    <Image x:Name="MutedImage" Stretch="Fill" Visibility="Collapsed" />
-                                    <Path x:Name="PercentPath" HorizontalAlignment="Left" VerticalAlignment="Top"
-                                          Cursor="SizeAll" Visibility="Collapsed" />
-                                    <!-- Draggable fill-range handles: where 0% and 100% sit inside the artwork. -->
-                                    <Border x:Name="RangeStartHandle" Width="7" HorizontalAlignment="Left"
-                                            Background="#800078D7" BorderBrush="#FF0078D7" BorderThickness="1,0"
-                                            Cursor="SizeWE" Visibility="Collapsed"
-                                            ToolTip="{loc:T designer.range-start-handle.tooltip}" />
-                                    <Border x:Name="RangeEndHandle" Width="7" HorizontalAlignment="Left"
-                                            Background="#80D77800" BorderBrush="#FFD77800" BorderThickness="1,0"
-                                            Cursor="SizeWE" Visibility="Collapsed"
-                                            ToolTip="{loc:T designer.range-end-handle.tooltip}" />
-                                </Grid>
+                    <ScrollViewer x:Name="CanvasScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                  Focusable="False">
+                        <Grid x:Name="ZoomHost" Margin="48" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Grid.LayoutTransform>
+                                <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
+                            </Grid.LayoutTransform>
+                            <!-- UseLayoutRounding/SnapsToDevicePixels are OFF for the artboards and must
+                                 stay off. FluentWindow switches both on at the window and they inherit:
+                                 with rounding on, a skin whose scaled size lands on a half pixel is
+                                 snapped and the canvas stops being a pixel-exact model of the OSD.
+                                 SkinOsdWindow is deliberately not a FluentWindow, so it has no rounding. -->
+                            <Grid x:Name="Artboards" UseLayoutRounding="False" SnapsToDevicePixels="False">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="24" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="{loc:T designer.layer.volume-bar}" FontSize="11" Margin="0,0,12,0"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <Border x:Name="VolumeBoard" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Left">
+                                    <TextBlock x:Name="VolumePlaceholder" Width="300" Margin="16" TextWrapping="Wrap"
+                                               Foreground="#FF404040" />
+                                </Border>
+                                <!-- Directly under the volume bar, as SkinOsdWindow stacks them. -->
+                                <TextBlock Grid.Row="1" Text="{loc:T designer.layer.airplay}" FontSize="11" Margin="0,0,12,0"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <Border x:Name="AirPlayBoard" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Left">
+                                    <loc:AirPlayBarView x:Name="AirPlayPreview" />
+                                </Border>
+                                <TextBlock Grid.Row="3" Text="{loc:T designer.text.notice}" FontSize="11" Margin="0,0,12,0"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <Border x:Name="NoticeBoard" Grid.Row="3" Grid.Column="1" HorizontalAlignment="Left">
+                                    <loc:NoticeView x:Name="NoticePreview" />
+                                </Border>
                             </Grid>
-                            <!-- The device notice on the same checkerboard: what the skin describes,
-                                 or the app's own plate while the notice is off. -->
-                            <Grid HorizontalAlignment="Center" Margin="24,0,24,24"
-                                  UseLayoutRounding="False" SnapsToDevicePixels="False"
-                                  Background="{StaticResource Checkerboard}">
-                                <loc:NoticeView x:Name="NoticePreview" HorizontalAlignment="Center" />
-                            </Grid>
-                        </StackPanel>
+                        </Grid>
                     </ScrollViewer>
                 </Border>
 
-                <!-- The options are taller than the window at any size the user can make it
-                     (MinHeight 520 leaves ~400px here for ~900px of controls), so they scroll.
-                     Padding on the right keeps the scrollbar beside the content instead of over
-                     it; PreviewMouseWheel is handled so the wheel scrolls the panel from anywhere
-                     in it (see OnOptionsWheel). Focusable=False keeps the viewer itself out of the
-                     tab order, so Tab walks control to control and the viewer brings each into
-                     view as it goes.
-
-                     The padding is 14 because the scrollbar MEASURES 14 wide. At the 10 it shipped
-                     with in v3.1.2 the bar covered the rightmost 4px of every full-width control in
-                     the panel — a hit test over that strip returned PART_VerticalScrollBar, not the
-                     text box under it. Change this only against a fresh measurement of the bar. -->
-                <ScrollViewer x:Name="OptionsScroll" Grid.Column="1" Margin="12,0,0,0"
-                              Padding="0,0,14,0" Focusable="False"
-                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                              PreviewMouseWheel="OnOptionsWheel">
-                    <!-- One vertical rhythm throughout: 18 above a section heading, 6 under it,
-                         10 between rows, 4 between a caption and the control it captions. Every
-                         row shares the panel's left edge. -->
-                    <StackPanel>
-                        <TextBlock Text="{loc:T designer.text.images}" FontWeight="SemiBold" Margin="0,0,0,6" />
-                        <TextBlock Text="{loc:T designer.text.png-sprite-sheet-png}"
-                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.empty-and-8212-artwork}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBlock x:Name="EmptyPathText" Text="{loc:T designer.empty-path.text}" FontSize="11"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                            <Button Content="{loc:T designer.options-scroll.label}" Padding="10,3" Click="OnBrowseEmpty" />
-                            <Button Content="{loc:T designer.options-scroll.label-2}" Padding="10,3" Margin="6,0,0,0" Click="OnImportEmptyFrames"
-                                    ToolTip="{loc:T designer.options-scroll.tooltip}" />
-                        </StackPanel>
-
-                        <TextBlock Text="{loc:T designer.text.full-and-8212-artwork}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBlock x:Name="FullPathText" Text="{loc:T designer.full-path.text}" FontSize="11"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                            <Button Content="{loc:T designer.options-scroll.label-3}" Padding="10,3" Click="OnBrowseFull" />
-                            <Button Content="{loc:T designer.options-scroll.label-4}" Padding="10,3" Margin="6,0,0,0" Click="OnImportFullFrames"
-                                    ToolTip="{loc:T designer.options-scroll.tooltip-2}" />
-                        </StackPanel>
-
-                        <TextBlock Text="{loc:T designer.text.muted-and-8212-optional}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBlock x:Name="MutedPathText" Text="{loc:T designer.muted-path.text}" FontSize="11"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <Button Content="{loc:T designer.options-scroll.label-5}" Padding="10,3" Click="OnBrowseMuted" />
-                            <Button Content="{loc:T designer.options-scroll.label-6}" Padding="10,3" Margin="6,0,0,0" Click="OnImportMutedFrames"
-                                    ToolTip="{loc:T designer.options-scroll.tooltip-3}" />
-                            <Button x:Name="ClearMutedButton" Content="{loc:T designer.clear-muted.label}" Padding="10,3" Margin="6,0,0,0"
-                                    Click="OnClearMuted" ToolTip="{loc:T designer.clear-muted.tooltip}" />
-                        </StackPanel>
-                        <TextBlock x:Name="ImageErrorText" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
-                                   FontSize="11" TextWrapping="Wrap" />
-
-                        <TextBlock Text="{loc:T designer.text.animation}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <Grid Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{loc:T designer.text.frames-per-second}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                            <TextBox x:Name="FpsBox" Grid.Column="1" Text="10" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        </Grid>
-                        <TextBlock Text="{loc:T designer.text.sprite-sheet-frame-counts}" FontSize="11" Margin="0,0,0,4" />
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0">
-                                <TextBlock Text="{loc:T designer.text.empty}" FontSize="11" Margin="0,0,0,4" />
-                                <TextBox x:Name="EmptyFramesBox" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="{loc:T designer.text.full}" FontSize="11" Margin="0,0,0,4" />
-                                <TextBox x:Name="FullFramesBox" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="4">
-                                <TextBlock Text="{loc:T designer.text.muted}" FontSize="11" Margin="0,0,0,4" />
-                                <TextBox x:Name="MutedFramesBox" Text="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </StackPanel>
-                        </Grid>
-
-                        <TextBlock Text="{loc:T designer.text.fill-range}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <TextBlock Text="{loc:T designer.text.where-the-bar-lives}"
-                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{loc:T designer.text.0-at}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                            <TextBox x:Name="FillStartBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            <TextBlock Grid.Column="3" Text="{loc:T designer.text.100-at}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                            <TextBox x:Name="FillEndBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        </Grid>
-
-                        <TextBlock Text="{loc:T designer.text.preview-and-mute}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <TextBlock Margin="0,0,0,4">
-                            <Run Text="{loc:T designer.text.fill-preview}" /><Run x:Name="FillLabel" Text="62%" />
-                        </TextBlock>
-                        <Slider x:Name="FillSlider" Minimum="0" Maximum="100" Value="62"
-                                ValueChanged="OnControlChanged" Margin="0,0,0,10" />
-                        <CheckBox x:Name="MuteCheck" Content="{loc:T designer.mute.label}"
-                                  Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,10" />
-                        <TextBlock Margin="0,0,0,4"
-                                   ToolTip="{loc:T designer.options-scroll.tooltip-4}">
-                            <Run Text="{loc:T designer.text.mute-dim}" /><Run x:Name="MutedDimLabel" Text="0.60" />
-                        </TextBlock>
-                        <Slider x:Name="MutedDimSlider" Minimum="0" Maximum="1" Value="0.6"
-                                TickFrequency="0.05" IsSnapToTickEnabled="True"
-                                ValueChanged="OnControlChanged" />
-
-                        <TextBlock Text="{loc:T designer.text.percent-text}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <CheckBox x:Name="ShowNumberCheck" Content="{loc:T designer.show-number.label}"
-                                  Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,10" />
-                        <Grid Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{loc:T designer.text.x}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                            <TextBox x:Name="NumberXBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            <TextBlock Grid.Column="3" Text="{loc:T designer.text.y}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                            <TextBox x:Name="NumberYBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                        </Grid>
-
-                        <!-- Number text styling (enabled only while Show number is checked) -->
-                        <StackPanel x:Name="TextStylePanel">
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="56" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{loc:T designer.text.font}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <!-- Editable so a skin's font that isn't installed here is preserved verbatim
-                                     rather than silently rewritten. -->
-                                <ComboBox x:Name="FontCombo" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="True"
-                                          SelectionChanged="OnControlChanged" LostFocus="OnControlChanged" />
-                                <TextBlock Grid.Column="3" Text="{loc:T designer.text.size}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <TextBox x:Name="FontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </Grid>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <CheckBox x:Name="BoldCheck" Content="{loc:T designer.bold.label}" VerticalAlignment="Center" Margin="0,0,16,0"
-                                          Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                                <TextBlock Text="{loc:T designer.text.color}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <Button x:Name="TextColorSwatch" Width="34" Height="24" Click="OnPickTextColor"
-                                        ToolTip="{loc:T designer.text-color-swatch.tooltip}" />
-                                <TextBlock Text="{loc:T designer.text.align}" VerticalAlignment="Center" Margin="16,0,8,0" FontSize="11"
-                                           ToolTip="{loc:T designer.text-style.tooltip}" />
-                                <ComboBox x:Name="AlignCombo" Width="86" SelectionChanged="OnControlChanged">
-                                    <ComboBoxItem Content="{loc:T designer.align.left}" Tag="left" IsSelected="True" />
-                                    <ComboBoxItem Content="{loc:T designer.align.center}" Tag="center" />
-                                    <ComboBoxItem Content="{loc:T designer.align.right}" Tag="right" />
-                                </ComboBox>
-                            </StackPanel>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <CheckBox x:Name="OutlineCheck" Grid.Column="0" Content="{loc:T designer.outline.label}" VerticalAlignment="Center"
-                                          Margin="0,0,8,0" Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                                <Button x:Name="OutlineColorSwatch" Grid.Column="1" Width="34" Height="24" Margin="0,0,16,0"
-                                        Click="OnPickOutlineColor" ToolTip="{loc:T designer.outline-color-swatch.tooltip}" />
-                                <TextBlock Grid.Column="2" Text="{loc:T designer.text.width}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <TextBox x:Name="OutlineWidthBox" Grid.Column="3" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </Grid>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <CheckBox x:Name="ShadowCheck" Content="{loc:T designer.shadow.label}" VerticalAlignment="Center" Margin="0,0,8,0"
-                                          Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                                <Button x:Name="ShadowColorSwatch" Width="34" Height="24"
-                                        Click="OnPickShadowColor" ToolTip="{loc:T designer.shadow-color-swatch.tooltip}" />
-                            </StackPanel>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{loc:T designer.text.blur}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <!-- MinWidth 48 is the v3.1.1 floor: in the old fixed-width row
-                                     these two had collapsed to 12px and 20px. The row is far wider
-                                     now, but the floor stays as the guard it was measured to be. -->
-                                <TextBox x:Name="ShadowBlurBox" Grid.Column="1" MinWidth="48" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                                <TextBlock Grid.Column="3" Text="{loc:T designer.text.depth}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <TextBox x:Name="ShadowDepthBox" Grid.Column="4" MinWidth="48" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </Grid>
-                        </StackPanel>
-
-                        <!-- The device-changed notice. Off = the skin carries no notice and the
-                             app draws its own; on = a plate in these colours, or the artwork with
-                             the name placed on it. -->
-                        <TextBlock Text="{loc:T designer.text.notice}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <CheckBox x:Name="NoticeEnableCheck" Content="{loc:T designer.notice.enable.label}"
-                                  Checked="OnControlChanged" Unchecked="OnControlChanged" Margin="0,0,0,10" />
-                        <TextBlock Text="{loc:T designer.notice.hint}"
-                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
-                        <!-- Enabled only while the notice is styled -->
-                        <StackPanel x:Name="NoticePanel">
-                            <TextBlock Text="{loc:T designer.notice.art.label}" FontSize="11" Margin="0,0,0,4" />
-                            <TextBlock x:Name="NoticeArtPathText" Text="{loc:T designer.notice.art.none}" FontSize="11"
-                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                       TextTrimming="CharacterEllipsis" Margin="0,0,0,4" />
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Button Content="{loc:T designer.notice.browse.label}" Padding="10,3" Click="OnBrowseNoticeArt" />
-                                <Button Content="{loc:T designer.notice.clear.label}" Padding="10,3" Margin="6,0,0,0" Click="OnClearNoticeArt" />
-                            </StackPanel>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="{loc:T designer.notice.background.label}" FontSize="11" Margin="0,0,0,4" />
-                                    <Button x:Name="NoticeBackgroundSwatch" Width="34" Height="24" HorizontalAlignment="Left"
-                                            Click="OnPickNoticeBackground" />
-                                </StackPanel>
-                                <!-- Border: off = none; picking a colour turns it on (the outline pattern) -->
-                                <StackPanel Grid.Column="1">
-                                    <CheckBox x:Name="NoticeBorderCheck" Content="{loc:T designer.notice.border.label}" FontSize="11" Margin="0,0,0,4"
-                                              Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                                    <Button x:Name="NoticeBorderSwatch" Width="34" Height="24" HorizontalAlignment="Left"
-                                            Click="OnPickNoticeBorder" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="{loc:T designer.notice.text-color.label}" FontSize="11" Margin="0,0,0,4" />
-                                    <Button x:Name="NoticeTextColorSwatch" Width="34" Height="24" HorizontalAlignment="Left"
-                                            Click="OnPickNoticeTextColor" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="3">
-                                    <TextBlock Text="{loc:T designer.notice.glyph-color.label}" FontSize="11" Margin="0,0,0,4" />
-                                    <Button x:Name="NoticeGlyphColorSwatch" Width="34" Height="24" HorizontalAlignment="Left"
-                                            Click="OnPickNoticeGlyphColor" />
-                                    <!-- On = the icon takes the text colour (no colour of its own is saved) -->
-                                    <CheckBox x:Name="NoticeGlyphSameCheck" Content="{loc:T designer.notice.glyph-same.label}" FontSize="11" Margin="0,4,0,0"
-                                              Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                                </StackPanel>
-                            </Grid>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{loc:T designer.notice.radius.label}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <TextBox x:Name="NoticeRadiusBox" Grid.Column="1" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </Grid>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="56" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{loc:T designer.text.font}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <!-- Editable for the same reason FontCombo is. -->
-                                <ComboBox x:Name="NoticeFontCombo" Grid.Column="1" IsEditable="True" IsTextSearchEnabled="True"
-                                          SelectionChanged="OnControlChanged" LostFocus="OnControlChanged" />
-                                <TextBlock Grid.Column="3" Text="{loc:T designer.text.size}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <TextBox x:Name="NoticeFontSizeBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </Grid>
-                            <CheckBox x:Name="NoticeBoldCheck" Content="{loc:T designer.bold.label}" Margin="0,0,0,10"
-                                      Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="16" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <CheckBox x:Name="NoticeShowGlyphCheck" Content="{loc:T designer.notice.show-glyph.label}" VerticalAlignment="Center"
-                                          Checked="OnControlChanged" Unchecked="OnControlChanged" />
-                                <TextBlock Grid.Column="2" Text="{loc:T designer.notice.glyph-size.label}" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" />
-                                <TextBox x:Name="NoticeGlyphSizeBox" Grid.Column="3" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                            </Grid>
-                            <!-- Positions inside the artwork: shown only while there is artwork -->
-                            <StackPanel x:Name="NoticeArtPanel">
-                                <TextBlock Text="{loc:T designer.notice.text-box.label}" FontSize="11" Margin="0,0,0,4" />
-                                <Grid Margin="0,0,0,10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="NoticeTextXBox" Grid.Column="0" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                                    <TextBox x:Name="NoticeTextYBox" Grid.Column="2" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                                    <TextBox x:Name="NoticeTextWidthBox" Grid.Column="4" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                                </Grid>
-                                <TextBlock Text="{loc:T designer.notice.glyph-pos.label}" FontSize="11" Margin="0,0,0,4" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="8" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="NoticeGlyphXBox" Grid.Column="0" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                                    <TextBox x:Name="NoticeGlyphYBox" Grid.Column="2" LostFocus="OnControlChanged" KeyDown="OnNumberBoxKeyDown" />
-                                </Grid>
-                            </StackPanel>
-                        </StackPanel>
-
-                        <TextBlock Text="{loc:T designer.text.scale}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <TextBlock Margin="0,0,0,4">
-                            <Run Text="{loc:T designer.text.scale-2}" /><Run x:Name="ScaleLabel" Text="1.00" />
-                        </TextBlock>
-                        <Slider x:Name="ScaleSlider" Minimum="0.25" Maximum="4" Value="1"
-                                TickFrequency="0.05" IsSnapToTickEnabled="True"
-                                ValueChanged="OnControlChanged" />
-
-                        <!-- Authorship / gallery metadata. All optional: a skin with none of it
-                             behaves and saves exactly as it did before 3.2. Same rhythm as the
-                             sections above — 18 above the heading, 6 under it, a 4px caption over
-                             each control, 10 between rows. -->
-                        <TextBlock Text="{loc:T designer.text.details}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <TextBlock Text="{loc:T designer.text.optional-shown-in-the}"
-                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.title-and-8212-the}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBox x:Name="TitleBox" MaxLength="{x:Static core:SkinMeta.MaxTitleLength}"
-                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.author-and-8212-who}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBox x:Name="AuthorBox" MaxLength="{x:Static core:SkinMeta.MaxAuthorLength}"
-                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.description}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBox x:Name="DescriptionBox" MaxLength="{x:Static core:SkinMeta.MaxDescriptionLength}"
-                                 AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56" MaxHeight="120"
-                                 VerticalScrollBarVisibility="Auto"
-                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.version-and-8212-yours}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBox x:Name="VersionBox" MaxLength="{x:Static core:SkinMeta.MaxVersionLength}"
-                                 TextChanged="OnControlChanged" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.tags-and-8212-comma}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBox x:Name="TagsBox" TextChanged="OnControlChanged" Margin="0,0,0,10" />
-
-                        <TextBlock Text="{loc:T designer.text.source-url-and-8212}" FontSize="11" Margin="0,0,0,4" />
-                        <TextBox x:Name="SourceUrlBox" MaxLength="{x:Static core:SkinMeta.MaxSourceUrlLength}"
-                                 TextChanged="OnControlChanged" />
-                        <TextBlock x:Name="MetaErrorText" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
-                                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
-
-                        <TextBlock Text="{loc:T designer.text.share}" FontWeight="SemiBold" Margin="0,18,0,6" />
-                        <!-- Text set from SkinShare.HostingHint in the constructor, so the wording
-                             the clipboard message uses and the wording shown here cannot drift. -->
-                        <TextBlock x:Name="ShareHintText" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" />
-                        <Button x:Name="ShareButton" Content="{loc:T designer.share.label}" Padding="10,4" Click="OnShare"
-                                ToolTip="{loc:T designer.share.tooltip}" />
-
-                        <Button x:Name="TestButton" Content="{loc:T designer.test.label}" Padding="10,4"
-                                Margin="0,18,0,0" Click="OnTestOnDesktop" />
-                    </StackPanel>
-                </ScrollViewer>
+                <!-- View state only: none of this is part of the skin or of its history. -->
+                <WrapPanel x:Name="PreviewStrip" Grid.Row="1" Margin="0,8,0,0">
+                    <TextBlock Text="{loc:T designer.text.fill-preview}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <Slider x:Name="PreviewFill" Width="140" Minimum="0" Maximum="100" Value="62"
+                            VerticalAlignment="Center" ValueChanged="OnPreviewValueChanged" />
+                    <TextBlock x:Name="PreviewFillLabel" Width="40" VerticalAlignment="Center" Margin="6,0,12,0" />
+                    <CheckBox x:Name="PreviewMute" Content="{loc:T designer.mute.label}" Margin="0,0,12,0"
+                              Checked="OnPreviewToggled" Unchecked="OnPreviewToggled" />
+                    <TextBlock Text="AirPlay" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox x:Name="PreviewAirPlayMode" Width="150" SelectedIndex="0" SelectionChanged="OnPreviewModeChanged">
+                        <ComboBoxItem Content="{loc:T designer.preview.connected}" />
+                        <ComboBoxItem Content="{loc:T designer.preview.disconnected}" />
+                        <ComboBoxItem Content="{loc:T designer.preview.no-receiver}" />
+                    </ComboBox>
+                    <TextBlock Text="{loc:T designer.preview.level}" VerticalAlignment="Center" Margin="12,0,6,0" />
+                    <Slider x:Name="PreviewLevel" Width="100" Minimum="0" Maximum="100" Value="70"
+                            VerticalAlignment="Center" ValueChanged="OnPreviewValueChanged" />
+                    <TextBlock Text="{loc:T designer.preview.device}" VerticalAlignment="Center" Margin="12,0,6,0" />
+                    <TextBox x:Name="PreviewDevice" Width="180" TextChanged="OnPreviewDeviceChanged" />
+                </WrapPanel>
             </Grid>
 
-            <!-- Wraps: the status line carries whole sentences (what was exported, what was copied
-                 to the clipboard and what to do with it), and an unwrapped TextBlock silently
-                 CLIPS the tail rather than ellipsizing it — the reader can't even tell there was
-                 more. The row is Auto-height, so wrapping costs the preview nothing. -->
-            <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" FontSize="11"
-                       TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                       Text="{loc:T designer.status.text}" />
+            <GridSplitter x:Name="PropertiesSplitter" Grid.Column="3" Width="6" HorizontalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext" Background="Transparent" DragCompleted="OnSplitterDragCompleted" />
+            <DockPanel Grid.Column="4">
+                <TextBlock DockPanel.Dock="Top" Text="{loc:T designer.properties.title}" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <!-- Padding 14: the scrollbar measures 14 wide (see the v3.1.2 note in git history). -->
+                <ScrollViewer x:Name="PropertiesScroll" Focusable="False" Padding="0,0,14,0"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="PropertiesHost" />
+                </ScrollViewer>
+            </DockPanel>
+        </Grid>
+
+        <Grid x:Name="StatusBar" Grid.Row="3" Margin="12,6,12,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <!-- Wraps: the status line carries whole sentences, and an unwrapped TextBlock CLIPS. -->
+            <TextBlock x:Name="StatusText" FontSize="11" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="{loc:T designer.status.text}" />
         </Grid>
     </Grid>
 </ui:FluentWindow>
