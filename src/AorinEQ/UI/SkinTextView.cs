@@ -23,7 +23,7 @@ internal sealed class SkinTextView : FrameworkElement
     private SkinText _style = SkinLoader.DefaultNotice.Text;
     private double _scale = 1.0;
     private string _text = "";
-    private double _textWidth;
+    private double _inkedWidth;
 
     public SkinTextView()
     {
@@ -62,20 +62,26 @@ internal sealed class SkinTextView : FrameworkElement
     protected override Visual GetVisualChild(int index) =>
         index == 0 ? Glyphs : throw new ArgumentOutOfRangeException(nameof(index));
 
+    /// <summary>Room kept for the outline stroke at each end of the line, so a trimmed name's
+    /// stroke stays inside its box and a plate grows by it.</summary>
+    private double OutlineReserve => PercentTextRenderer.StrokeWidth(_style, _scale);
+
     protected override Size MeasureOverride(Size availableSize)
     {
+        double reserve = OutlineReserve;
         var size = PercentTextRenderer.Update(Glyphs, _style, _text, _scale,
-            VisualTreeHelper.GetDpi(this).PixelsPerDip, FontFamily, availableSize.Width);
-        _textWidth = size.Width;
+            VisualTreeHelper.GetDpi(this).PixelsPerDip, FontFamily, availableSize.Width - 2 * reserve);
+        _inkedWidth = size.Width + 2 * reserve;
         Glyphs.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return size;
+        return new Size(_inkedWidth, size.Height);
     }
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        // The style's x anchors the box, so the text's left edge is the box's anchor under its align.
+        // The style's x anchors the box, so the inked line's left edge is the box's anchor under
+        // its align; the glyphs start one reserve in from it.
         double anchor = _style.Align switch { "center" => finalSize.Width / 2, "right" => finalSize.Width, _ => 0 };
-        double left = SkinMath.AlignedTextX(anchor, _textWidth, _style.Align);
+        double left = SkinMath.AlignedTextX(anchor, _inkedWidth, _style.Align) + OutlineReserve;
         Glyphs.Arrange(new Rect(new System.Windows.Point(left, 0), Glyphs.DesiredSize));
         return finalSize;
     }

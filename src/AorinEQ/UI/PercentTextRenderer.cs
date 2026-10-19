@@ -54,17 +54,9 @@ internal static class PercentTextRenderer
         path.Data = geometry;
         path.Fill = Brush(style.Color) ?? System.Windows.Media.Brushes.White;
 
-        var outline = style.OutlineColor is null ? null : Brush(style.OutlineColor);
-        if (outline is not null && style.OutlineWidth > 0)
-        {
-            path.Stroke = outline;
-            path.StrokeThickness = style.OutlineWidth * scale;
-        }
-        else
-        {
-            path.Stroke = null;
-            path.StrokeThickness = 0;
-        }
+        double stroke = StrokeWidth(style, scale);
+        path.Stroke = stroke > 0 ? Brush(style.OutlineColor) : null;
+        path.StrokeThickness = stroke;
 
         path.Effect = SkinColor.Parse(style.ShadowColor) is { } shadow
             ? new DropShadowEffect
@@ -79,6 +71,11 @@ internal static class PercentTextRenderer
 
         return size;
     }
+
+    /// <summary>The outline stroke Update draws, already scale-multiplied: 0 when the style has no
+    /// outline, a colour that does not parse or no width.</summary>
+    internal static double StrokeWidth(SkinText style, double scale) =>
+        style.OutlineWidth > 0 && Brush(style.OutlineColor) is not null ? style.OutlineWidth * scale : 0;
 
     /// <summary>The size <see cref="Update(Path,SkinText,string,double,double)"/> draws
     /// <paramref name="text"/> at in skin pixels (scale 1), before outline and shadow - what the

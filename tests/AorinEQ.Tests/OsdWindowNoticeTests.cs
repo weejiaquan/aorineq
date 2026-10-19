@@ -324,6 +324,61 @@ public class OsdWindowNoticeTests
         Assert.InRange(r.InkLeft, r.BoxLeft, r.BoxLeft + 3);
     }
 
+    /// <summary>An outline is part of what a trimmed name may fill: a name trimmed to its box keeps
+    /// one outline width (scaled) clear at each end, so the stroke never runs past the box - and
+    /// off art whose box ends at its edge.</summary>
+    [Fact]
+    public void A_trimmed_outlined_name_keeps_its_stroke_inside_the_box()
+    {
+        const double scale = 2.0;
+        var folder = TempFolder();
+        try
+        {
+            var art = LoadArtSkin(folder, 320, 56).Notice!;
+            var look = art with { Text = art.Text with { OutlineColor = "#FF000000", OutlineWidth = 6 } };
+            var r = With(osd =>
+            {
+                osd.ApplyConfig(Settings.Default with { OsdStyle = OsdStyles.Skin });
+                osd.SetSkinNotice(look, scale);
+                osd.ShowNotice(new string('W', DeviceNotice.MaxNameLength));
+                osd.UpdateLayout();
+                return (Ink: InkInBox(osd), Stroke: Notice(osd).NoticeText.Glyphs.StrokeThickness);
+            });
+            _out.WriteLine($"outline 6 at scale {scale}: stroke {r.Stroke}; box {r.Ink.BoxLeft:0.##}..{r.Ink.BoxRight:0.##}, " +
+                           $"glyph geometry {r.Ink.InkLeft:0.##}..{r.Ink.InkRight:0.##}; the reserve is one stroke at each end");
+            Assert.Equal(12, r.Stroke);
+            Assert.True(r.Ink.InkRight + r.Stroke <= r.Ink.BoxRight + 0.5,
+                $"the stroke reaches {r.Ink.InkRight + r.Stroke:0.##}, past the box at {r.Ink.BoxRight:0.##}");
+            Assert.True(r.Ink.InkLeft - r.Stroke >= r.Ink.BoxLeft - 0.5,
+                $"the stroke starts at {r.Ink.InkLeft - r.Stroke:0.##}, before the box at {r.Ink.BoxLeft:0.##}");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    /// <summary>A plate sizes itself from the inked name, outline included: an outline of 5 makes
+    /// the plate exactly 2 x 5 wider than the same name without one.</summary>
+    [Fact]
+    public void A_plate_grows_by_its_names_outline()
+    {
+        var d = SkinLoader.DefaultNotice;
+        var r = _sta.Run(() =>
+        {
+            double Width(SkinNotice look)
+            {
+                var view = new NoticeView();
+                view.Apply(look, 1.0);
+                view.SetText("Speakers");
+                view.PlateBorder.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                return view.PlateBorder.DesiredSize.Width;
+            }
+            return (Plain: Width(d), Outlined: Width(d with { Text = d.Text with { OutlineColor = "#FF000000", OutlineWidth = 5 } }),
+                Unparseable: Width(d with { Text = d.Text with { OutlineColor = "nope", OutlineWidth = 5 } }));
+        });
+        _out.WriteLine($"plate width: plain {r.Plain:0.###}, outline 5 {r.Outlined:0.###} (expected +10), unparseable outline colour {r.Unparseable:0.###} (no stroke, expected +0)");
+        Assert.Equal(r.Plain + 10, r.Outlined, 6);
+        Assert.Equal(r.Plain, r.Unparseable, 6);
+    }
+
     [Fact]
     public void A_long_name_on_art_is_trimmed_inside_its_text_box()
     {
