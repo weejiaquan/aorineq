@@ -298,4 +298,27 @@ public class SkinDocumentTests : IDisposable
         Assert.Equal(strip, info.AirPlay);
         Assert.Equal(SkinLoader.DefaultNotice, info.Notice);
     }
+
+    /// <summary>Strip art replaced with narrower art leaves a fill range measured on the old art.
+    /// The loader's rule (Restrip) resets it to the new width, so Issues must judge the range the
+    /// skin will actually have, not the stale one - else a skin that saves and loads fine is blocked.</summary>
+    [Fact]
+    public void Narrower_strip_art_resets_the_fill_range_instead_of_blocking_save()
+    {
+        var folder = Folder("narrower");
+        TestPngs.Write(Path.Combine(folder, "ae.png"), 200, 30);
+        TestPngs.Write(Path.Combine(folder, "af.png"), 200, 30);
+        var stale = new SkinAirPlay(Path.Combine(folder, "ae.png"), Path.Combine(folder, "af.png"), 300, 30,
+            false, false, 1, 1, 250, 290, null, null, new SkinHitRect(0, 0, 300, 30));
+        var doc = SkinDocument.New("x") with { Config = new SkinConfig(null, 1.0, Meta: SkinMeta.None, AirPlay: stale) };
+
+        var issues = doc.Issues(_probe);
+        var strip = doc.ToInfo(_probe).AirPlay;
+        _out.WriteLine($"stale range {stale.FillStartX}..{stale.FillEndX} on {stale.Width} px; art now 200 px");
+        _out.WriteLine($"derived strip: {strip?.ToString() ?? "(null)"}");
+        _out.WriteLine(string.Join(Environment.NewLine, issues));
+        Assert.DoesNotContain(issues, i => i.Kind == SkinIssueKind.FillRangeInverted);
+        Assert.NotNull(strip);
+        Assert.Equal((200, 0, 200), (strip.Width, strip.FillStartX, strip.FillEndX));
+    }
 }

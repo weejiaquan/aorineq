@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 
 namespace AorinEQ.Core;
@@ -19,9 +20,13 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
     string? AirPlayError = null, string? NoticeError = null)
 {
     /// <summary>A loaded skin as a document. A full-width fill range becomes "no range" and a hidden
-    /// text carrying nothing becomes no text - both what the writer would write.</summary>
+    /// text carrying nothing becomes no text - both what the writer would write.
+    ///
+    /// <paramref name="info"/> must be valid: an invalid one carries no strip or notice (and no
+    /// reasons for them), so a document built from it would drop art that is fine on disk.</summary>
     public static SkinDocument FromInfo(SkinInfo info)
     {
+        Debug.Assert(info.IsValid, $"FromInfo needs a valid skin; got: {info.Error}");
         bool wholeWidth = info.FillStartX == 0 && info.FillEndX == info.Width;
         var strip = info.AirPlay is { } a
             ? a with { Name = SkinClamps.OptionalText(a.Name), Percent = SkinClamps.OptionalText(a.Percent) }
@@ -87,7 +92,10 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
 
     /// <summary>The config to hand <see cref="SkinWriter.Save"/>: the strip and notice placed
     /// against the art as it is on disk NOW, so the writer's "omit the default" checks (fill end
-    /// at the strip's width, a whole-strip dropdown) compare against the real size.</summary>
+    /// at the strip's width, a whole-strip dropdown) compare against the real size.
+    ///
+    /// Call it only when <see cref="Issues"/> is empty: it discards the strip's and notice's
+    /// errors, and a null strip or notice makes the writer delete that art.</summary>
     public SkinConfig SaveConfig(ImageProbe probe) => Config with
     {
         AirPlay = AirPlayInfo(probe, out _),
@@ -122,7 +130,9 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
             if (stripEmpty.IsUsable)
             {
                 MismatchIssue(SkinLayer.AirPlayFull, stripFull, stripEmpty);
-                FillIssue(SkinLayer.AirPlay, a.FillStartX, a.FillEndX, stripEmpty.LogicalWidth);
+                // Judged as ToInfo and SaveConfig will have it: art of a new width resets the range.
+                var placed = Restrip(a, probe);
+                FillIssue(SkinLayer.AirPlay, placed.FillStartX, placed.FillEndX, placed.Width);
             }
         }
 
