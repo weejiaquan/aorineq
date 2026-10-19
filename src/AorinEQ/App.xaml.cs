@@ -181,13 +181,9 @@ public partial class App : System.Windows.Application
         }
 
         // Disposed first, so Shutdown closes the designer instead of it asking about unsaved edits
-        // in a box nobody can answer during a crash. Best effort too: it may be what broke - and
-        // apart, so a Dispose that throws still lets the window go.
-        try { _skinDesigner?.Dispose(); }
+        // in a box nobody can answer during a crash. Best effort too: it may be what broke.
+        try { CloseSkinDesigner(); }
         catch (Exception) { }
-        try { _skinDesigner?.Close(); }
-        catch (Exception) { }
-        _skinDesigner = null;
 
         try { Shutdown(1); }
         catch (InvalidOperationException) { } // already shutting down
@@ -688,9 +684,11 @@ public partial class App : System.Windows.Application
     /// and static language subscription go with it, and after Dispose, Close really closes it.</summary>
     private void CloseSkinDesigner()
     {
-        _skinDesigner?.Dispose();
-        _skinDesigner?.Close();
+        // Let go first, and closed even if Dispose throws, so no path leaves a half-closed designer behind.
+        var designer = _skinDesigner;
         _skinDesigner = null;
+        try { designer?.Dispose(); }
+        finally { designer?.Close(); }
     }
 
     /// <summary>Windows is logging off or shutting down: there is no asking then, and WPF closes
