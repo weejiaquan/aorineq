@@ -93,46 +93,61 @@ public partial class App
     }
 
     /// <summary>Makes VB-Cable Windows' default output for all three roles, so nothing plays on the
-    /// speakers while the stream captures the cable. The defaults it displaces are written to disk
-    /// FIRST — flushed, not merely posted — so a process killed one instruction later still knows
-    /// what to put back on its next start. A record already held (reconnecting mid-stream) is kept:
-    /// it describes the user's devices; re-capturing now would record the cable. A cable that is
-    /// already the default with no record held is the user's own choice: nothing to record or move.
+    /// speakers while the stream captures the cable — in the order
+    /// <see cref="DefaultEndpointSwitcher.BeginAirPlayOnly"/> fixes: the displaced defaults are on
+    /// disk (saved and confirmed, not merely posted) before anything moves, so a process killed one
+    /// instruction later still knows what to put back on its next start.
     ///
-    /// If Windows refuses the switch, the record is dropped at once (anything that did move is put
-    /// back) and the stream still captures the cable: the user hears it locally this time, rather
-    /// than AorinEQ's notice and health suppression applying to a default it never moved.</summary>
+    /// When the record cannot be saved, or Windows refuses the switch, the stream still captures the
+    /// cable without the default moving: the user hears it locally this time, rather than AorinEQ's
+    /// notice and health suppression applying to a default it never moved. The own-switch target is
+    /// set after the call: default-device notifications reach <see cref="OnDefaultDeviceChanged"/>
+    /// through the dispatcher, so none of them is handled before this returns.</summary>
     private void BeginAirPlayOnly(string cableId)
     {
-        if (string.Equals(AudioEndpoint.GetDefaultRenderEndpointId(), cableId, StringComparison.OrdinalIgnoreCase))
-            return;
-        if (_settings.AirPlayRestoreDefault is null)
+        AirPlayOnlyStart outcome;
+        string? movedTo;
+        (_settings, outcome, movedTo) = DefaultEndpointSwitcher.BeginAirPlayOnly(_settings, cableId, recorded =>
         {
-            _settings = _settings with { AirPlayRestoreDefault = DefaultEndpointSwitcher.Capture() };
-            SaveSettings();
-            _settingsSaver.Flush();
+            _settings = recorded;
+            return SaveSettingsNow();
+        });
+        switch (outcome)
+        {
+            case AirPlayOnlyStart.Switched:
+                _airPlayOwnSwitchTarget = cableId;
+                break;
+            case AirPlayOnlyStart.NotSaved:
+                // AorinEQ has no log file; a trace line is what a debugger or DebugView sees.
+                System.Diagnostics.Trace.TraceWarning(
+                    $"AirPlay only: could not save the current default output; streaming from {cableId} without switching.");
+                break;
+            case AirPlayOnlyStart.Refused:
+                _airPlayOwnSwitchTarget = movedTo;
+                SaveSettingsNow();
+                System.Diagnostics.Trace.TraceWarning(
+                    $"AirPlay only: Windows refused to make {cableId} the default output; streaming from it without switching.");
+                break;
         }
-        _airPlayOwnSwitchTarget = cableId;
-        if (DefaultEndpointSwitcher.SetDefaultForAllRoles(cableId))
-            return;
-        // AorinEQ has no log file; a trace line is what a debugger or DebugView sees.
-        System.Diagnostics.Trace.TraceWarning(
-            $"AirPlay only: Windows refused to make {cableId} the default output; streaming from it without switching.");
-        EndAirPlayOnly();
     }
 
     /// <summary>Puts back the defaults AirPlay only displaced, then forgets them — through
-    /// <see cref="DefaultEndpointSwitcher.RestoreRecorded"/>, the method the recovery test drives.
+    /// <see cref="DefaultEndpointSwitcher.RestoreRecorded"/>, the method the recovery tests drive.
     /// Every way a stream ends comes here (Disconnect, the receiver going away, an idle hang-up, a
-    /// session error, the app exiting, VB-Cable vanishing, a refused switch), and so does the next
-    /// start after a crash. The Multimedia endpoint it moved to is flagged as our own, so that
-    /// notification raises no notice.</summary>
+    /// session error, the app exiting, VB-Cable vanishing, AirPlay only switched off), and so does
+    /// the next start after a crash. Only the instance that owns settings.json may do it — see
+    /// <see cref="DefaultEndpointSwitcher.MayRestore"/>. The Multimedia endpoint it moved to is
+    /// flagged as our own, so that notification raises no notice. A restore Windows did not
+    /// complete keeps the record, and the next end or start tries again.</summary>
     private void EndAirPlayOnly()
     {
+        if (!DefaultEndpointSwitcher.MayRestore(_ownsMutex, _settingsAdopted)) return;
         if (_settings.AirPlayRestoreDefault is null) return;
         (_settings, _airPlayOwnSwitchTarget) = DefaultEndpointSwitcher.RestoreRecorded(_settings);
-        SaveSettings();
-        _settingsSaver.Flush();
+        if (_settings.AirPlayRestoreDefault is not null)
+            System.Diagnostics.Trace.TraceWarning(
+                "AirPlay only: Windows did not put every default output back; the record is kept for the next try.");
+        SaveSettingsNow();
     }
 
     private void DisconnectAirPlay() => _airPlay?.Stop();
@@ -141,6 +156,9 @@ public partial class App
     {
         _settings = _settings with { AirPlay = setting };
         SaveSettings();
+        // AirPlay only switched off mid-stream gives the user their output back now; the stream
+        // goes on capturing the cable until it ends, as the source only changes on the next connect.
+        if (!setting.AirPlayOnly) EndAirPlayOnly();
 
         // The receiver's own level applies immediately; the queue depth and source only take
         // effect on the next connection, because changing them mid-stream would mean tearing

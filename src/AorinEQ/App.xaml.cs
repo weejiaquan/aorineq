@@ -17,6 +17,11 @@ public partial class App : System.Windows.Application
 
     private Mutex? _mutex;
     private bool _ownsMutex;
+
+    /// <summary>Set once OnStartup has loaded the per-device state and this process is the
+    /// instance: before that (or in a launch that exits early) a save would write defaults over
+    /// settings.json. See <see cref="DefaultEndpointSwitcher.MayRestore"/>.</summary>
+    private bool _settingsAdopted;
     private EventWaitHandle? _showEvent;
     /// <summary>THE thread both low-level hooks below are installed on, and the only thing it
     /// ever does. Not the UI thread, and that is the whole point — see <see cref="HookThread"/>
@@ -420,6 +425,10 @@ public partial class App : System.Windows.Application
             // eapo mode for default-device tracking (per-device state switching) and the
             // mute-handover reads.
             SetupEndpointVolume();
+            // From here on settings.json is this instance's: it holds the mutex (every exit above
+            // returned before this point) and its per-device state is loaded, so a save writes the
+            // user's real state — see DefaultEndpointSwitcher.MayRestore.
+            _settingsAdopted = true;
             // A restore record still on disk means the last session died mid-stream with Windows'
             // default on VB-Cable. Nothing can be streaming yet, so it is put back now — after the
             // endpoint backend exists, so the switch it causes is followed like any other.
@@ -2532,7 +2541,10 @@ public partial class App : System.Windows.Application
         // capturing the cable. SaveSettings below persists the cleared record — and with it gone,
         // the health check at the end of this method judges the user's device as usual.
         if (change == DefaultChange.UserOverride)
+        {
             _settings = _settings with { AirPlayRestoreDefault = null };
+            _airPlayOwnSwitchTarget = null;
+        }
         else if (change == DefaultChange.CableLost)
             EndAirPlayOnly();
         RenderEqConfig();
@@ -3158,20 +3170,22 @@ public partial class App : System.Windows.Application
             DeviceVolumes = new Dictionary<string, DeviceVolumeSetting>(_deviceStates.Snapshot()),
         };
         var s = _settings;
-        _settingsSaver.Post(() =>
-        {
-            try
-            {
-                s.Save(_settingsPath);
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-        });
+        _settingsSaver.Post(() => _lastSettingsSaveSucceeded = s.TrySave(_settingsPath));
     }
+
+    /// <summary><see cref="SaveSettings"/>, landed on disk before it returns, and whether it did.
+    /// For the writes something irreversible waits on — AirPlay only's restore record must be on
+    /// disk before Windows' default moves. Flush runs the save just posted on this thread (or waits
+    /// for it on the timer's), so the flag it leaves is this save's.</summary>
+    private bool SaveSettingsNow()
+    {
+        SaveSettings();
+        _settingsSaver.Flush();
+        return _lastSettingsSaveSucceeded;
+    }
+
+    /// <summary>Whether the last save that ran reached the disk; read by <see cref="SaveSettingsNow"/>.</summary>
+    private volatile bool _lastSettingsSaveSucceeded;
 
     /// <summary>ONE-TIME v3.0.0 rename migration of autostart. An entry left under the pre-rename
     /// name would start an exe that the same rename may have just moved, and this build — looking

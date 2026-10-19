@@ -177,4 +177,24 @@ public sealed record Settings(
             Directory.CreateDirectory(dir);
         File.WriteAllText(path, JsonSerializer.Serialize(this));
     }
+
+    /// <summary><see cref="Save"/> for callers that must know whether the file was written: a
+    /// locked or read-only settings.json is reported, never thrown. The app's coalesced saves go
+    /// through it, and AirPlay only refuses to move Windows' default when it returns false.</summary>
+    public bool TrySave(string path)
+    {
+        try
+        {
+            Save(path);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
 }

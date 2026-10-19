@@ -478,4 +478,24 @@ public class SettingsTests : IDisposable
         Assert.Null(loaded.AirPlayRestoreDefault); // an empty record restores nothing; null says so
         Assert.Equal(VirtualCableInstaller.PendingStartLimit, loaded.VirtualCablePendingStarts);
     }
+
+    [Fact]
+    public void TrySave_writes_the_file_and_says_so()
+    {
+        bool saved = (Settings.Default with { Percent = 37 }).TrySave(_path);
+        _out.WriteLine($"TrySave({_path}) -> {saved}; file exists={File.Exists(_path)}");
+        Assert.True(saved);
+        Assert.Equal(37, Settings.Load(_path).Percent);
+    }
+
+    [Fact]
+    public void TrySave_reports_a_refused_write_instead_of_throwing()
+    {
+        // A real refusal: the settings path is a folder, so Windows will not write a file there.
+        Directory.CreateDirectory(_path);
+        bool saved = (Settings.Default with { Percent = 37 }).TrySave(_path);
+        _out.WriteLine($"TrySave onto a folder -> {saved}; still a folder={Directory.Exists(_path)}");
+        Assert.False(saved);
+        Assert.True(Directory.Exists(_path));
+    }
 }
