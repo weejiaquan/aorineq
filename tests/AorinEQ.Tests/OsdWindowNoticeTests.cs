@@ -419,6 +419,33 @@ public class OsdWindowNoticeTests
         }
         finally { Directory.Delete(folder, recursive: true); }
     }
+
+    /// <summary>App owns its OSD's lifetime, so Close only hides it and the window can be shown
+    /// again; CloseForGood (the designer's notice preview, at its Dispose) really closes it.</summary>
+    [Fact]
+    public void Close_only_hides_the_osd_and_close_for_good_really_closes_it()
+    {
+        // Not With: its teardown hides the window, which a closed window refuses.
+        var r = _sta.Run(() =>
+        {
+            Application.Current.Resources["AppFontFamily"] = new System.Windows.Media.FontFamily("Segoe UI");
+            var osd = new OsdWindow();
+            osd.ApplyConfig(Settings.Default);
+            int closed = 0;
+            osd.Closed += (_, _) => closed++;
+            osd.ShowNotice("Speakers", light: false);
+            osd.Close();
+            var afterClose = (osd.IsVisible, Closed: closed);
+            osd.ShowNotice("Speakers", light: false);
+            bool reshown = osd.IsVisible;
+            osd.CloseForGood();
+            return (afterClose, reshown, AfterCloseForGood: (osd.IsVisible, Closed: closed));
+        });
+        _out.WriteLine($"expected: Close hides without closing, the notice shows again, CloseForGood closes once; actual {r}");
+        Assert.Equal((false, 0), r.afterClose);
+        Assert.True(r.reshown);
+        Assert.Equal((false, 1), r.AfterCloseForGood);
+    }
 }
 
 /// <summary>One STA thread and one <see cref="Application"/> for every test class that builds WPF

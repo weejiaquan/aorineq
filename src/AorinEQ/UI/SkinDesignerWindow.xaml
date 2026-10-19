@@ -39,6 +39,8 @@
                         ToolTip="{loc:T designer.share.tooltip}" />
                 <Button x:Name="TestButton" Focusable="False" Content="{loc:T designer.test.label}" Padding="10,4" Margin="6,0,0,0"
                         Click="OnTestOnDesktop" />
+                <Button x:Name="ShowNoticeButton" Focusable="False" Content="{loc:T designer.show-notice.label}" Padding="10,4" Margin="6,0,0,0"
+                        Click="OnShowNotice" ToolTip="{loc:T designer.show-notice.tooltip}" />
                 <ui:Button x:Name="SaveButton" Focusable="False" Content="{loc:T designer.save.label}" Appearance="Primary" Padding="16,4"
                            Margin="6,0,0,0" Click="OnSave" ToolTipService.ShowOnDisabled="True" />
             </StackPanel>

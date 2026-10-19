@@ -1498,7 +1498,7 @@ public class SkinDesignerWindowTests : IDisposable
             d.LoadSkin("buttons");
             d.Select(SkinLayer.PercentText);
             var buttons = new ButtonBase[] { d.NewButton, d.ImportZipButton, d.ExportZipButton, d.UndoButton, d.RedoButton,
-                d.ShareButton, d.TestButton, d.SaveButton, d.ZoomOutButton, d.ZoomInButton, d.ZoomFitButton, d.ZoomActualButton };
+                d.ShareButton, d.TestButton, d.ShowNoticeButton, d.SaveButton, d.ZoomOutButton, d.ZoomInButton, d.ZoomFitButton, d.ZoomActualButton };
             var focusable = buttons.Where(b => b.Focusable).Select(b => b.Name).ToList();
             bool focused = TakeKeyboardFocus(d, d.Overlay);
             d.ZoomInButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
@@ -1512,11 +1512,11 @@ public class SkinDesignerWindowTests : IDisposable
             d.UpdateLayout();
             bool panned = d.BeginPan(MouseButton.Left, spaceHeld: true, new Point(100, 100));
             d.CanvasScroll.ReleaseMouseCapture();
-            return (focusable, focused, zoomed, buttonTookFocus, after, keyTaken, selection, panned);
+            return (focusable, focused, zoomed, buttonTookFocus, after, keyTaken, selection, panned, Modifiers: Keyboard.Modifiers);
         });
         _out.WriteLine($"expected no focusable buttons, the canvas focused before and after the click, zoom 1.5, Esc on the canvas deselects, a pan; actual " +
                        $"focusable [{string.Join(", ", r.focusable)}], {r.focused}, {r.zoomed}, button took focus {r.buttonTookFocus}, " +
-                       $"{r.after}, Esc taken {r.keyTaken}, selection {r.selection}, panned {r.panned}");
+                       $"{r.after}, Esc taken {r.keyTaken}, selection {r.selection}, panned {r.panned}; keyboard modifiers {r.Modifiers}");
         Assert.Empty(r.focusable);
         Assert.True(r.focused, "the test window could not take the keyboard focus (see output)");
         Assert.Equal(1.5, r.zoomed);
@@ -1589,11 +1589,11 @@ public class SkinDesignerWindowTests : IDisposable
             bool canvasFocused = TakeKeyboardFocus(d, d.Overlay);
             bool escOnCanvas = Press(d.Overlay, Key.Escape);
             return (boxFocused, upTaken, afterUp, labelFocused, scrubbing, scrubbed, escTaken, afterEsc,
-                textFocused, inText, canvasFocused, escOnCanvas, Deselected: d.Selection);
+                textFocused, inText, canvasFocused, escOnCanvas, Deselected: d.Selection, Modifiers: Keyboard.Modifiers);
         });
         _out.WriteLine($"expected box focused, Up taken, Y stepped up from 5 with the box showing it and x still 10; label focused, " +
                        $"scrub 10 steps past that, Esc taken, back to the stepped Y with PercentText still selected; in a text box Left " +
-                       $"and Esc are the box's (x 10, PercentText); canvas focused, Esc taken and SkinInfo selected; actual {r}");
+                       $"and Esc are the box's (x 10, PercentText); canvas focused, Esc taken and SkinInfo selected; actual (Modifiers last) {r}");
         Assert.True(r.boxFocused && r.labelFocused && r.textFocused && r.canvasFocused, "the test window could not take the keyboard focus (see output)");
         Assert.True(r.upTaken);
         Assert.True(r.afterUp.Y > 5, "Up in the box did not step the field");    // 6, or 15 with Shift held: both the field's
@@ -1850,5 +1850,160 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.Equal((true, SkinLayer.PercentText, false), r.afterDown);
         Assert.True(r.Open);
         Assert.Equal(SkinLayer.PercentText, r.Selection);
+    }
+
+    /// <summary>Clicking the eyedropper a second time while it waits starts nothing new: the status
+    /// line it put up is not taken for the one to restore, so ending it brings back what was there
+    /// before the first click.</summary>
+    [Fact]
+    public void A_second_eyedropper_click_still_restores_the_status_line()
+    {
+        MakeSkin("dropper-twice", """{"percentText":{"show":true}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-twice");
+            Click(PercentTextColours(d)[0].Swatch);
+            var before = d.StatusText.Text;
+            Click(d.Picker!.EyedropperButton);
+            Click(d.Picker.EyedropperButton);
+            var waiting = (d.Overlay.EyedropperActive, d.StatusText.Text);
+            d.StopEyedropper();
+            return (before, waiting, After: d.StatusText.Text, d.Overlay.EyedropperActive);
+        });
+        _out.WriteLine($"expected: waiting with '{Loc.T("designer.status.eyedropper")}', then '{r.before}' back and the eyedropper off; actual {r}");
+        Assert.Equal((true, Loc.T("designer.status.eyedropper")), r.waiting);
+        Assert.Equal(r.before, r.After);
+        Assert.False(r.EyedropperActive);
+    }
+
+    /// <summary>Moved to a monitor of another scale, the window shows other device pixels than the
+    /// eyedropper's snapshot holds: the next sample takes a new one.</summary>
+    [Fact]
+    public void A_dpi_change_retakes_the_eyedropper_snapshot()
+    {
+        MakeSkin("dropper-dpi", """{"percentText":{"show":true}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-dpi");
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            var at = d.VolumeBoard.TranslatePoint(new Point(5, 5), d.Overlay);
+            System.Windows.Media.Imaging.BitmapSource Sampled() =>
+                ((System.Windows.Media.Imaging.CroppedBitmap)d.Overlay.Magnifier!(at)!).Source;
+            var first = Sampled();
+            bool cached = ReferenceEquals(first, Sampled());
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(d);
+            // DpiChangedEventArgs has no public constructor; this is the event WPF raises on WM_DPICHANGED.
+            var args = (DpiChangedEventArgs)typeof(DpiChangedEventArgs)
+                .GetConstructor(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, null,
+                    [typeof(DpiScale), typeof(DpiScale), typeof(RoutedEvent), typeof(object)], null)!
+                .Invoke([dpi, new DpiScale(dpi.DpiScaleX * 1.5, dpi.DpiScaleY * 1.5), Window.DpiChangedEvent, d]);
+            d.RaiseEvent(args);
+            bool retaken = !ReferenceEquals(first, Sampled());
+            return (cached, retaken);
+        });
+        _out.WriteLine($"expected the same snapshot twice before the DPI change and a new one after it; actual {r}");
+        Assert.True(r.cached, "the snapshot was retaken with nothing changed, so this test cannot see an invalidation");
+        Assert.True(r.retaken, "the eyedropper kept sampling the snapshot taken at the old DPI");
+    }
+
+    /// <summary>Review focus: a skin written before the strip existed is tested with the app's
+    /// native strip under it, as the real OSD will draw it, and the test copy gains no strip files.</summary>
+    [Fact]
+    public void Test_on_desktop_gives_a_legacy_skin_the_native_strip()
+    {
+        MakeSkin("legacy-test", "{}");
+        string? folder = null;
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("legacy-test");
+            bool shown = d.TestOnDesktop();
+            folder = d.TestFolder;
+            return (shown, d.TestOsd!.IsVisible, d.TestOsd.Height, StripFiles: Directory.GetFiles(folder!, "airplay-*").Length);
+        });
+        _out.WriteLine($"{r}; test folder {folder}");
+        Assert.True(r.shown);
+        Assert.True(r.IsVisible);
+        Assert.Equal(40 + 30, r.Height);     // the bar plus the native strip
+        Assert.Equal(0, r.StripFiles);
+        Assert.False(Directory.Exists(folder), "the test folder outlived the designer");
+    }
+
+    [Fact]
+    public void Test_on_desktop_shows_the_skins_own_strip()
+    {
+        MakeSkin("strip-test", "{}", strip: true);
+        var height = WithDesigner(d =>
+        {
+            d.LoadSkin("strip-test");
+            d.PreviewAirPlayMode.SelectedIndex = 1; // a chosen receiver, not connected: still shown
+            d.TestOnDesktop();
+            return d.TestOsd!.Height;
+        });
+        _out.WriteLine($"expected 64 (40 bar + 24 strip), actual {height}");
+        Assert.Equal(40 + 24, height);
+    }
+
+    [Fact]
+    public void Show_notice_puts_the_real_notice_on_the_desktop_with_the_sample_name()
+    {
+        MakeSkin("notice-test", """{"notice":{"background":"#FF102030"}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("notice-test");
+            d.PreviewDevice.Text = "Den";
+            bool shown = d.ShowTestNotice();
+            var notice = (NoticeView)d.TestNotice!.FindName("NoticeRoot");
+            var seen = (shown, d.TestNotice.IsVisible, notice.NoticeText.Text,
+                Plate: ((System.Windows.Media.SolidColorBrush)notice.PlateBorder.Background).Color);
+            var window = d.TestNotice!;
+            int closed = 0;
+            window.Closed += (_, _) => closed++;
+            d.Dispose();
+            return (seen, StillVisible: window.IsVisible, Closed: closed, Released: d.TestNotice is null);
+        });
+        _out.WriteLine($"expected shown, visible, 'Den', #FF102030, then closed once and released at Dispose; actual {r}");
+        Assert.True(r.seen.shown);
+        Assert.True(r.seen.IsVisible);
+        Assert.Equal("Den", r.seen.Text);
+        Assert.Equal(System.Windows.Media.Color.FromArgb(0xFF, 0x10, 0x20, 0x30), r.seen.Plate);
+        Assert.False(r.StillVisible);
+        Assert.Equal(1, r.Closed);
+        Assert.True(r.Released, "the designer kept the closed notice window");
+    }
+
+    /// <summary>Test on desktop and Show notice write the draft through the writer, which is only
+    /// handed a clean document: with an issue they write nothing, show nothing and say why.</summary>
+    [Fact]
+    public void Test_on_desktop_and_show_notice_refuse_a_document_with_issues()
+    {
+        MakeSkin("issues-test", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("issues-test");
+            d.Commit(SkinEdits.SetName(d.Document, ""));
+            var issues = d.Issues.ToArray();
+            var enabled = (d.TestButton.IsEnabled, d.ShowNoticeButton.IsEnabled);
+            bool tested = d.TestOnDesktop();
+            var afterTest = (d.TestOsd, d.TestFolder, d.StatusText.Text);
+            bool noticed = d.ShowTestNotice();
+            return (issues, enabled, tested, afterTest, noticed, Notice: d.TestNotice, d.TestFolder, d.StatusText.Text);
+        });
+        var message = r.issues.Single().Message;
+        _out.WriteLine($"expected one issue, both buttons enabled (the skin draws), both refused with no window or folder and '{message}' in the status");
+        _out.WriteLine($"actual  : issues [{string.Join("; ", r.issues.AsEnumerable())}] enabled {r.enabled}; test {r.tested} {r.afterTest}; " +
+                       $"notice {r.noticed} window {r.Notice?.ToString() ?? "(none)"} folder {r.TestFolder ?? "(none)"} status '{r.Text}'");
+        Assert.Equal(SkinIssueKind.InvalidName, r.issues.Single().Kind);
+        Assert.Equal((true, true), r.enabled);
+        Assert.False(r.tested);
+        Assert.Null(r.afterTest.TestOsd);
+        Assert.Null(r.afterTest.TestFolder);
+        Assert.Contains(message, r.afterTest.Text);
+        Assert.StartsWith(Loc.T("designer.test.blocked", ""), r.afterTest.Text);
+        Assert.False(r.noticed);
+        Assert.Null(r.Notice);
+        Assert.Null(r.TestFolder);
+        Assert.Contains(message, r.Text);
+        Assert.StartsWith(Loc.T("designer.test.blocked", ""), r.Text);
     }
 }

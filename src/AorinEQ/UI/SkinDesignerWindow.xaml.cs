@@ -38,6 +38,10 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     private SkinLayer _selection = SkinLayer.SkinInfo;
     private SkinOsdWindow? _testOsd;
     private string? _testFolder;
+    /// <summary>The notice test uses the REAL notice window. OsdWindow cancels Close by design
+    /// (App owns its OSD's lifetime), so this one is created once, hidden between uses, and closed
+    /// for good (<see cref="OsdWindow.CloseForGood"/>) at Dispose.</summary>
+    private OsdWindow? _testNotice;
     private bool _populatingSkins;
     private bool _ready;
     private bool _disposed;
@@ -78,6 +82,9 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     internal SkinDocument Document => _history.Current;
     internal DesignerHistory History => _history;
+    internal SkinOsdWindow? TestOsd => _testOsd;
+    internal OsdWindow? TestNotice => _testNotice;
+    internal string? TestFolder => _testFolder;
     internal SkinInfo Info => _info;
     internal IReadOnlyList<SkinIssue> Issues => _issues;
     internal SkinLayer Selection => _selection;
@@ -176,12 +183,16 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         SaveButton.IsEnabled = _issues.Count == 0;
         SaveButton.ToolTip = _issues.Count == 0 ? null : BlockedMessage();
         TestButton.IsEnabled = _info.IsValid;
+        ShowNoticeButton.IsEnabled = _info.IsValid;
         ExportZipButton.IsEnabled = _loadedName is not null;
         ShareButton.IsEnabled = _loadedName is not null;
     }
 
-    private string BlockedMessage() =>
-        Loc.T("designer.save.blocked", string.Join(Environment.NewLine, _issues.Select(i => LayerName(i.Layer) + ": " + i.Message)));
+    private string BlockedMessage() => Loc.T("designer.save.blocked", IssueLines());
+
+    /// <summary>The issues, one per line, each named by its layer.</summary>
+    private string IssueLines() =>
+        string.Join(Environment.NewLine, _issues.Select(i => LayerName(i.Layer) + ": " + i.Message));
 
     /// <summary>Writes the document with <see cref="SkinWriter"/>. Saving under the name of a
     /// DIFFERENT existing skin overwrites it, so that is confirmed first; re-saving the skin being
@@ -392,6 +403,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
                 var s = _currentSettings();
                 PreviewFill.Value += _previewScroll.Feed(n.RawDelta, ScrollStep.StepFor(n.Ctrl, n.Shift, s.StepPercent), s.ScrollInverted);
             };
+            _testOsd.SetAirPlay(PreviewAirPlayState()); // the strip in the preview's state
             _testOsd.ShowVolume(PreviewPercent, PreviewMuted, interactive: true);
             StatusText.Text = Loc.T("designer.status.showing-on-desktop-click");
             return true;
@@ -404,9 +416,13 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     }
 
     /// <summary>Saves the document under a fresh name in %TEMP%\aorineq-skin-preview and loads it
-    /// back - the test OSD shows exactly what a save would load.</summary>
+    /// back - the test OSD shows exactly what a save would load. As for <see cref="Save"/>, the art
+    /// is looked at again first and a document with issues is not written: the writer is only
+    /// handed a clean one.</summary>
     private SkinInfo SaveTestCopy()
     {
+        OnDocumentChanged();
+        if (_issues.Count > 0) throw new InvalidOperationException(Loc.T("designer.test.blocked", IssueLines()));
         var doc = _history.Current;
         var root = Path.Combine(Path.GetTempPath(), "aorineq-skin-preview");
         _testFolder = SkinWriter.Save(root, Guid.NewGuid().ToString("N"), doc.EmptyPath, doc.FullPath,
@@ -415,8 +431,35 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         return info.IsValid ? info : throw new InvalidOperationException(info.Error);
     }
 
+    private void OnShowNotice(object sender, RoutedEventArgs e) => ShowTestNotice();
+
+    /// <summary>Shows the device notice exactly as the OSD will: the real notice window, in the
+    /// skin style, with this draft's notice (or the dark pill when it has none) and the preview's
+    /// sample device name.</summary>
+    internal bool ShowTestNotice()
+    {
+        if (!_info.IsValid) return false;
+        CleanupTestOsd();
+        try
+        {
+            var info = SaveTestCopy();
+            _testNotice ??= new OsdWindow();
+            _testNotice.ApplyConfig(_currentSettings() with { OsdStyle = OsdStyles.Skin });
+            _testNotice.SetSkinNotice(info.Notice, info.Scale);
+            _testNotice.ShowNotice(PreviewDeviceName);
+            StatusText.Text = Loc.T("designer.status.showing-notice");
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException || SkinFrames.IsImagingFailure(ex))
+        {
+            StatusText.Text = ex.Message;
+            return false;
+        }
+    }
+
     private void CleanupTestOsd()
     {
+        _testNotice?.Hide();
         _testOsd?.Close();
         _testOsd = null;
         if (_testFolder is null) return;
@@ -476,6 +519,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         Loc.LanguageChanged -= OnLanguageChanged;
         _history.Changed -= OnDocumentChanged;
         CleanupTestOsd();
+        _testNotice?.CloseForGood(); // its hide timer stops and the window really goes
+        _testNotice = null;
         _skinView?.StopAnimations();
         try
         {

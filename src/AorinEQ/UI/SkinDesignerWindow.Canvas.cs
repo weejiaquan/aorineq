@@ -143,6 +143,8 @@ public partial class SkinDesignerWindow
         Deactivated += (_, _) => StopEyedropper();
         // Scrolled or zoomed, other device pixels are on screen than the snapshot holds.
         CanvasScroll.ScrollChanged += (_, _) => _snapshot = null;
+        // Moved to a monitor of another scale, the screen shows other device pixels too.
+        DpiChanged += (_, _) => _snapshot = null;
         Overlay.PointerMoved += (board, x, y) =>
             CursorText.Text = board is null ? "" : Loc.T("designer.status.cursor", x, y);
     }
@@ -509,10 +511,11 @@ public partial class SkinDesignerWindow
     internal void StartEyedropper()
     {
         _snapshot = null;
+        // A second click while it waits: the status line is its own, not the one to restore.
+        if (!Overlay.EyedropperActive) _statusBeforeEyedropper = StatusText.Text;
         Overlay.EyedropperActive = true;
         Overlay.Magnifier = point => Snapshot().Region(Overlay.TranslatePoint(point, Artboards), 5);
         if (_picker is not null) _picker.StaysOpen = true;
-        _statusBeforeEyedropper = StatusText.Text;
         StatusText.Text = Loc.T("designer.status.eyedropper");
         Overlay.Focus();
     }
