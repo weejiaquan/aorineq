@@ -35,18 +35,19 @@ internal static class PercentTextRenderer
 {
     /// <summary>Rebuilds <paramref name="path"/> to show <paramref name="text"/> styled per
     /// <paramref name="style"/> at <paramref name="scale"/> (font size, outline width, shadow
-    /// blur/depth are all multiplied by scale so the number tracks the skin's zoom). Returns the
-    /// measured text width (already scale-multiplied) so callers can place the Path's margin per
-    /// the style's alignment — the width changes with the digit count, so the margin must be
-    /// recomputed on every update.</summary>
-    public static double Update(Path path, SkinText style, string text, double scale, double pixelsPerDip)
+    /// blur/depth are all multiplied by scale so the number tracks the skin's zoom). An unbold
+    /// style is drawn at <paramref name="unboldWeight"/>, which the caller owns: the percent
+    /// number's historical SemiBold, the AirPlay labels' Normal - so moving a text onto this
+    /// renderer never changes how an existing skin looks. Returns the measured text width (already
+    /// scale-multiplied) so callers can place the Path's margin per the style's alignment — the
+    /// width changes with the digit count, so the margin must be recomputed on every update.</summary>
+    public static double Update(Path path, SkinText style, string text, double scale, double pixelsPerDip,
+        FontWeight unboldWeight)
     {
         var typeface = new Typeface(
             new System.Windows.Media.FontFamily(string.IsNullOrWhiteSpace(style.FontFamily) ? "Segoe UI" : style.FontFamily),
             FontStyles.Normal,
-            // Unbold baseline is SemiBold — the historical look of the percent number before
-            // styling existed, so plain {show,x,y} skins render exactly as they always did.
-            style.Bold ? FontWeights.Bold : FontWeights.SemiBold,
+            style.Bold ? FontWeights.Bold : unboldWeight,
             FontStretches.Normal);
 
         var formatted = new FormattedText(
@@ -70,11 +71,10 @@ internal static class PercentTextRenderer
             path.StrokeThickness = 0;
         }
 
-        var shadow = style.ShadowColor is null ? null : ParseColor(style.ShadowColor);
-        path.Effect = shadow is { } sc
+        path.Effect = SkinColor.Parse(style.ShadowColor) is { } shadow
             ? new DropShadowEffect
             {
-                Color = sc,
+                Color = ToMedia(shadow),
                 BlurRadius = style.ShadowBlur * scale,
                 ShadowDepth = style.ShadowDepth * scale,
                 Direction = 315, // down-right, the conventional shadow angle
@@ -85,28 +85,17 @@ internal static class PercentTextRenderer
         return formatted.WidthIncludingTrailingWhitespace;
     }
 
-    /// <summary>A frozen brush for a user-authored colour, or null when it does not parse. Also
-    /// the device notice's colour parser (<see cref="NoticeView"/>).</summary>
-    internal static SolidColorBrush? Brush(string? hex)
+    /// <summary>A frozen brush for a user-authored colour, or null when it does not parse. Every
+    /// skin colour in the app goes through here (and so through <see cref="SkinColor"/>): the
+    /// notice, the AirPlay strip, the designer's swatches.</summary>
+    internal static SolidColorBrush? Brush(string? color)
     {
-        var c = ParseColor(hex);
-        if (c is null) return null;
-        var brush = new SolidColorBrush(c.Value);
+        if (SkinColor.Parse(color) is not { } parsed) return null;
+        var brush = new SolidColorBrush(ToMedia(parsed));
         brush.Freeze();
         return brush;
     }
 
-    /// <summary>Parses #AARRGGBB / #RRGGBB (and named colors) via WPF's converter; null on any
-    /// failure so callers fall back rather than crash on user-authored strings.</summary>
-    private static System.Windows.Media.Color? ParseColor(string? hex)
-    {
-        if (string.IsNullOrWhiteSpace(hex)) return null;
-        try
-        {
-            var converted = System.Windows.Media.ColorConverter.ConvertFromString(hex);
-            return converted is System.Windows.Media.Color c ? c : null;
-        }
-        catch (FormatException) { return null; }
-        catch (NotSupportedException) { return null; }
-    }
+    internal static System.Windows.Media.Color ToMedia(SkinColor c) =>
+        System.Windows.Media.Color.FromArgb(c.A, c.R, c.G, c.B);
 }

@@ -682,7 +682,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow
         {
             var style = CurrentSkinText()!;
             _lastTextWidth = PercentTextRenderer.Update(PercentPath, style, percent.ToString(), scale,
-                VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                VisualTreeHelper.GetDpi(this).PixelsPerDip, FontWeights.SemiBold);
             int x = int.TryParse(NumberXBox.Text, out var px) ? px : 0;
             int y = int.TryParse(NumberYBox.Text, out var py) ? py : 0;
             // X is the alignment anchor, same math as SkinOsdWindow.ShowVolume.

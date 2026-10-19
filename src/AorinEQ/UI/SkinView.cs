@@ -22,9 +22,9 @@ namespace AorinEQ.UI;
 /// IT IS A CONTROL RATHER THAN A WINDOW ON PURPOSE, and that is the one architectural seam this
 /// release is built around. Until v3.5.0 this code was the body of <see cref="SkinOsdWindow"/>,
 /// so a skin could only ever be a transient OSD. The HUD's volume widget is the second surface
-/// that has to render one — and it renders THIS, not a bespoke bar of its own. Skin format v2 then
-/// upgrades both surfaces by changing one class, instead of two implementations that have already
-/// drifted apart.
+/// that has to render one — and it renders THIS, not a bespoke bar of its own. The Skin Designer
+/// is the third: it re-targets one view at every edit through <see cref="Update"/>, which decodes
+/// a layer again only when its art actually changed.
 ///
 /// What is deliberately NOT here: where the skin appears, when it appears, whether it fades, and
 /// what a click MEANS. Those differ between a transient OSD and a persistent widget, and they
@@ -35,20 +35,32 @@ public sealed class SkinView : UserControl
     /// <summary>The mute badge's glyph, Segoe Fluent Icons / MDL2 "Mute" (U+E74F).</summary>
     private static readonly string MuteGlyph = ((char)0xE74F).ToString();
 
-    private readonly SkinInfo _info;
+    /// <summary>What a decoded layer was decoded FROM. The file's write time is part of it, so art
+    /// re-exported under the same name is decoded again; a GIF's fps is not, because its timing
+    /// comes from the file.</summary>
+    private readonly record struct LayerKey(string Path, int Frames, double Fps, DateTime Written)
+    {
+        public static LayerKey Of(string path, int frames, double fps) =>
+            new(path, frames, ImageProbe.IsGif(path) ? 0 : fps, System.IO.File.GetLastWriteTimeUtc(path));
+    }
+
+    private SkinInfo _info;
 
     // Hit shape = the union of the opaque pixels across ALL frames of the layers CURRENTLY
     // conveying the skin, so an element that is transparent in one animation frame stays clickable
     // throughout. Normal display hit-tests empty∪full; while dedicated muted artwork replaces those
     // layers only ITS pixels are hittable — the hidden bar must not swallow clicks that should fall
     // through to whatever is beneath.
-    private readonly AlphaMap _hitMap;
-    private readonly AlphaMap? _mutedHitMap;
+    private AlphaMap _hitMap;
+    private AlphaMap? _mutedHitMap;
     private bool _mutedLayerShowing;
 
-    private readonly SkinFrames _emptyFrames;
-    private readonly SkinFrames _fullFrames;
-    private readonly SkinFrames? _mutedFrames;
+    private SkinFrames _emptyFrames;
+    private SkinFrames _fullFrames;
+    private SkinFrames? _mutedFrames;
+    private LayerKey _emptyKey;
+    private LayerKey _fullKey;
+    private LayerKey? _mutedKey;
 
     private readonly Image _emptyImage = new() { Stretch = Stretch.Fill };
     private readonly Image _fullImage = new() { Stretch = Stretch.Fill };
@@ -71,8 +83,13 @@ public sealed class SkinView : UserControl
     private int _lastPercent;
     private bool _lastMuted;
 
-    /// <summary>The skin this view was built from.</summary>
+    /// <summary>The skin this view currently draws.</summary>
     public SkinInfo Info => _info;
+
+    internal SkinFrames EmptyFrames => _emptyFrames;
+    internal SkinFrames FullFrames => _fullFrames;
+    internal SkinFrames? MutedFrames => _mutedFrames;
+    internal Path PercentPath => _percentPath;
 
     /// <summary>Total scale applied to the skin's logical pixels: the skin's own scale times the
     /// owner's zoom. All geometry — size, fill width, text position, hit testing — goes through
@@ -102,15 +119,14 @@ public sealed class SkinView : UserControl
     /// contract <see cref="SkinFrames.Load"/> has always had.</summary>
     public SkinView(SkinInfo info)
     {
-        if (!info.IsValid)
-            throw new ArgumentException($"Cannot render an invalid skin: {info.Error}", nameof(info));
+        RequireValid(info);
         _info = info;
-
+        _emptyKey = LayerKey.Of(info.EmptyPath, info.EmptyFrames, info.Fps);
+        _fullKey = LayerKey.Of(info.FullPath, info.FullFrames, info.Fps);
+        _mutedKey = info.MutedPath is null ? null : LayerKey.Of(info.MutedPath, info.MutedFrames, info.Fps);
         _emptyFrames = SkinFrames.Load(info.EmptyPath, info.EmptyFrames, info.Fps);
         _fullFrames = SkinFrames.Load(info.FullPath, info.FullFrames, info.Fps);
-        _mutedFrames = info.MutedPath is null
-            ? null
-            : SkinFrames.Load(info.MutedPath, info.MutedFrames, info.Fps);
+        _mutedFrames = info.MutedPath is null ? null : SkinFrames.Load(info.MutedPath, info.MutedFrames, info.Fps);
         _hitMap = AlphaMap.Union(_emptyFrames.Frames.Concat(_fullFrames.Frames));
         _mutedHitMap = _mutedFrames is null ? null : AlphaMap.Union(_mutedFrames.Frames);
 
@@ -121,11 +137,7 @@ public sealed class SkinView : UserControl
         RenderOptions.SetEdgeMode(_emptyImage, EdgeMode.Aliased);
         RenderOptions.SetEdgeMode(_fullImage, EdgeMode.Aliased);
         _fullImage.Clip = _fillClip;
-
-        _emptyImage.Source = _emptyFrames.Frames[0];
-        _fullImage.Source = _fullFrames.Frames[0];
-        if (_mutedFrames is not null)
-            _mutedImage.Source = _mutedFrames.Frames[0];
+        ShowFirstFrames();
 
         _muteBadge = new Border
         {
@@ -159,10 +171,15 @@ public sealed class SkinView : UserControl
         Content = grid;
         Background = System.Windows.Media.Brushes.Transparent;
 
-        if (info.Text is { Show: true })
-            _percentPath.Visibility = Visibility.Visible;
+        // Wired once: each tick reads whichever frames the view holds NOW, so Update can swap them.
+        _emptyAnimTimer.Tick += (_, _) => Advance(_emptyFrames, ref _emptyFrameIndex, _emptyImage, _emptyAnimTimer);
+        _fullAnimTimer.Tick += (_, _) => Advance(_fullFrames, ref _fullFrameIndex, _fullImage, _fullAnimTimer);
+        _mutedAnimTimer.Tick += (_, _) =>
+        {
+            if (_mutedFrames is not null) Advance(_mutedFrames, ref _mutedFrameIndex, _mutedImage, _mutedAnimTimer);
+        };
 
-        WireAnimation();
+        ApplyText();
         ApplySize();
 
         // Animated layers cost nothing while nobody can see them.
@@ -173,29 +190,68 @@ public sealed class SkinView : UserControl
         };
     }
 
-    private void WireAnimation()
+    /// <summary>Re-targets this view at <paramref name="info"/>. A layer is decoded again only when
+    /// its path, frame count, fps (sheets) or file timestamp changed; text, fill range, scale and
+    /// mute dim are re-applied without touching the art. Everything that has to be decoded is
+    /// decoded BEFORE anything is replaced, so a decode that throws leaves the view drawing exactly
+    /// what it drew.</summary>
+    public void Update(SkinInfo info)
     {
-        if (_emptyFrames.IsAnimated)
-            _emptyAnimTimer.Tick += (_, _) =>
-            {
-                _emptyFrameIndex = (_emptyFrameIndex + 1) % _emptyFrames.Frames.Count;
-                _emptyImage.Source = _emptyFrames.Frames[_emptyFrameIndex];
-                _emptyAnimTimer.Interval = _emptyFrames.Delays[_emptyFrameIndex];
-            };
-        if (_fullFrames.IsAnimated)
-            _fullAnimTimer.Tick += (_, _) =>
-            {
-                _fullFrameIndex = (_fullFrameIndex + 1) % _fullFrames.Frames.Count;
-                _fullImage.Source = _fullFrames.Frames[_fullFrameIndex];
-                _fullAnimTimer.Interval = _fullFrames.Delays[_fullFrameIndex];
-            };
-        if (_mutedFrames is { IsAnimated: true })
-            _mutedAnimTimer.Tick += (_, _) =>
-            {
-                _mutedFrameIndex = (_mutedFrameIndex + 1) % _mutedFrames.Frames.Count;
-                _mutedImage.Source = _mutedFrames.Frames[_mutedFrameIndex];
-                _mutedAnimTimer.Interval = _mutedFrames.Delays[_mutedFrameIndex];
-            };
+        RequireValid(info);
+        var emptyKey = LayerKey.Of(info.EmptyPath, info.EmptyFrames, info.Fps);
+        var fullKey = LayerKey.Of(info.FullPath, info.FullFrames, info.Fps);
+        LayerKey? mutedKey = info.MutedPath is null ? null : LayerKey.Of(info.MutedPath, info.MutedFrames, info.Fps);
+
+        bool emptyChanged = emptyKey != _emptyKey;
+        bool fullChanged = fullKey != _fullKey;
+        bool mutedChanged = mutedKey != _mutedKey;
+        var empty = emptyChanged ? SkinFrames.Load(info.EmptyPath, info.EmptyFrames, info.Fps) : _emptyFrames;
+        var full = fullChanged ? SkinFrames.Load(info.FullPath, info.FullFrames, info.Fps) : _fullFrames;
+        var muted = !mutedChanged ? _mutedFrames
+            : info.MutedPath is null ? null : SkinFrames.Load(info.MutedPath, info.MutedFrames, info.Fps);
+
+        _info = info;
+        if (emptyChanged || fullChanged || mutedChanged)
+        {
+            StopAnimations();
+            if (emptyChanged || fullChanged) _hitMap = AlphaMap.Union(empty.Frames.Concat(full.Frames));
+            if (mutedChanged) _mutedHitMap = muted is null ? null : AlphaMap.Union(muted.Frames);
+            (_emptyFrames, _fullFrames, _mutedFrames) = (empty, full, muted);
+            (_emptyKey, _fullKey, _mutedKey) = (emptyKey, fullKey, mutedKey);
+            _emptyFrameIndex = _fullFrameIndex = _mutedFrameIndex = 0;
+            ShowFirstFrames();
+        }
+        ApplyText();
+        ApplySize();
+        SetVolume(_lastPercent, _lastMuted);
+    }
+
+    private static void RequireValid(SkinInfo info)
+    {
+        if (!info.IsValid)
+            throw new ArgumentException($"Cannot render an invalid skin: {info.Error}", nameof(info));
+    }
+
+    private void ShowFirstFrames()
+    {
+        _emptyImage.Source = _emptyFrames.Frames[0];
+        _fullImage.Source = _fullFrames.Frames[0];
+        _mutedImage.Source = _mutedFrames?.Frames[0];
+    }
+
+    private void ApplyText() =>
+        _percentPath.Visibility = _info.Text is { Show: true } ? Visibility.Visible : Visibility.Collapsed;
+
+    private static void Advance(SkinFrames frames, ref int index, Image image, DispatcherTimer timer)
+    {
+        if (!frames.IsAnimated)
+        {
+            timer.Stop();
+            return;
+        }
+        index = (index + 1) % frames.Frames.Count;
+        image.Source = frames.Frames[index];
+        timer.Interval = frames.Delays[index];
     }
 
     private void ApplySize()
@@ -215,8 +271,9 @@ public sealed class SkinView : UserControl
 
         if (_info.Text is { Show: true } text)
         {
+            // SemiBold is the unbold look the number has always had (plain {show,x,y} skins).
             double textWidth = PercentTextRenderer.Update(_percentPath, text, percent.ToString(),
-                scale, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+                scale, VisualTreeHelper.GetDpi(this).PixelsPerDip, FontWeights.SemiBold);
             // X is the anchor (left edge / centre / right edge per align); recomputed on every
             // update since the measured width changes with the digit count.
             _percentPath.Margin = new Thickness(
