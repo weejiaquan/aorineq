@@ -76,13 +76,15 @@ public class SkinTypographyTests : IDisposable
     }
 
     [Theory]
-    [InlineData(0, 100)]
-    [InlineData(150, 200)]
-    [InlineData(449, 400)]
-    [InlineData(950, 900)]
-    public void A_weight_is_rounded_to_its_hundred_and_clamped_on_every_text(int written, int expected)
+    [InlineData("0", 100)]
+    [InlineData("150", 200)]
+    [InlineData("449", 400)]
+    [InlineData("950", 900)]
+    [InlineData("600.0", 600)]  // fractions: the skin still loads, and the weight rounds
+    [InlineData("450.5", 500)]
+    public void A_weight_is_rounded_to_its_hundred_and_clamped_on_every_text(string written, int expected)
     {
-        var info = LoadStyled("r" + written, $"\"weight\": {written}");
+        var info = LoadStyled("r" + written.Replace('.', '_'), $"\"weight\": {written}");
         var weights = Texts(info).Select(t => t.Weight).ToArray();
         _out.WriteLine($"weight {written}: expected {expected} on all four, actual [{string.Join(", ", weights)}]");
         Assert.All(weights, w => Assert.Equal(expected, w));

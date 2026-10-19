@@ -261,7 +261,7 @@ public static class SkinLoader
             Color = t.Color ?? "",
             FontFamily = t.FontFamily ?? "",
             FontSize = t.FontSize ?? SkinClamps.DefaultFontSize,
-            Weight = t.Weight ?? (t.Bold == true ? SkinClamps.BoldWeight : defaultWeight),
+            Weight = SkinClamps.Weight(t.Weight ?? (t.Bold == true ? SkinClamps.BoldWeight : defaultWeight)),
             Italic = t.Italic ?? false,
             LetterSpacing = t.LetterSpacing ?? 0,
             OutlineColor = t.OutlineColor,
@@ -564,7 +564,7 @@ public static class SkinLoader
         public string? Color { get; set; }
         public string? FontFamily { get; set; }
         public double? FontSize { get; set; }
-        public int? Weight { get; set; }
+        public double? Weight { get; set; }
         public bool? Bold { get; set; } // legacy: read as weight 700 when no weight is given
         public bool? Italic { get; set; }
         public double? LetterSpacing { get; set; }

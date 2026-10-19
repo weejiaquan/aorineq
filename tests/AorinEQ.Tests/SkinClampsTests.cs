@@ -132,9 +132,12 @@ public class SkinClampsTests
     [InlineData(450, 500)]
     [InlineData(600, 600)]
     [InlineData(949, 900)]
-    [InlineData(950, 900)]     // rounds to 1000, then clamps
+    [InlineData(950, 900)]     // clamped to 900 first
+    [InlineData(450.5, 500)]   // a hand-written fraction is still a weight
+    [InlineData(449.9, 400)]
+    [InlineData(double.NaN, 600)]
     [InlineData(int.MaxValue, 900)]
-    public void Weight_rounds_to_the_nearest_hundred_inside_100_to_900(int input, int expected) =>
+    public void Weight_rounds_to_the_nearest_hundred_inside_100_to_900(double input, int expected) =>
         Check($"Weight({input})", expected, SkinClamps.Weight(input));
 
     [Theory]

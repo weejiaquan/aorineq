@@ -69,10 +69,13 @@ public static class SkinClamps
 
     public static double ShadowDepth(double value) => Clamp(value, 0, MaxShadow, DefaultShadowDepth);
 
-    /// <summary>A weight on the OpenType scale: rounded to the nearest 100 (half away from zero)
-    /// and pulled into 100..900.</summary>
-    public static int Weight(int value) =>
-        Math.Clamp((int)Math.Round(value / 100.0, MidpointRounding.AwayFromZero) * 100, MinWeight, MaxWeight);
+    /// <summary>A weight on the OpenType scale: pulled into 100..900 and rounded to the nearest
+    /// 100 (half away from zero), so a hand-written 600.0 or 450.5 is a weight too. A non-finite
+    /// value is the default weight.</summary>
+    public static int Weight(double value) =>
+        double.IsFinite(value)
+            ? (int)(Math.Round(Math.Clamp(value, MinWeight, MaxWeight) / 100, MidpointRounding.AwayFromZero) * 100)
+            : DefaultWeight;
 
     public static double LetterSpacing(double value) => Clamp(value, MinLetterSpacing, MaxLetterSpacing, 0);
 
