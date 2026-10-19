@@ -31,7 +31,7 @@ public class ColorPickerPopupTests
             StaWpf.Pump(); // the anchor must be loaded before a Popup will open on it
             var picker = new ColorPickerPopup();
             try { return body(picker, anchor); }
-            finally { picker.IsOpen = false; host.Close(); }
+            finally { picker.IsOpen = false; StaWpf.Pump(); host.Close(); }
         });
 
     private static void PressEnter(UIElement element) =>
@@ -163,6 +163,84 @@ public class ColorPickerPopupTests
         Assert.False(r.IsOpen);
     }
 
+    /// <summary>Everything the picker tells its host, in order, as "color #..", "closed" and
+    /// "recents [..]".</summary>
+    private static List<string> Record(ColorPickerPopup picker)
+    {
+        var log = new List<string>();
+        picker.ColorChanged += c => log.Add("color " + c);
+        picker.Closed += (_, _) => log.Add("closed");
+        picker.RecentsChanged += c => log.Add($"recents [{string.Join(", ", c)}]");
+        return log;
+    }
+
+    [Fact]
+    public void A_typed_hex_not_yet_entered_is_committed_before_the_host_hears_the_picker_closed()
+    {
+        var log = WithPicker((picker, anchor) =>
+        {
+            var log = Record(picker);
+            picker.Open(anchor, "#FF336699", ["#FF336699"]);
+            StaWpf.Pump();
+            picker.HexBox.Text = "#0F0";                    // typed, no Enter, focus never left
+            picker.IsOpen = false;
+            StaWpf.Pump();
+            return log.ToArray();             // before teardown closes the picker again
+        });
+        _out.WriteLine($"expected [color #FF00FF00, closed, recents [#FF00FF00, #FF336699]]; actual [{string.Join(", ", log)}]");
+        Assert.Equal(new[] { "color #FF00FF00", "closed", "recents [#FF00FF00, #FF336699]" }, log);
+    }
+
+    [Fact]
+    public void A_typed_hex_not_yet_entered_is_committed_before_the_picker_reopens()
+    {
+        var log = WithPicker((picker, anchor) =>
+        {
+            var log = Record(picker);
+            picker.Open(anchor, "#FF336699", ["#FF336699"]);
+            StaWpf.Pump();
+            picker.HexBox.Text = "#0F0";
+            picker.Open(anchor, "#FFFF0000", ["#FF336699"]); // another field asks
+            StaWpf.Pump();
+            return log.ToArray();             // before teardown closes the picker again
+        });
+        _out.WriteLine($"expected [color #FF00FF00, recents [#FF00FF00, #FF336699]]; actual [{string.Join(", ", log)}]");
+        Assert.Equal(new[] { "color #FF00FF00", "recents [#FF00FF00, #FF336699]" }, log);
+    }
+
+    [Fact]
+    public void A_host_that_closes_and_opens_in_one_turn_still_remembers_the_colour()
+    {
+        var log = WithPicker((picker, anchor) =>
+        {
+            var log = Record(picker);
+            picker.Open(anchor, "#FF336699", []);
+            StaWpf.Pump();
+            picker.SetColor("#FF00FF00");
+            picker.IsOpen = false;                          // the HUD closes its menu, then opens the picker
+            picker.Open(anchor, "#FFFF0000", ["#FF336699"]);
+            StaWpf.Pump();
+            return log.ToArray();             // before teardown closes the picker again
+        });
+        _out.WriteLine($"expected [color #FF00FF00, recents [#FF00FF00, #FF336699]]; actual [{string.Join(", ", log)}]");
+        Assert.Equal(new[] { "color #FF00FF00", "recents [#FF00FF00, #FF336699]" }, log);
+    }
+
+    [Fact]
+    public void The_first_opening_remembers_nothing()
+    {
+        var log = WithPicker((picker, anchor) =>
+        {
+            var log = Record(picker);
+            picker.Open(anchor, "#FF336699", ["#FF808080"]);
+            StaWpf.Pump();
+            return (Log: log.ToArray(), Shown: picker.Recents.ToArray());
+        });
+        _out.WriteLine($"expected no events and recents [#FF808080]; actual [{string.Join(", ", log.Log)}], recents [{string.Join(", ", log.Shown)}]");
+        Assert.Empty(log.Log);
+        Assert.Equal(new[] { "#FF808080" }, log.Shown);
+    }
+
     [Fact]
     public void A_grey_keeps_the_hue_the_user_had_and_the_eyedropper_can_be_hidden()
     {
@@ -171,11 +249,15 @@ public class ColorPickerPopupTests
             picker.Open(anchor, "#FF0000FF", []);
             picker.SetColor("#FF808080");
             var hue = picker.HueSlider.Value;
+            picker.SetFromSquare(new Point(ColorPickerPopup.SquareSize, 0)); // back out of the grey
+            var leftGrey = picker.Color;
             picker.EyedropperAvailable = false;
-            return (hue, picker.EyedropperButton.Visibility);
+            return (hue, leftGrey, picker.EyedropperButton.Visibility);
         });
-        _out.WriteLine($"expected hue 240 and the eyedropper Collapsed; actual hue {r.hue}, eyedropper {r.Visibility}");
+        _out.WriteLine($"expected hue 240, #FF0000FF after leaving the grey, the eyedropper Collapsed; " +
+                       $"actual hue {r.hue}, {r.leftGrey}, eyedropper {r.Visibility}");
         Assert.Equal(240.0, r.hue);
+        Assert.Equal("#FF0000FF", r.leftGrey);
         Assert.Equal(Visibility.Collapsed, r.Visibility);
     }
 }

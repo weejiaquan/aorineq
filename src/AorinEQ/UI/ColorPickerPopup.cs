@@ -42,7 +42,8 @@ internal sealed class ColorPickerPopup : Popup
     };
     private readonly Border _alphaRamp = new() { Height = 10, CornerRadius = new CornerRadius(2) };
 
-    private double _hue, _saturation, _value;
+    // White, matching _opened, so the Remember() at the very first Open finds nothing changed.
+    private double _hue, _saturation, _value = 1;
     private byte _alpha = 0xFF;
     private string _opened = "#FFFFFFFF";
     private bool _syncing;
@@ -164,14 +165,16 @@ internal sealed class ColorPickerPopup : Popup
     public event Action<IReadOnlyList<string>>? RecentsChanged;
 
     /// <summary>Opens under <paramref name="anchor"/> on <paramref name="initial"/> (white when it
-    /// is not a colour). Opening while already open - another field asking - first remembers the
-    /// colour the last opening left: closing and reopening in one turn cancels the close, so
-    /// <see cref="OnClosed"/> would never run for it. It goes on top of <paramref name="recents"/>,
-    /// which the host read before that colour was pushed.</summary>
+    /// is not a colour). First it ends the last opening - a pending hex edit committed, the colour
+    /// it left remembered - because closing and reopening in one turn (another field asking while
+    /// open, or a host that closes then opens) cancels the close, so <see cref="OnClosed"/> would
+    /// never run for it. That colour goes on top of <paramref name="recents"/>, which the host read
+    /// before it was pushed.</summary>
     public void Open(UIElement anchor, string initial, IReadOnlyList<string> recents)
     {
+        CommitPendingHex();
         Recents = SkinColor.NormalizeRecents(recents);
-        if (IsOpen) Remember();
+        Remember();
         IsOpen = false;
         BuildRecents();
         _opened = SkinColor.Format(initial) ?? "#FFFFFFFF";
@@ -215,6 +218,9 @@ internal sealed class ColorPickerPopup : Popup
 
     protected override void OnClosed(EventArgs e)
     {
+        // Before base: the host's Closed handlers must already have seen the typed colour. The
+        // hex box losing focus would commit it too, but only after this.
+        CommitPendingHex();
         base.OnClosed(e);
         StaysOpen = false;
         Remember();
@@ -266,6 +272,11 @@ internal sealed class ColorPickerPopup : Popup
     }
 
     private void Raise() => ColorChanged?.Invoke(Color);
+
+    private void CommitPendingHex()
+    {
+        if (HexBox.Text != Color) CommitHex();
+    }
 
     private void CommitHex()
     {
