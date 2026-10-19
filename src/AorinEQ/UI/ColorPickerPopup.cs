@@ -184,6 +184,15 @@ internal sealed class ColorPickerPopup : Popup
         IsOpen = true;
     }
 
+    /// <summary>Ends the current opening now: a pending hex edit committed, the colour remembered.
+    /// <see cref="OnClosed"/> does the same a turn after the popup closes, which a host shutting
+    /// down cannot wait for; remembering twice is a no-op.</summary>
+    public void Commit()
+    {
+        CommitPendingHex();
+        Remember();
+    }
+
     /// <summary>Takes a colour from outside the picker - a recent swatch, the eyedropper - as if
     /// the user had picked it here.</summary>
     public void SetColor(string color)

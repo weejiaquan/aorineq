@@ -227,6 +227,25 @@ public class ColorPickerPopupTests
     }
 
     [Fact]
+    public void Commit_remembers_the_colour_and_a_typed_hex_now_and_only_once()
+    {
+        var log = WithPicker((picker, anchor) =>
+        {
+            var log = Record(picker);
+            picker.Open(anchor, "#FF336699", []);
+            StaWpf.Pump();
+            picker.HexBox.Text = "#FF00FF00";
+            picker.Commit();
+            picker.Commit();                                // idempotent
+            picker.IsOpen = false;
+            StaWpf.Pump();                                  // the late OnClosed must not push again
+            return log.ToArray();
+        });
+        _out.WriteLine($"expected [color #FF00FF00, recents [#FF00FF00], closed]; actual [{string.Join(", ", log)}]");
+        Assert.Equal(new[] { "color #FF00FF00", "recents [#FF00FF00]", "closed" }, log);
+    }
+
+    [Fact]
     public void The_first_opening_remembers_nothing()
     {
         var log = WithPicker((picker, anchor) =>

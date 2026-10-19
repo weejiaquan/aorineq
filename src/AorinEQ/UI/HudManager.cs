@@ -190,7 +190,14 @@ internal sealed class HudManager : IDisposable
     /// still swallowed, by the one surface the mode switch had not reached.</summary>
     private void CloseWidgetMenu()
     {
-        if (_colourPicker is { IsOpen: true }) _colourPicker.IsOpen = false;
+        if (_colourPicker is { IsOpen: true } picker)
+        {
+            // Now, not on the picker's Closed a turn later: a shutdown or an edit-mode exit must not
+            // lose the pick or its place in the recents.
+            picker.Commit();
+            ApplyPickedColour();
+            picker.IsOpen = false;
+        }
         if (_openMenu is null) return;
         _openMenu.IsOpen = false;
         _openMenu = null;
@@ -227,12 +234,21 @@ internal sealed class HudManager : IDisposable
     private ColorPickerPopup CreateColourPicker()
     {
         var picker = new ColorPickerPopup { EyedropperAvailable = false };
-        picker.ColorChanged += colour => _pickLatest = colour;
-        // A late Closed from an opening that was since reopened must not end the new one.
-        picker.Closed += (_, _) => { if (!picker.IsOpen) ApplyPickedColour(); };
-        picker.RecentsChanged += colours => RecentColorsChanged?.Invoke(colours);
+        picker.ColorChanged += OnPickerColorChanged;
+        picker.Closed += OnPickerClosed;
+        picker.RecentsChanged += OnPickerRecentsChanged;
         return picker;
     }
+
+    private void OnPickerColorChanged(string colour) => _pickLatest = colour;
+
+    // A late Closed from an opening that was since reopened must not end the new one.
+    private void OnPickerClosed(object? sender, EventArgs e)
+    {
+        if (sender is ColorPickerPopup { IsOpen: false }) ApplyPickedColour();
+    }
+
+    private void OnPickerRecentsChanged(IReadOnlyList<string> colours) => RecentColorsChanged?.Invoke(colours);
 
     private void CloseWindow(string id)
     {
@@ -598,9 +614,17 @@ internal sealed class HudManager : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
-        Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnAppThemeChanged;
+        // Before _disposed and the store go: a pending pick is applied and its recents pushed now.
         CloseWidgetMenu();
+        _disposed = true;
+        if (_colourPicker is { } picker)
+        {
+            picker.ColorChanged -= OnPickerColorChanged;
+            picker.Closed -= OnPickerClosed;
+            picker.RecentsChanged -= OnPickerRecentsChanged;
+            _colourPicker = null;
+        }
+        Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnAppThemeChanged;
         _timer.Stop();
         _audio?.Dispose();
         _audio = null;

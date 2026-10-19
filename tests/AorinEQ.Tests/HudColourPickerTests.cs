@@ -110,6 +110,52 @@ public class HudColourPickerTests : IDisposable
     }
 
     [Fact]
+    public void Disposing_with_the_picker_open_applies_the_pick_and_pushes_the_recents()
+    {
+        var r = _sta.Run(() =>
+        {
+            var path = Path.Combine(_dir, "dispose.json");
+            var store = new HudStore(path);
+            store.Update(l => l.Add(HudWidget.Create(HudWidgetTypes.Spectrum) with { Visible = false }));
+            var widget = store.Layout.Widgets.Single();
+            using var pipeline = new SharedAudioPipeline();
+            var hud = new HudManager(store, pipeline, () => new HudManager.HudRuntimeState(50, false, null, "", []));
+            var pushed = new List<string[]>();
+            hud.RecentColors = () => [];
+            hud.RecentColorsChanged += c => pushed.Add(c.ToArray());
+            var window = new HudWidgetWindow(widget, new HudSpectrumView());
+            window.Show();
+            ClickLowColour(hud, window);
+            hud.ColourPicker!.SetColor("#FF00FF00");
+            hud.Dispose(); // no Pump: Closed has not been raised and the store is gone after this
+            window.Close();
+            var onDisk = new HudStore(path).Layout.Widgets.Single().ColorStart;
+            return (onDisk, Pushed: pushed.ToArray(), Picker: hud.ColourPicker);
+        });
+        _out.WriteLine($"on disk {r.onDisk}; pushed {string.Join(" | ", r.Pushed.Select(p => string.Join(", ", p)))}; picker released {r.Picker is null}");
+        Assert.Equal("#FF00FF00", r.onDisk);
+        Assert.Equal(new[] { "#FF00FF00" }, Assert.Single(r.Pushed));
+        Assert.Null(r.Picker);
+    }
+
+    [Fact]
+    public void Leaving_edit_mode_with_the_picker_open_applies_the_pick_at_once()
+    {
+        var r = WithHud((hud, window, store, pushed) =>
+        {
+            hud.SetMode(HudModes.Edit);
+            ClickLowColour(hud, window);
+            hud.ColourPicker!.SetColor("#FF00FF00");
+            hud.SetMode(HudModes.Live); // no Pump
+            return (After: store.Layout.Widgets.Single().ColorStart, Open: hud.ColourPicker.IsOpen, Pushed: pushed.Count);
+        });
+        _out.WriteLine($"after {r.After}; open {r.Open}; pushed {r.Pushed}");
+        Assert.Equal("#FF00FF00", r.After);
+        Assert.False(r.Open);
+        Assert.Equal(1, r.Pushed);
+    }
+
+    [Fact]
     public void Closing_the_picker_without_a_change_changes_nothing()
     {
         var r = WithHud((hud, window, store, pushed) =>
