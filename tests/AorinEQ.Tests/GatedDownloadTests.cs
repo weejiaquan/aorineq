@@ -24,28 +24,6 @@ public class GatedDownloadTests
         return payload;
     }
 
-    private static (HttpListener Listener, string Url, Task Serve) Serve(byte[] body, bool chunked = false)
-    {
-        var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        int port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        var prefix = $"http://localhost:{port}/";
-        var listener = new HttpListener();
-        listener.Prefixes.Add(prefix);
-        listener.Start();
-        var serve = Task.Run(async () =>
-        {
-            var ctx = await listener.GetContextAsync();
-            if (chunked) ctx.Response.SendChunked = true;
-            else ctx.Response.ContentLength64 = body.Length;
-            try { await ctx.Response.OutputStream.WriteAsync(body); }
-            catch (HttpListenerException) { } // client aborted mid-body (size-cap tests)
-            try { ctx.Response.Close(); } catch (HttpListenerException) { }
-        });
-        return (listener, prefix + "file.bin", serve);
-    }
-
     private static string TempDest() =>
         Path.Combine(Path.GetTempPath(), "apo-gated-test-" + Guid.NewGuid().ToString("N") + ".bin");
 
@@ -53,7 +31,7 @@ public class GatedDownloadTests
     public async Task Download_accepts_matching_magic_and_sha256()
     {
         var payload = ZipPayload(200_000);
-        var (listener, url, serve) = Serve(payload);
+        var (listener, url, serve) = LoopbackHttp.Serve(payload);
         var dest = TempDest();
         try
         {
@@ -74,7 +52,7 @@ public class GatedDownloadTests
     public async Task Download_without_pin_skips_sha_gate_but_keeps_magic_gate()
     {
         var payload = ZipPayload(1000);
-        var (listener, url, serve) = Serve(payload);
+        var (listener, url, serve) = LoopbackHttp.Serve(payload);
         var dest = TempDest();
         try
         {
@@ -93,7 +71,7 @@ public class GatedDownloadTests
     public async Task Download_rejects_sha256_mismatch_and_deletes_staging()
     {
         var payload = ZipPayload(1000);
-        var (listener, url, serve) = Serve(payload);
+        var (listener, url, serve) = LoopbackHttp.Serve(payload);
         var dest = TempDest();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => GatedDownload.DownloadAsync(
             url, dest, 20 * 1024 * 1024, GatedDownload.ZipMagic, new string('0', 64)));
@@ -108,7 +86,7 @@ public class GatedDownloadTests
     public async Task Download_rejects_wrong_magic_and_deletes_staging()
     {
         var payload = new byte[1000]; // zeros: neither PK nor MZ
-        var (listener, url, serve) = Serve(payload);
+        var (listener, url, serve) = LoopbackHttp.Serve(payload);
         var dest = TempDest();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => GatedDownload.DownloadAsync(
             url, dest, 20 * 1024 * 1024, GatedDownload.ExeMagic, Sha256Hex(payload)));
@@ -122,7 +100,7 @@ public class GatedDownloadTests
     public async Task Download_rejects_declared_oversize_before_reading_body()
     {
         var payload = ZipPayload(50_000);
-        var (listener, url, serve) = Serve(payload);
+        var (listener, url, serve) = LoopbackHttp.Serve(payload);
         var dest = TempDest();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => GatedDownload.DownloadAsync(
             url, dest, maxBytes: 10_000, GatedDownload.ZipMagic, null));
@@ -137,7 +115,7 @@ public class GatedDownloadTests
     public async Task Download_rejects_streamed_oversize_without_content_length()
     {
         var payload = ZipPayload(200_000);
-        var (listener, url, serve) = Serve(payload, chunked: true); // no Content-Length header
+        var (listener, url, serve) = LoopbackHttp.Serve(payload, chunked: true); // no Content-Length header
         var dest = TempDest();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => GatedDownload.DownloadAsync(
             url, dest, maxBytes: 10_000, GatedDownload.ZipMagic, null));

@@ -66,6 +66,9 @@
          rather than a copy of it. Nothing else in the build reads this file. -->
     <None Include="..\..\installer\AorinEQ.iss" Link="AorinEQ.iss"
           CopyToOutputDirectory="PreserveNewest" />
+    <!-- Real captures of third-party pages the product parses (VB-Audio's cable page), copied
+         beside the test assembly so tests read the saved bytes, not a hand-written imitation. -->
+    <None Include="Fixtures\*.html" CopyToOutputDirectory="PreserveNewest" />
     <!-- Directory.Build.props and the project files are deliberately NOT linked here:
          VersionSingleSourceTests walks the repository for them instead, because a list fixed at
          build time cannot express "no project, including one added later, redeclares the

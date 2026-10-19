@@ -7,11 +7,11 @@ namespace AorinEQ.Tests;
 /// <summary>Real WinVerifyTrust against real files on this machine. The runtime's own
 /// System.Private.CoreLib.dll is Authenticode-signed by Microsoft (CN=.NET), which makes it a valid
 /// signature with the WRONG signer for VB-Cable's purposes; AorinEQ's own locally built assembly is
-/// unsigned. No VB-Audio-signed file ships with the repo, so the right-signer case is the literal
-/// compared against: the wrong-signer test proves it is not matched by accident.</summary>
+/// unsigned. No VB-Audio-signed file ships with the repo, so the right-signer case is VB-Audio's
+/// real setup, downloaded live in VirtualCableInstallerTests (Requires=Network); here the
+/// wrong-signer test proves the constant is not matched by accident.</summary>
 public class AuthenticodeTests
 {
-    private const string VbAudioSigner = "BUREL VINCENT Entrepreneur individuel";
     private readonly ITestOutputHelper _out;
     public AuthenticodeTests(ITestOutputHelper output) => _out = output;
 
@@ -27,7 +27,7 @@ public class AuthenticodeTests
         var cn = Authenticode.VerifiedSignerCommonName(file);
         _out.WriteLine($"{CoreLib}: verified signer CN='{cn}'");
         Assert.Equal(".NET", cn);
-        Assert.NotEqual(VbAudioSigner, cn);
+        Assert.NotEqual(VirtualCableInstaller.SignerCommonName, cn);
     }
 
     [Fact]

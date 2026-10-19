@@ -39,4 +39,10 @@ public static class Requires
     /// These tests move the real default device (restoring it afterwards) — the same trade the
     /// rest of the audio tests make when they move the real volume.</summary>
     public const string MultipleRenderEndpoints = "MultipleRenderEndpoints";
+
+    /// <summary>The public internet — specifically a THIRD-PARTY server (VB-Audio's cable page and
+    /// download host). These tests prove the real vendor page and package still pass every gate,
+    /// which no saved copy can; CI must not go red because somebody else's server is slow or
+    /// redesigned, so the gate excludes them and they run at the desk and before every release.</summary>
+    public const string Network = "Network";
 }
