@@ -39,4 +39,12 @@ public static class Requires
     /// These tests move the real default device (restoring it afterwards) — the same trade the
     /// rest of the audio tests make when they move the real volume.</summary>
     public const string MultipleRenderEndpoints = "MultipleRenderEndpoints";
+
+    /// <summary>An interactive desktop that lets the test's window be activated and take the real
+    /// keyboard focus, and whose real keyboard has no modifier held. Keyboard focus only lands in
+    /// the foreground window, so in a service session (a CI runner, a locked or remote-minimised
+    /// desktop) Activate and Keyboard.Focus are refused and these tests would assert on a focus
+    /// change that never happened. Raised key events carry the real keyboard's modifiers, so the
+    /// routing tests also need nobody holding Ctrl or Shift at the machine.</summary>
+    public const string InteractiveDesktop = "InteractiveDesktop";
 }

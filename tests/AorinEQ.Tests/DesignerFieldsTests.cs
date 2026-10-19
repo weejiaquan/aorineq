@@ -90,6 +90,7 @@ public class DesignerFieldsTests : IDisposable
         { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
 
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void Arrow_steps_on_the_focused_label_end_when_focus_leaves_it()
     {
         var r = Hosted(() => new NumberField("Size", 0, 100), field =>

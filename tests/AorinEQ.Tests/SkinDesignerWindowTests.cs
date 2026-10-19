@@ -1440,6 +1440,7 @@ public class SkinDesignerWindowTests : IDisposable
     /// what commits the field being typed in, which can re-lay the canvas, so a point read before
     /// it could be stale.</summary>
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void A_canvas_press_reads_its_point_after_taking_the_focus()
     {
         MakeSkin("press", """{"percentText":{"show":true,"x":40,"y":0}}""");
@@ -1518,6 +1519,7 @@ public class SkinDesignerWindowTests : IDisposable
     /// <summary>A clicked toolbar or zoom button does not keep the keyboard: the canvas keeps it, so
     /// Space held for a pan is not a second click of the button, and the canvas still takes its keys.</summary>
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void Clicked_buttons_leave_the_keyboard_with_the_canvas()
     {
         MakeSkin("buttons", """{"scale":2,"percentText":{"show":true,"x":10,"y":5}}""");
@@ -1591,6 +1593,7 @@ public class SkinDesignerWindowTests : IDisposable
     /// Ctrl changes. Shift steps and nudges are covered with explicit modifiers by the HandleKey and
     /// HandleShortcut tests.</summary>
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void Keys_reach_the_field_that_has_them_and_the_canvas_otherwise()
     {
         MakeSkin("route", """{"percentText":{"show":true,"x":10,"y":5}}""");
@@ -1674,6 +1677,7 @@ public class SkinDesignerWindowTests : IDisposable
     /// <summary>Esc while the eyedropper waits cancels it - and only it: the selection, the
     /// history and the picker are left as they were. The next Esc deselects as usual.</summary>
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void Esc_cancels_the_eyedropper_before_it_deselects()
     {
         MakeSkin("dropper-esc", """{"percentText":{"show":true}}""");
@@ -1728,6 +1732,7 @@ public class SkinDesignerWindowTests : IDisposable
     /// <summary>Switching to another app while the eyedropper waits ends it: the pinned picker
     /// would otherwise float over that app. Needs a desktop that can activate windows.</summary>
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void Leaving_the_window_ends_the_eyedropper()
     {
         MakeSkin("dropper-away", """{"percentText":{"show":true}}""");
@@ -1838,6 +1843,7 @@ public class SkinDesignerWindowTests : IDisposable
     /// <summary>Esc cancels the eyedropper whatever has the keyboard - a Properties text box
     /// included, through the real key routing - and the box keeps what it shows.</summary>
     [Fact]
+    [Trait(Requires.Key, Requires.InteractiveDesktop)]
     public void Esc_in_a_text_box_cancels_the_eyedropper()
     {
         MakeSkin("dropper-box", """{"percentText":{"show":true,"x":40}}""");
