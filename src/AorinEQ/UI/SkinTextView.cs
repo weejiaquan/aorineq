@@ -85,4 +85,8 @@ internal sealed class SkinTextView : FrameworkElement
         Glyphs.Arrange(new Rect(new System.Windows.Point(left, 0), Glyphs.DesiredSize));
         return finalSize;
     }
+
+    /// <summary>The glyph geometry is built for one PixelsPerDip, so on a monitor with another the
+    /// text is laid out again, as a TextBlock is.</summary>
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi) => InvalidateMeasure();
 }
