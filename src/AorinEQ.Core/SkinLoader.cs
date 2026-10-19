@@ -97,32 +97,6 @@ public sealed record SkinInfo(string Name, string Folder, string EmptyPath, stri
 /// &lt;layer&gt;.png (preferred — static or sprite sheet) or &lt;layer&gt;.gif (animated).</summary>
 public static class SkinLoader
 {
-    private const double MinScale = 0.25;
-    private const double MaxScale = 4.0;
-    private const double DefaultScale = 1.0;
-    private const double MinFps = 1.0;
-    private const double MaxFps = 60.0;
-    private const double DefaultFps = 10.0;
-    private const double MinFontSize = 4.0;
-    private const double MaxFontSize = 200.0;
-    private const double MaxOutlineWidth = 20.0;
-    private const double MaxShadow = 50.0;
-    private const double DefaultMutedDim = 0.6; // the pre-1.8 hardcoded mute dim opacity
-
-    private static string EmptyToDefault(string? value, string fallback) =>
-        string.IsNullOrWhiteSpace(value) ? fallback : value;
-
-    /// <summary>Case-insensitive align parse; anything but center/right reads as left, the
-    /// historical anchor semantics of x.</summary>
-    private static string NormalizeAlign(string? value)
-    {
-        var v = value?.Trim().ToLowerInvariant();
-        return v is "center" or "right" ? v : "left";
-    }
-
-    private static string? NullIfBlank(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
-
     // JsonSerializerOptions caches type metadata internally — a fresh instance per Deserialize
     // call would rebuild that metadata every time a skin is (re)loaded or the folder is scanned.
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -134,18 +108,18 @@ public static class SkinLoader
         string emptyPath = Path.Combine(folder, "empty.png");
         string fullPath = Path.Combine(folder, "full.png");
         SkinText? text = null;
-        double scale = DefaultScale;
-        double fps = DefaultFps;
+        double scale = SkinClamps.DefaultScale;
+        double fps = SkinClamps.DefaultFps;
         int emptyFrames = 1;
         int fullFrames = 1;
         int mutedFrames = 1;
-        double mutedDim = DefaultMutedDim;
+        double mutedDim = SkinClamps.DefaultMutedDim;
         int? fillStartJson = null;
         int? fillEndJson = null;
         SkinMeta meta = SkinMeta.None;
 
         SkinInfo Bad(string error) => new(name, folder, emptyPath, fullPath, 0, 0, text, scale,
-            fps, 1, 1, false, false, 0, 0, null, false, 1, DefaultMutedDim, meta, error);
+            fps, 1, 1, false, false, 0, 0, null, false, 1, SkinClamps.DefaultMutedDim, meta, error);
 
         try
         {
@@ -172,17 +146,17 @@ public static class SkinLoader
 
                 text = ReadText(parsed?.PercentText) ?? text;
                 if (parsed?.Scale is { } rawScale)
-                    scale = Math.Clamp(rawScale, MinScale, MaxScale);
+                    scale = SkinClamps.Scale(rawScale);
                 if (parsed?.Fps is { } rawFps)
-                    fps = Math.Clamp(rawFps, MinFps, MaxFps);
+                    fps = SkinClamps.Fps(rawFps);
                 if (parsed?.EmptyFrames is { } ef)
-                    emptyFrames = Math.Max(1, ef);
+                    emptyFrames = SkinClamps.Frames(ef);
                 if (parsed?.FullFrames is { } ff)
-                    fullFrames = Math.Max(1, ff);
+                    fullFrames = SkinClamps.Frames(ff);
                 if (parsed?.MutedFrames is { } mf)
-                    mutedFrames = Math.Max(1, mf);
+                    mutedFrames = SkinClamps.Frames(mf);
                 if (parsed?.MutedDim is { } dim)
-                    mutedDim = Math.Clamp(dim, 0.0, 1.0);
+                    mutedDim = SkinClamps.MutedDim(dim);
                 fillStartJson = parsed?.FillStartX;
                 fillEndJson = parsed?.FillEndX;
                 airPlayJson = parsed?.AirPlay;
@@ -234,8 +208,8 @@ public static class SkinLoader
             // Fill range: where the bar actually lives inside the (possibly wider, decorative)
             // image. Defaults to the full width; values clamp into the image, but an inverted or
             // empty range is an authoring error worth surfacing rather than guessing around.
-            int fillStart = Math.Clamp(fillStartJson ?? 0, 0, empty.LogicalWidth);
-            int fillEnd = Math.Clamp(fillEndJson ?? empty.LogicalWidth, 0, empty.LogicalWidth);
+            int fillStart = SkinClamps.FillStart(fillStartJson, empty.LogicalWidth);
+            int fillEnd = SkinClamps.FillEnd(fillEndJson, empty.LogicalWidth);
             if (fillStart >= fillEnd)
                 return Bad($"fillStartX ({fillStart}) must be less than fillEndX ({fillEnd})");
 
@@ -257,17 +231,17 @@ public static class SkinLoader
     /// Shared by the volume bar's percent text and by both of the AirPlay bar's labels: three
     /// callers, one set of defaults, so a clamp fixed in one place is fixed everywhere.</summary>
     private static SkinText? ReadText(SkinTextJson? t) =>
-        t is null ? null : new SkinText(t.Show, t.X, t.Y,
-            Color: EmptyToDefault(t.Color, "#FFFFFFFF"),
-            FontFamily: EmptyToDefault(t.FontFamily, "Segoe UI"),
-            FontSize: Math.Clamp(t.FontSize ?? 14, MinFontSize, MaxFontSize),
+        t is null ? null : SkinClamps.Text(new SkinText(t.Show, t.X, t.Y,
+            Color: t.Color ?? "",
+            FontFamily: t.FontFamily ?? "",
+            FontSize: t.FontSize ?? SkinClamps.DefaultFontSize,
             Bold: t.Bold ?? false,
-            OutlineColor: NullIfBlank(t.OutlineColor),
-            OutlineWidth: Math.Clamp(t.OutlineWidth ?? 0, 0, MaxOutlineWidth),
-            ShadowColor: NullIfBlank(t.ShadowColor),
-            ShadowBlur: Math.Clamp(t.ShadowBlur ?? 4, 0, MaxShadow),
-            ShadowDepth: Math.Clamp(t.ShadowDepth ?? 2, 0, MaxShadow),
-            Align: NormalizeAlign(t.Align));
+            OutlineColor: t.OutlineColor,
+            OutlineWidth: t.OutlineWidth ?? 0,
+            ShadowColor: t.ShadowColor,
+            ShadowBlur: t.ShadowBlur ?? SkinClamps.DefaultShadowBlur,
+            ShadowDepth: t.ShadowDepth ?? SkinClamps.DefaultShadowDepth,
+            Align: t.Align ?? ""));
 
     /// <summary>Reads the "airplay" block out of its raw element, or null when it is absent or is
     /// not an object at all. Deliberately total: a wrong type there must not throw, for the same
@@ -308,8 +282,8 @@ public static class SkinLoader
                        + "airplay-empty/airplay-full artwork.");
         }
 
-        int emptyFrames = Math.Max(1, json?.EmptyFrames ?? 1);
-        int fullFrames = Math.Max(1, json?.FullFrames ?? 1);
+        int emptyFrames = SkinClamps.Frames(json?.EmptyFrames ?? 1);
+        int fullFrames = SkinClamps.Frames(json?.FullFrames ?? 1);
 
         var empty = ResolveLayer(folder, "airplay-empty", emptyFrames);
         if (empty.Error is not null) return (null, empty.Error);
@@ -326,26 +300,25 @@ public static class SkinLoader
         int width = empty.LogicalWidth;
         int height = empty.LogicalHeight;
 
-        int fillStart = Math.Clamp(json?.FillStartX ?? 0, 0, width);
-        int fillEnd = Math.Clamp(json?.FillEndX ?? width, 0, width);
+        int fillStart = SkinClamps.FillStart(json?.FillStartX, width);
+        int fillEnd = SkinClamps.FillEnd(json?.FillEndX, width);
         if (fillStart >= fillEnd)
             return (null, $"airplay fillStartX ({fillStart}) must be less than fillEndX ({fillEnd})");
 
         // No declared region means the whole bar opens the dropdown, so a skin that only drops in
         // two PNGs still gets a usable control rather than a decorative strip.
         var hit = json?.DropdownHit is { } h
-            ? ClampHit(h, width, height)
+            ? SkinClamps.Hit(h.X, h.Y, h.W, h.H, width, height)
             : new SkinHitRect(0, 0, width, height);
 
         // The connect button is opt-in and has NO default region, which is the opposite of the
         // dropdown's. The dropdown falling back to the whole bar makes a two-PNG skin usable; a
         // connect button doing the same would put a hidden power switch under every pixel of every
         // skin written before this existed, and connecting by accident is not a small mistake.
-        var connect = json?.ConnectHit is { } c ? ClampHit(c, width, height) : null;
-
-        // A zero-area region is an authoring slip, not a control. Dropped rather than reported,
-        // for the same reason everything else here fails soft: it costs the strip nothing.
-        if (connect is { Width: 0 } or { Height: 0 }) connect = null;
+        // A zero-area region is an authoring slip and is dropped (OptionalHit), failing soft.
+        var connect = json?.ConnectHit is { } c
+            ? SkinClamps.OptionalHit(SkinClamps.Hit(c.X, c.Y, c.W, c.H, width, height), width, height)
+            : null;
 
         return (new SkinAirPlay(empty.Path, full.Path, width, height,
             empty.IsGif, full.IsGif,
@@ -354,9 +327,6 @@ public static class SkinLoader
             ReadText(json?.NameText), ReadText(json?.PercentText), hit,
             connect, json?.ConnectColor), null);
     }
-
-    private const double MaxCornerRadius = 64;
-    private const double MaxPadding = 64;
 
     /// <summary>The dark-pill plate: what a notice looks like when nothing says otherwise.</summary>
     public static readonly SkinNotice DefaultNotice = new(
@@ -383,23 +353,23 @@ public static class SkinLoader
         var d = DefaultNotice;
         var plate = ClampNotice(d with
         {
-            Background = EmptyToDefault(json?.Background, d.Background),
-            Border = NullIfBlank(json?.Border),
+            Background = SkinClamps.OrDefault(json?.Background, d.Background),
+            Border = SkinClamps.NullIfBlank(json?.Border),
             CornerRadius = json?.CornerRadius ?? d.CornerRadius,
             PadX = json?.Padding?.X ?? d.PadX,
             PadY = json?.Padding?.Y ?? d.PadY,
             Text = new SkinText(true, json?.Text?.X ?? 0, json?.Text?.Y ?? 0,
-                Color: EmptyToDefault(json?.Text?.Color, d.Text.Color),
-                FontFamily: EmptyToDefault(json?.Text?.FontFamily, d.Text.FontFamily),
+                Color: SkinClamps.OrDefault(json?.Text?.Color, d.Text.Color),
+                FontFamily: SkinClamps.OrDefault(json?.Text?.FontFamily, d.Text.FontFamily),
                 FontSize: json?.Text?.FontSize ?? d.Text.FontSize,
                 Bold: json?.Text?.Bold ?? d.Text.Bold,
-                Align: NormalizeAlign(json?.Text?.Align)),
+                Align: SkinClamps.Align(json?.Text?.Align)),
             Glyph = new SkinNoticeGlyph(json?.Glyph?.Show ?? true, json?.Glyph?.X ?? d.Glyph.X, 0,
-                json?.Glyph?.Size ?? d.Glyph.Size, NullIfBlank(json?.Glyph?.Color)),
+                json?.Glyph?.Size ?? d.Glyph.Size, SkinClamps.NullIfBlank(json?.Glyph?.Color)),
         });
         if (!hasArt) return (plate, null);
 
-        int frames = Math.Max(1, json?.Frames ?? 1);
+        int frames = SkinClamps.Frames(json?.Frames ?? 1);
         var art = ResolveLayer(folder, "notice", frames);
         if (art.Error is not null) return (null, art.Error);
 
@@ -413,11 +383,11 @@ public static class SkinLoader
     /// designer previews is what the saved skin loads as.</summary>
     public static SkinNotice ClampNotice(SkinNotice look) => look with
     {
-        CornerRadius = Math.Clamp(look.CornerRadius, 0, MaxCornerRadius),
-        PadX = Math.Clamp(look.PadX, 0, MaxPadding),
-        PadY = Math.Clamp(look.PadY, 0, MaxPadding),
-        Text = look.Text with { FontSize = Math.Clamp(look.Text.FontSize, MinFontSize, MaxFontSize) },
-        Glyph = look.Glyph with { Size = Math.Clamp(look.Glyph.Size, MinFontSize, MaxFontSize) },
+        CornerRadius = SkinClamps.CornerRadius(look.CornerRadius),
+        PadX = SkinClamps.Padding(look.PadX),
+        PadY = SkinClamps.Padding(look.PadY),
+        Text = look.Text with { FontSize = SkinClamps.FontSize(look.Text.FontSize) },
+        Glyph = look.Glyph with { Size = SkinClamps.FontSize(look.Glyph.Size) },
     };
 
     /// <summary>Puts a (clamped) plate on notice art of <paramref name="width"/> x
@@ -430,7 +400,7 @@ public static class SkinLoader
     {
         int w = width, h = height;
         int tx = Math.Clamp(textX ?? 48, 0, w);
-        int ty = Math.Clamp(textY ?? (h - (int)Math.Round(plate.Text.FontSize * 1.33)) / 2, 0, h);
+        int ty = Math.Clamp(textY ?? (h - (int)Math.Round(plate.Text.FontSize * SkinClamps.LineHeightRatio)) / 2, 0, h);
         int gx = Math.Clamp(glyphX ?? 16, 0, w);
         int gy = Math.Clamp(glyphY ?? (int)((h - plate.Glyph.Size) / 2), 0, h);
         int tw = Math.Clamp(textWidth ?? w - tx - 12, 0, w - tx);
@@ -444,42 +414,17 @@ public static class SkinLoader
         };
     }
 
-    /// <summary>Pulls a declared hit region inside the artwork it belongs to.</summary>
-    private static SkinHitRect ClampHit(SkinHitJson h, int width, int height)
-    {
-        int x = Math.Clamp(h.X ?? 0, 0, width);
-        int y = Math.Clamp(h.Y ?? 0, 0, height);
-        int w = Math.Clamp(h.W ?? width, 0, width - x);
-        int hh = Math.Clamp(h.H ?? height, 0, height - y);
-        return new SkinHitRect(x, y, w, hh);
-    }
-
-    /// <summary>Resolves one layer: .png wins over .gif. For PNG sheets the declared frame count
-    /// must divide the pixel height evenly; the logical height is one frame's. GIFs ignore the
-    /// declared count (their real frames come from the decoder) and use the logical screen size.</summary>
-    private static (string Path, bool IsGif, int LogicalWidth, int LogicalHeight, string? Error)
-        ResolveLayer(string folder, string layer, int declaredFrames)
+    /// <summary>Resolves one layer: .png wins over .gif, and the header is judged by
+    /// <see cref="ImageProbe.Evaluate"/> - the same verdict, in the same words, the designer gets.</summary>
+    private static LayerProbe ResolveLayer(string folder, string layer, int declaredFrames)
     {
         string pngPath = Path.Combine(folder, layer + ".png");
         string gifPath = Path.Combine(folder, layer + ".gif");
         if (File.Exists(pngPath))
-        {
-            var size = PngHeader.Read(pngPath);
-            if (size is null)
-                return (pngPath, false, 0, 0, $"{layer}.png is not a valid PNG");
-            if (size.Value.Height % declaredFrames != 0)
-                return (pngPath, false, 0, 0,
-                    $"{layer}.png height {size.Value.Height} is not divisible by {layer}Frames {declaredFrames}");
-            return (pngPath, false, size.Value.Width, size.Value.Height / declaredFrames, null);
-        }
+            return ImageProbe.Evaluate(pngPath, layer, declaredFrames, PngHeader.Read(pngPath));
         if (File.Exists(gifPath))
-        {
-            var size = GifHeader.Read(gifPath);
-            if (size is null)
-                return (gifPath, true, 0, 0, $"{layer}.gif is not a valid GIF");
-            return (gifPath, true, size.Value.Width, size.Value.Height, null);
-        }
-        return (pngPath, false, 0, 0, $"{layer}.png or {layer}.gif not found");
+            return ImageProbe.Evaluate(gifPath, layer, declaredFrames, GifHeader.Read(gifPath));
+        return new LayerProbe(pngPath, false, 0, 0, LayerProblem.NotFound, $"{layer}.png or {layer}.gif not found");
     }
 
     /// <summary>Lists every subfolder of skinsRoot as a SkinInfo (valid and invalid alike). Empty list if root is missing.</summary>
