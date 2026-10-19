@@ -180,6 +180,11 @@ public partial class App : System.Windows.Application
             // matters; showing it is best effort.
         }
 
+        // Disposed first, so Shutdown closes the designer instead of it asking about unsaved edits
+        // in a box nobody can answer during a crash. Best effort too: it may be what broke.
+        try { CloseSkinDesigner(); }
+        catch (Exception) { }
+
         try { Shutdown(1); }
         catch (InvalidOperationException) { } // already shutting down
     }
@@ -2172,7 +2177,17 @@ public partial class App : System.Windows.Application
     /// the swap cannot happen before the process is finished with its own image.</summary>
     private async void RestartForUpdate()
     {
-        if (_pendingUpdate is null || !await ConfirmQuitAsync()) return;
+        if (_pendingUpdate is not { } pending) return;
+        if (!await ConfirmQuitAsync())
+        {
+            // The user stayed in the skin designer: no "restarting…" left behind. The staged
+            // build still applies on the way out, whenever that is - unless auto-update was
+            // switched off while the box was up, which threw it away and leaves nothing to say.
+            _settingsWindow?.SetUpdateStatus(ReferenceEquals(_pendingUpdate, pending)
+                ? Loc.T("app.is-ready-applies-when-aorineq-restarts", pending.TagName)
+                : "");
+            return;
+        }
         _relaunchAfterUpdate = true;
         BeginShutdown();
     }

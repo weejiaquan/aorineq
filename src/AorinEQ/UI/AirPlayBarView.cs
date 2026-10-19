@@ -19,7 +19,6 @@ using Border = System.Windows.Controls.Border;
 // VerticalAlignment are PROPERTIES - so the bare enum names resolve to those instead.
 using HAlign = System.Windows.HorizontalAlignment;
 using VAlign = System.Windows.VerticalAlignment;
-using Size = System.Windows.Size;
 
 namespace AorinEQ.UI;
 
