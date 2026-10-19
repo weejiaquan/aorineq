@@ -1,9 +1,16 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using AorinEQ.Core;
+// WPF and WinForms are both referenced by this project, so the names below are
+// ambiguous without an explicit alias. Every one of these is the WPF type.
+using ComboBox = System.Windows.Controls.ComboBox;
+using Cursors = System.Windows.Input.Cursors;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using Point = System.Windows.Point;
+using TextBoxBase = System.Windows.Controls.Primitives.TextBoxBase;
 
 namespace AorinEQ.UI;
 
@@ -203,15 +210,16 @@ public partial class SkinDesignerWindow
         }
 
         Overlay.Scene = new DesignerScene(boards, elements);
-        // Frozen while a drag runs: the canvas is centred, so growing it would move the overlay
-        // under a still pointer and run the drag ahead of it. The drag's end applies it.
-        if (_dragStart is null) ApplyOverhang();
+        ApplyOverhang();
     }
 
     /// <summary>What of the overlay's hit area lies past the artboards (text stopped at a far edge
-    /// and its handles) gets canvas to scroll to, in whole pixels.</summary>
+    /// and its handles) gets canvas to scroll to, in whole pixels. Frozen while a drag runs: the
+    /// canvas is centred, so growing it would move the overlay under a still pointer and run the
+    /// drag ahead of it. The drag's end applies it.</summary>
     private void ApplyOverhang()
     {
+        if (_dragStart is not null) return;
         var area = Overlay.HitArea;
         Artboards.Margin = new Thickness(0, 0, Math.Max(0, Math.Ceiling(area.Right - Overlay.ActualWidth)),
             Math.Max(0, Math.Ceiling(area.Bottom - Overlay.ActualHeight)));
@@ -256,5 +264,222 @@ public partial class SkinDesignerWindow
     private void OnPreviewDeviceChanged(object sender, TextChangedEventArgs e)
     {
         if (_ready) RefreshCanvas();
+    }
+
+    private double _zoom = 1;
+    private Point? _panOrigin;
+    private Point _panStartOffset;
+
+    internal double Zoom => _zoom;
+
+    /// <summary>What has the keyboard: the canvas (arrows nudge, Delete clears), a text input
+    /// (keys are its own), or anything else (the tree, a button).</summary>
+    internal enum KeyboardTarget { Canvas, Text, Other }
+
+    internal void SetZoom(double zoom)
+    {
+        _zoom = CanvasZoom.Clamp(zoom);
+        ZoomTransform.ScaleX = _zoom;
+        ZoomTransform.ScaleY = _zoom;
+        // From 200 % the art's own pixels are shown rather than a blur of them, as image editors do.
+        RenderOptions.SetBitmapScalingMode(Artboards, _zoom >= 2 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.Unspecified);
+        // Snap thresholds and handle sizes are screen pixels: the overlay converts them by this.
+        Overlay.Zoom = _zoom;
+        ApplyOverhang(); // the handles' room past the artboards is screen pixels too
+        ZoomText.Text = Math.Round(_zoom * 100).ToString(CultureInfo.CurrentCulture) + "%";
+    }
+
+    /// <summary>The zoom that shows all the artboards in the canvas - decided by the skin's size,
+    /// as the artboards are drawn from it.</summary>
+    internal void ZoomToFit()
+    {
+        Artboards.UpdateLayout();
+        var margin = ZoomHost.Margin;
+        SetZoom(CanvasZoom.Fit(Artboards.ActualWidth, Artboards.ActualHeight,
+            CanvasScroll.ViewportWidth - margin.Left - margin.Right, CanvasScroll.ViewportHeight - margin.Top - margin.Bottom));
+    }
+
+    /// <summary>Zooms keeping the content under <paramref name="cursor"/> (viewport pixels) still.
+    /// The zoomed content does not start at the scroll extent's origin - the canvas margin is
+    /// outside the zoom, and content smaller than the viewport is centred - so the cursor is taken
+    /// relative to where the content starts, before and after.</summary>
+    internal void ZoomAt(double zoom, Point cursor)
+    {
+        double before = _zoom, h = CanvasScroll.HorizontalOffset, v = CanvasScroll.VerticalOffset;
+        var from = ContentOrigin();
+        SetZoom(zoom);
+        CanvasScroll.UpdateLayout();
+        var to = ContentOrigin();
+        CanvasScroll.ScrollToHorizontalOffset(CanvasZoom.OffsetFor(h, cursor.X - from.X, before, _zoom) + to.X - from.X);
+        CanvasScroll.ScrollToVerticalOffset(CanvasZoom.OffsetFor(v, cursor.Y - from.Y, before, _zoom) + to.Y - from.Y);
+    }
+
+    /// <summary>Where the zoomed content starts in the canvas's scroll extent.</summary>
+    private Point ContentOrigin() =>
+        ZoomHost.TranslatePoint(new Point(0, 0), CanvasScroll) + new Vector(CanvasScroll.HorizontalOffset, CanvasScroll.VerticalOffset);
+
+    private void WireCanvasInput()
+    {
+        CanvasScroll.PreviewMouseWheel += (_, e) =>
+        {
+            if (HandleWheel(e.Delta, Keyboard.Modifiers, e.GetPosition(CanvasScroll))) e.Handled = true;
+        };
+        // Space+drag and middle-drag pan; both are taken before the overlay sees the press.
+        CanvasScroll.PreviewMouseDown += (_, e) =>
+        {
+            if (BeginPan(e.ChangedButton, Keyboard.IsKeyDown(Key.Space), e.GetPosition(CanvasScroll))) e.Handled = true;
+        };
+        CanvasScroll.PreviewMouseMove += (_, e) =>
+        {
+            if (_panOrigin is null) return;
+            PanTo(e.GetPosition(CanvasScroll));
+            e.Handled = true;
+        };
+        CanvasScroll.PreviewMouseUp += (_, e) =>
+        {
+            if (_panOrigin is null) return;
+            CanvasScroll.ReleaseMouseCapture();
+            e.Handled = true;
+        };
+        // Every way a pan ends - the button released, the capture taken away - goes through here.
+        CanvasScroll.LostMouseCapture += (_, _) =>
+        {
+            _panOrigin = null;
+            CanvasScroll.ClearValue(CursorProperty);
+        };
+    }
+
+    /// <summary>Ctrl+wheel zooms one step at <paramref name="cursor"/> (viewport pixels); a plain
+    /// wheel is not taken, and scrolls. Whether it was taken.</summary>
+    internal bool HandleWheel(int delta, ModifierKeys modifiers, Point cursor)
+    {
+        if (!modifiers.HasFlag(ModifierKeys.Control)) return false;
+        ZoomAt(CanvasZoom.WheelZoom(_zoom, delta), cursor);
+        return true;
+    }
+
+    /// <summary>A press of <paramref name="button"/> at <paramref name="at"/> (viewport pixels)
+    /// starts a pan when it is the middle button, or the left with Space held. Whether it did.</summary>
+    internal bool BeginPan(MouseButton button, bool spaceHeld, Point at)
+    {
+        if (button != MouseButton.Middle && !(button == MouseButton.Left && spaceHeld)) return false;
+        if (!CanvasScroll.CaptureMouse()) return false;
+        _panOrigin = at;
+        _panStartOffset = new Point(CanvasScroll.HorizontalOffset, CanvasScroll.VerticalOffset);
+        CanvasScroll.Cursor = Cursors.ScrollAll;
+        return true;
+    }
+
+    /// <summary>The pointer of a running pan is at <paramref name="at"/>: the canvas follows it.</summary>
+    internal void PanTo(Point at)
+    {
+        if (_panOrigin is not { } origin) return;
+        CanvasScroll.ScrollToHorizontalOffset(_panStartOffset.X - (at.X - origin.X));
+        CanvasScroll.ScrollToVerticalOffset(_panStartOffset.Y - (at.Y - origin.Y));
+    }
+
+    private void OnZoomOut(object sender, RoutedEventArgs e) => SetZoom(CanvasZoom.Out(_zoom));
+
+    private void OnZoomIn(object sender, RoutedEventArgs e) => SetZoom(CanvasZoom.In(_zoom));
+
+    private void OnZoomFit(object sender, RoutedEventArgs e) => ZoomToFit();
+
+    private void OnZoomActual(object sender, RoutedEventArgs e) => SetZoom(1);
+
+    // The canvas's keys are taken on the way down, before the scroll viewer round it scrolls by
+    // the arrows. Anything else's keys are its own first (a scrub label's Esc, a text box's
+    // Ctrl+Z, the tree's arrows) and reach the window only when it leaves them, on the way up.
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+        if (!e.Handled && TargetOf(Keyboard.FocusedElement) == KeyboardTarget.Canvas)
+            e.Handled = HandleShortcut(KeyOf(e), e.KeyboardDevice.Modifiers, KeyboardTarget.Canvas);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (!e.Handled && TargetOf(Keyboard.FocusedElement) is var target && target != KeyboardTarget.Canvas)
+            e.Handled = HandleShortcut(KeyOf(e), e.KeyboardDevice.Modifiers, target);
+    }
+
+    private static Key KeyOf(KeyEventArgs e) => e.Key == Key.System ? e.SystemKey : e.Key;
+
+    /// <summary>Who a key is for when <paramref name="focused"/> has the keyboard.</summary>
+    internal KeyboardTarget TargetOf(object? focused) => focused switch
+    {
+        TextBoxBase or ComboBox { IsEditable: true } => KeyboardTarget.Text,
+        null => KeyboardTarget.Canvas,
+        _ when ReferenceEquals(focused, Overlay) || ReferenceEquals(focused, this) => KeyboardTarget.Canvas,
+        _ => KeyboardTarget.Other,
+    };
+
+    /// <summary>Ctrl+S saves (committing the field being typed in first), Ctrl+0 fits, Ctrl+1 is
+    /// 100 %, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo and redo unless a text input has the keyboard
+    /// (then they are its own). Esc deselects unless a text input has the keyboard. With the canvas
+    /// focused: arrows nudge 1 skin px (Shift: 10), Delete clears optional art or the power area.
+    /// Whether the key was taken.</summary>
+    internal bool HandleShortcut(Key key, ModifierKeys modifiers, KeyboardTarget target)
+    {
+        bool shift = modifiers.HasFlag(ModifierKeys.Shift);
+        if (modifiers.HasFlag(ModifierKeys.Control))
+        {
+            switch (key)
+            {
+                case Key.S:
+                    Keyboard.ClearFocus();
+                    Save();
+                    return true;
+                case Key.D0 or Key.NumPad0:
+                    ZoomToFit();
+                    return true;
+                case Key.D1 or Key.NumPad1:
+                    SetZoom(1);
+                    return true;
+                case Key.Z when target != KeyboardTarget.Text && shift:
+                case Key.Y when target != KeyboardTarget.Text:
+                    Redo();
+                    return true;
+                case Key.Z when target != KeyboardTarget.Text:
+                    Undo();
+                    return true;
+            }
+            return false;
+        }
+
+        if (key == Key.Escape && target != KeyboardTarget.Text)
+        {
+            Select(SkinLayer.SkinInfo);
+            return true;
+        }
+        if (target != KeyboardTarget.Canvas) return false;
+        int step = shift ? 10 : 1;
+        switch (key)
+        {
+            case Key.Left: CommitKeyEdit(doc => Nudged(doc, -step, 0)); return true;
+            case Key.Right: CommitKeyEdit(doc => Nudged(doc, step, 0)); return true;
+            case Key.Up: CommitKeyEdit(doc => Nudged(doc, 0, -step)); return true;
+            case Key.Down: CommitKeyEdit(doc => Nudged(doc, 0, step)); return true;
+            case Key.Delete:
+                CommitKeyEdit(doc => _selection switch
+                {
+                    SkinLayer.VolumeMuted or SkinLayer.NoticeArt => SkinEdits.ClearArt(doc, _selection, _probe),
+                    SkinLayer.AirPlayPower => SkinEdits.SetHit(doc, SkinLayer.AirPlayPower, null),
+                    _ => doc,
+                });
+                return true;
+        }
+        return false;
+    }
+
+    private SkinDocument Nudged(SkinDocument doc, int dx, int dy) =>
+        SkinEdits.Drag(doc, _selection, SkinHandle.Move, dx, dy, _probe);
+
+    /// <summary>A key's edit of the canvas, one undo step per press. A drag still running ends
+    /// first, as for Undo: it stays one step, and its next move does not overwrite the edit.</summary>
+    private void CommitKeyEdit(Func<SkinDocument, SkinDocument> edit)
+    {
+        Overlay.FinishDrag();
+        Commit(edit(_history.Current));
     }
 }

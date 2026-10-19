@@ -37,18 +37,17 @@ internal sealed record DesignerScene(IReadOnlyList<SceneBoard> Boards, IReadOnly
         Boards.FirstOrDefault(b => b.Layer == SkinLayers.BoardOf(layer));
 
     /// <summary>Everything the scene covers in overlay coordinates: the artboards and every
-    /// element - including a text stopped at an artboard's right or bottom edge, which lies
-    /// outside it. Empty for an empty scene.</summary>
-    public Rect Extent
+    /// element with <paramref name="elementMargin"/> round it (room for its handles) - including a
+    /// text stopped at an artboard's right or bottom edge, which lies outside it. The artboards get
+    /// no margin: they carry no handles. Empty for an empty scene.</summary>
+    public Rect Extent(double elementMargin)
     {
-        get
-        {
-            var extent = Rect.Empty;
-            foreach (var board in Boards) extent.Union(board.Bounds);
-            foreach (var element in Elements)
-                if (BoardFor(element.Board) is { } board) extent.Union(board.ToOverlay(element.Bounds));
-            return extent;
-        }
+        var extent = Rect.Empty;
+        foreach (var board in Boards) extent.Union(board.Bounds);
+        foreach (var element in Elements)
+            if (BoardFor(element.Board) is { } board)
+                extent.Union(Rect.Inflate(board.ToOverlay(element.Bounds), elementMargin, elementMargin));
+        return extent;
     }
 }
 
@@ -107,8 +106,7 @@ internal sealed class DesignerOverlay : FrameworkElement
         get
         {
             var area = new Rect(RenderSize);
-            double half = HandleScreenSize / _zoom / 2;
-            if (_scene.Extent is { IsEmpty: false } extent) area.Union(Rect.Inflate(extent, half, half));
+            if (_scene.Extent(HandleScreenSize / _zoom / 2) is { IsEmpty: false } extent) area.Union(extent);
             return area;
         }
     }
@@ -236,17 +234,19 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
-        if (BeginDragAt(e.GetPosition(this))) e.Handled = true;
+        if (BeginDragAt(() => e.GetPosition(this))) e.Handled = true;
     }
 
-    /// <summary>The mouse went down at <paramref name="point"/> (overlay coordinates): the canvas
+    /// <summary>The mouse went down at <paramref name="pointAt"/> (overlay coordinates): the canvas
     /// takes the focus, the layer under it is clicked, and a drag starts when it is on something
     /// that drags. False when no drag started.</summary>
-    internal bool BeginDragAt(Point point)
+    internal bool BeginDragAt(Func<Point> pointAt)
     {
         // Focus first: the field being typed in commits (ending its merge run) before the drag's
-        // first commit, and the canvas takes the keyboard (arrows nudge).
+        // first commit, and the canvas takes the keyboard (arrows nudge). That commit can re-lay
+        // the canvas under the pointer, so the point is read only after it.
         Focus();
+        var point = pointAt();
         var (board, element, handle) = HitTest(point);
         if (board is null)
         {

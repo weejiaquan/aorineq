@@ -113,6 +113,15 @@
 
                 <!-- View state only: none of this is part of the skin or of its history. -->
                 <WrapPanel x:Name="PreviewStrip" Grid.Row="1" Margin="0,8,0,0">
+                    <Button x:Name="ZoomOutButton" Content="-" Width="28" Padding="0,4" Click="OnZoomOut"
+                            ToolTip="{loc:T designer.zoom.out.tooltip}" />
+                    <TextBlock x:Name="ZoomText" Width="48" TextAlignment="Center" VerticalAlignment="Center" />
+                    <Button x:Name="ZoomInButton" Content="+" Width="28" Padding="0,4" Click="OnZoomIn"
+                            ToolTip="{loc:T designer.zoom.in.tooltip}" />
+                    <Button Content="{loc:T designer.zoom.fit.label}" Padding="10,4" Margin="6,0,0,0" Click="OnZoomFit"
+                            ToolTip="{loc:T designer.zoom.fit.tooltip}" />
+                    <Button Content="100%" Padding="10,4" Margin="6,0,24,0" Click="OnZoomActual"
+                            ToolTip="{loc:T designer.zoom.actual.tooltip}" />
                     <TextBlock Text="{loc:T designer.text.fill-preview}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <Slider x:Name="PreviewFill" Width="140" Minimum="0" Maximum="100" Value="62"
                             VerticalAlignment="Center" ValueChanged="OnPreviewValueChanged" />

@@ -124,7 +124,9 @@ public class DesignerOverlayTests
     }
 
     /// <summary>A text stopped at its artboard's far edge lies past the overlay's own bounds: the
-    /// scene's extent includes it, and the overlay takes the mouse over it - but not beyond.</summary>
+    /// scene's extent includes it, and the overlay takes the mouse over it - but not beyond. Only
+    /// the elements get room for their handles: the artboards themselves add none, so a scene with
+    /// nothing past its boards needs no more than the overlay's own size.</summary>
     [Fact]
     public void An_element_past_the_overlay_still_takes_the_mouse()
     {
@@ -138,13 +140,20 @@ public class DesignerOverlayTests
             overlay.Arrange(new Rect(0, 0, 100, 40));
             var onText = VisualTreeHelper.HitTest(overlay, new Point(115, 49))?.VisualHit;
             var beyond = VisualTreeHelper.HitTest(overlay, new Point(160, 49))?.VisualHit;
-            return (scene.Extent, EmptyExtent: DesignerScene.Empty.Extent, overlay.RenderSize, overlay.HitArea,
-                OnText: ReferenceEquals(onText, overlay), Beyond: beyond is null,
-                Picked: overlay.HitTest(new Point(115, 49)).Element?.Layer);
+            var hitArea = overlay.HitArea;
+            var picked = overlay.HitTest(new Point(115, 49)).Element?.Layer;
+            overlay.Scene = new DesignerScene(scene.Boards,
+                [new SceneElement(SkinLayer.PercentText, SkinLayer.VolumeBar, new Rect(10, 10, 30, 18), [SkinHandle.Move])]);
+            return (Extent: scene.Extent(0), Handled: scene.Extent(4), EmptyExtent: DesignerScene.Empty.Extent(4), overlay.RenderSize, hitArea,
+                InsideHitArea: overlay.HitArea, OnText: ReferenceEquals(onText, overlay), Beyond: beyond is null,
+                Picked: picked);
         });
-        _out.WriteLine($"expected extent 0,0,130,58, hit area -4,-4,138,66, mouse taken on the text and not beyond, PercentText picked; actual {r}");
+        _out.WriteLine("expected extent 0,0,130,58, with 4 px handle room 0,0,134,62, hit area 0,0,134,62 and 0,0,100,40 with the text inside, " +
+                       $"mouse taken on the text and not beyond, PercentText picked; actual {r}");
         Assert.Equal(new Rect(0, 0, 130, 58), r.Extent);
-        Assert.Equal(new Rect(-4, -4, 138, 66), r.HitArea); // the extent and half a handle round it
+        Assert.Equal(new Rect(0, 0, 134, 62), r.Handled);
+        Assert.Equal(new Rect(0, 0, 134, 62), r.hitArea);         // half a handle round the text, none round the board
+        Assert.Equal(new Rect(0, 0, 100, 40), r.InsideHitArea);   // nothing past the board: no margin at all
         Assert.True(r.EmptyExtent.IsEmpty);
         Assert.True(r.OnText);
         Assert.True(r.Beyond);

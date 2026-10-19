@@ -68,6 +68,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _info = _history.Current.ToInfo(_probe);
         Loc.LanguageChanged += OnLanguageChanged;
         WireOverlay();
+        WireCanvasInput();
+        SetZoom(1);
         _ready = true;
         PopulateSkinList(null);
         OnDocumentChanged();
@@ -264,14 +266,18 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
 
     private void OnNew(object sender, RoutedEventArgs e) => NewDocument();
 
+    private void OnUndo(object sender, RoutedEventArgs e) => Undo();
+
+    private void OnRedo(object sender, RoutedEventArgs e) => Redo();
+
     // A drag still running ends first, so it stays one undo step and is not resumed on top of the undo.
-    private void OnUndo(object sender, RoutedEventArgs e)
+    private void Undo()
     {
         Overlay.FinishDrag();
         _history.Undo();
     }
 
-    private void OnRedo(object sender, RoutedEventArgs e)
+    private void Redo()
     {
         Overlay.FinishDrag();
         _history.Redo();

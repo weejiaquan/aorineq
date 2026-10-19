@@ -973,7 +973,7 @@ public class SkinDesignerWindowTests : IDisposable
         {
             d.LoadSkin("slow");
             var start = Centre(d, SkinLayer.PercentText);
-            bool began = d.Overlay.BeginDragAt(start);
+            bool began = d.Overlay.BeginDragAt(() => start);
             var steps = new List<(int X, int Y)>();
             foreach (var dx in new[] { 1, 2, 3 })
             {
@@ -1001,7 +1001,7 @@ public class SkinDesignerWindowTests : IDisposable
         {
             d.LoadSkin("guide");
             var start = Centre(d, SkinLayer.PercentText);
-            d.Overlay.BeginDragAt(start);
+            d.Overlay.BeginDragAt(() => start);
             d.Overlay.DragTo(start + new Vector(58, 0), snap: true); // left edge 98: 2 px from the bar's centre line
             var snapped = (d.Document.Config.Text!.X, Guides: d.Overlay.Guides.ToArray(), Magenta: MagentaColumns(d));
             d.Overlay.DragTo(start + new Vector(58, 0), snap: false);
@@ -1065,7 +1065,7 @@ public class SkinDesignerWindowTests : IDisposable
             var pointer = d.Overlay.TranslatePoint(Centre(d, SkinLayer.PercentText), d);
             Point OverOverlay(Vector by) { d.UpdateLayout(); return d.TranslatePoint(pointer + by, d.Overlay); }
             double before = d.Artboards.Margin.Right;
-            d.Overlay.BeginDragAt(OverOverlay(new Vector(0, 0)));
+            d.Overlay.BeginDragAt(() => OverOverlay(new Vector(0, 0)));
             d.Overlay.DragTo(OverOverlay(new Vector(380, 0)), snap: false); // x 200: past the bar's right edge
             var during = (Margin: d.Artboards.Margin.Right, Overlay: d.Overlay.TranslatePoint(new Point(0, 0), d));
             d.Overlay.DragTo(OverOverlay(new Vector(360, 0)), snap: false); // back 10 skin px
@@ -1091,7 +1091,7 @@ public class SkinDesignerWindowTests : IDisposable
         {
             d.LoadSkin("undo-drag");
             var start = Centre(d, SkinLayer.PercentText);
-            d.Overlay.BeginDragAt(start);
+            d.Overlay.BeginDragAt(() => start);
             d.Overlay.DragTo(start + new Vector(10, 0), snap: false);
             int dragged = d.Document.Config.Text!.X;
             d.UndoButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
@@ -1131,5 +1131,332 @@ public class SkinDesignerWindowTests : IDisposable
         {
             _sta.Run(() => Loc.Language = previous);
         }
+    }
+
+    [Fact]
+    public void Zoom_is_clamped_and_drives_the_canvas_and_the_overlay()
+    {
+        MakeSkin("zoom", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("zoom");
+            d.SetZoom(20);
+            // Named: d.Zoom and d.Overlay.Zoom would both infer "Zoom", and C# then names neither.
+            var high = (Zoom: d.Zoom, ScaleX: d.ZoomTransform.ScaleX, OverlayZoom: d.Overlay.Zoom, Text: d.ZoomText.Text,
+                Mode: System.Windows.Media.RenderOptions.GetBitmapScalingMode(d.Artboards));
+            d.SetZoom(0.01);
+            return (high, Low: d.Zoom, LowText: d.ZoomText.Text);
+        });
+        _out.WriteLine($"expected 800% everywhere with nearest-neighbour scaling, then 25%; actual {r}");
+        Assert.Equal((8.0, 8.0, 8.0, "800%"), (r.high.Zoom, r.high.ScaleX, r.high.OverlayZoom, r.high.Text));
+        Assert.Equal(System.Windows.Media.BitmapScalingMode.NearestNeighbor, r.high.Mode);
+        Assert.Equal((0.25, "25%"), (r.Low, r.LowText));
+    }
+
+    /// <summary>Fit is decided by the skin, not by the boards that are always there (the 300 px
+    /// notice pill, the native strip): a skin wider than them fits at a zoom those boards alone
+    /// could never produce, and a tiny skin fits larger than that.</summary>
+    [Fact]
+    public void Fit_is_decided_by_the_skins_size()
+    {
+        foreach (var (name, width, height) in new[] { ("tiny", 8, 2), ("wide", 1200, 40) })
+        {
+            var folder = Path.Combine(_root, name);
+            Directory.CreateDirectory(folder);
+            RealPngs.WriteSolid(Path.Combine(folder, "empty.png"), width, height, Color.Red);
+            RealPngs.WriteSolid(Path.Combine(folder, "full.png"), width, height, Color.Lime);
+        }
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("tiny");
+            d.ZoomToFit();
+            double tiny = d.Zoom;
+            d.LoadSkin("wide");
+            d.ZoomToFit();
+            return (Tiny: tiny, Wide: d.Zoom, Viewport: d.CanvasScroll.ViewportWidth, Boards: d.Artboards.ActualWidth);
+        });
+        // The 1200 px skin has to fit across the viewport: no zoom above this can show it whole.
+        double widest = CanvasZoom.Clamp(r.Viewport / 1200.0);
+        _out.WriteLine($"fit: tiny {r.Tiny}, wide {r.Wide}; viewport {r.Viewport}, artboards {r.Boards} px unzoomed; " +
+                       $"expected wide in [{CanvasZoom.Min}, {widest}] and tiny > wide");
+        Assert.True(r.Boards >= 1200, $"the artboards are {r.Boards} px wide, narrower than the 1200 px skin");
+        Assert.InRange(r.Wide, CanvasZoom.Min, widest);
+        Assert.True(r.Tiny > r.Wide, $"a tiny skin fitted at {r.Tiny}, no larger than a 1200 px one at {r.Wide}");
+    }
+
+    [Fact]
+    public void Keyboard_shortcuts_edit_the_canvas_and_leave_text_fields_alone()
+    {
+        MakeSkin("keys", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var muted = Src("m.png", 200, 40, Color.Gray);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("keys");
+            d.Select(SkinLayer.PercentText);
+            d.HandleShortcut(Key.Right, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            d.HandleShortcut(Key.Down, ModifierKeys.Shift, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var nudged = (d.Document.Config.Text!.X, d.Document.Config.Text.Y);
+            bool typedArrow = d.HandleShortcut(Key.Left, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Text);
+            d.HandleShortcut(Key.Z, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Other);
+            var undone = d.Document.Config.Text!.Y;
+            d.HandleShortcut(Key.Z, ModifierKeys.Control | ModifierKeys.Shift, SkinDesignerWindow.KeyboardTarget.Other);
+            var redone = d.Document.Config.Text!.Y;
+            bool undoInText = d.HandleShortcut(Key.Z, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Text);
+            d.Commit(SkinEdits.SetArt(d.Document, SkinLayer.VolumeMuted, muted, 1, new ImageProbe()));
+            d.Select(SkinLayer.VolumeMuted);
+            d.HandleShortcut(Key.Delete, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var mutedAfterDelete = d.Document.MutedPath;
+            d.HandleShortcut(Key.Escape, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            d.HandleShortcut(Key.D1, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Text);
+            bool saved = d.HandleShortcut(Key.S, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Text);
+            return (nudged, typedArrow, undone, redone, undoInText, mutedAfterDelete, d.Selection, d.Zoom, saved, Dirty: d.History.IsDirty);
+        });
+        _out.WriteLine($"{r}");
+        Assert.Equal((11, 15), r.nudged);
+        Assert.False(r.typedArrow);
+        Assert.Equal(5, r.undone);
+        Assert.Equal(15, r.redone);
+        Assert.False(r.undoInText);         // Ctrl+Z inside a text box is the text box's
+        Assert.Null(r.mutedAfterDelete);
+        Assert.Equal(SkinLayer.SkinInfo, r.Selection);
+        Assert.Equal(1.0, r.Zoom);
+        Assert.True(r.saved);
+        Assert.False(r.Dirty);
+    }
+
+    /// <summary>Each arrow press is its own undo step; Ctrl+Y redoes like Ctrl+Shift+Z; Ctrl+0
+    /// fits and Ctrl+1 goes back to 100 %; Delete clears the power area; keys that are not the
+    /// canvas's are left to whoever has the keyboard.</summary>
+    [Fact]
+    public void Every_nudge_is_one_step_and_the_other_shortcuts_do_their_one_thing()
+    {
+        MakeSkin("steps", """{"airplay":{"connectHit":{"x":150,"y":4,"w":40,"h":16}}}""", strip: true);
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("steps");
+            d.Select(SkinLayer.AirPlayPower);
+            var loaded = d.Document.Config.AirPlay!.ConnectHit;
+            foreach (var key in new[] { Key.Left, Key.Left, Key.Up })
+                d.HandleShortcut(key, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var nudged = d.Document.Config.AirPlay!.ConnectHit;
+            d.History.Undo();
+            var oneBack = d.Document.Config.AirPlay!.ConnectHit;
+            d.HandleShortcut(Key.Y, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var redone = d.Document.Config.AirPlay!.ConnectHit;
+            d.HandleShortcut(Key.Delete, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var deleted = d.Document.Config.AirPlay!.ConnectHit;
+            d.HandleShortcut(Key.D0, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Canvas);
+            double fitted = d.Zoom;
+            d.SetZoom(1);
+            d.ZoomToFit();
+            double fit = d.Zoom;
+            d.HandleShortcut(Key.NumPad1, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Canvas);
+            bool deleteInTree = d.HandleShortcut(Key.Delete, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Other);
+            bool plainKey = d.HandleShortcut(Key.A, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            bool ctrlKey = d.HandleShortcut(Key.Q, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Canvas);
+            return (loaded, nudged, oneBack, redone, deleted, fitted, fit, Actual: d.Zoom, deleteInTree, plainKey, ctrlKey);
+        });
+        _out.WriteLine($"expected loaded 150,4; nudged 148,3; one undo 148,4; redone 148,3; deleted null; Ctrl+0 = fit; then 1; actual {r}");
+        Assert.Equal((150, 4), (r.loaded!.X, r.loaded.Y));
+        Assert.Equal((148, 3), (r.nudged!.X, r.nudged.Y));
+        Assert.Equal((148, 4), (r.oneBack!.X, r.oneBack.Y));
+        Assert.Equal(r.nudged, r.redone);
+        Assert.Null(r.deleted);
+        Assert.NotEqual(1.0, r.fit);
+        Assert.Equal(r.fit, r.fitted);
+        Assert.Equal(1.0, r.Actual);
+        Assert.False(r.deleteInTree);
+        Assert.False(r.plainKey);
+        Assert.False(r.ctrlKey);
+    }
+
+    /// <summary>What has the keyboard decides who a key is for: the canvas (the overlay, the window
+    /// itself, nothing), a text input, or anything else - a number field's scrub label included,
+    /// so its own Esc and arrow keys stay its own.</summary>
+    [Fact]
+    public void The_keyboard_target_is_what_has_the_focus()
+    {
+        MakeSkin("target", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("target");
+            d.Select(SkinLayer.PercentText);
+            var field = Number(d, "X");
+            return (Overlay: d.TargetOf(d.Overlay), Window: d.TargetOf(d), Nothing: d.TargetOf(null),
+                Box: d.TargetOf(field.Box), Device: d.TargetOf(d.PreviewDevice),
+                Label: d.TargetOf(field.Label), Tree: d.TargetOf(d.LayersTree), Button: d.TargetOf(d.UndoButton));
+        });
+        _out.WriteLine($"expected canvas x3, text x2, other x3; actual {r}");
+        var canvas = SkinDesignerWindow.KeyboardTarget.Canvas;
+        var text = SkinDesignerWindow.KeyboardTarget.Text;
+        var other = SkinDesignerWindow.KeyboardTarget.Other;
+        Assert.Equal((canvas, canvas, canvas), (r.Overlay, r.Window, r.Nothing));
+        Assert.Equal((text, text), (r.Box, r.Device));
+        Assert.Equal((other, other, other), (r.Label, r.Tree, r.Button));
+    }
+
+    /// <summary>Ctrl+wheel keeps the skin pixel under the cursor where it is - in and out, with
+    /// the canvas's margin and centring in play; a plain wheel is left to scroll.</summary>
+    [Fact]
+    public void Zooming_at_the_cursor_keeps_the_skin_under_it_still()
+    {
+        MakeSkin("anchor", """{"scale":2}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("anchor");
+            d.SetZoom(2);
+            d.UpdateLayout();
+            var cursor = new Point(d.CanvasScroll.ViewportWidth * 0.7, d.CanvasScroll.ViewportHeight * 0.4);
+            (Point Skin, Point Now, double H, double V) Step(int delta)
+            {
+                var skin = d.CanvasScroll.TranslatePoint(cursor, d.Artboards);
+                bool zoomed = d.HandleWheel(delta, ModifierKeys.Control, cursor);
+                Assert.True(zoomed);
+                d.UpdateLayout();
+                return (skin, d.Artboards.TranslatePoint(skin, d.CanvasScroll), d.CanvasScroll.HorizontalOffset, d.CanvasScroll.VerticalOffset);
+            }
+            var zoomIn = Step(120);
+            double inZoom = d.Zoom;
+            var zoomOut = Step(-120);
+            double outZoom = d.Zoom;
+            bool plain = d.HandleWheel(120, ModifierKeys.None, cursor);
+            return (cursor, zoomIn, inZoom, zoomOut, outZoom, plain, After: d.Zoom, OverlayZoom: d.Overlay.Zoom,
+                Viewport: (d.CanvasScroll.ViewportWidth, d.CanvasScroll.ViewportHeight));
+        });
+        _out.WriteLine($"cursor {r.cursor} in viewport {r.Viewport}; in to {r.inZoom}: skin {r.zoomIn.Skin} now at {r.zoomIn.Now} " +
+                       $"(offsets {r.zoomIn.H},{r.zoomIn.V}); out to {r.outZoom}: skin {r.zoomOut.Skin} now at {r.zoomOut.Now} " +
+                       $"(offsets {r.zoomOut.H},{r.zoomOut.V}); plain wheel taken {r.plain}, zoom after {r.After}, overlay {r.OverlayZoom}");
+        Assert.Equal((3.0, 2.0), (r.inZoom, r.outZoom));
+        Assert.True(r.zoomIn.H > 0, "the zoomed-in canvas never scrolled: the test proves nothing");
+        foreach (var step in new[] { r.zoomIn, r.zoomOut })
+        {
+            Assert.InRange(step.Now.X, r.cursor.X - 1, r.cursor.X + 1); // layout rounding of the offsets
+            Assert.InRange(step.Now.Y, r.cursor.Y - 1, r.cursor.Y + 1);
+        }
+        Assert.False(r.plain);
+        Assert.Equal((2.0, 2.0), (r.After, r.OverlayZoom));
+    }
+
+    /// <summary>Middle-drag pans; a left drag pans only with Space held; letting go (the capture
+    /// lost) ends the pan, and the pointer moving on scrolls nothing.</summary>
+    [Fact]
+    public void Middle_drag_and_space_drag_pan_the_canvas()
+    {
+        MakeSkin("pan", """{"scale":2}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("pan");
+            d.SetZoom(4);
+            d.UpdateLayout();
+            d.CanvasScroll.ScrollToHorizontalOffset(100);
+            d.CanvasScroll.ScrollToVerticalOffset(100);
+            d.UpdateLayout();
+            var start = (d.CanvasScroll.HorizontalOffset, d.CanvasScroll.VerticalOffset);
+            bool leftAlone = d.BeginPan(MouseButton.Left, spaceHeld: false, new Point(200, 200));
+            bool middle = d.BeginPan(MouseButton.Middle, spaceHeld: false, new Point(200, 200));
+            var cursor = d.CanvasScroll.Cursor;
+            d.PanTo(new Point(150, 170));
+            d.UpdateLayout();
+            var panned = (d.CanvasScroll.HorizontalOffset, d.CanvasScroll.VerticalOffset);
+            d.CanvasScroll.ReleaseMouseCapture();
+            d.PanTo(new Point(0, 0));
+            d.UpdateLayout();
+            var released = (d.CanvasScroll.HorizontalOffset, d.CanvasScroll.VerticalOffset, Cursor: d.CanvasScroll.Cursor);
+            bool space = d.BeginPan(MouseButton.Left, spaceHeld: true, new Point(200, 200));
+            d.PanTo(new Point(210, 200));
+            d.UpdateLayout();
+            var spacePanned = d.CanvasScroll.HorizontalOffset;
+            d.CanvasScroll.ReleaseMouseCapture();
+            return (start, leftAlone, middle, cursor, panned, released, space, spacePanned);
+        });
+        _out.WriteLine($"expected start (100,100), left alone not a pan, middle pans to (150,130), release keeps it, " +
+                       $"space-left pans back 10; actual {r}");
+        Assert.Equal((100.0, 100.0), r.start);
+        Assert.False(r.leftAlone);
+        Assert.True(r.middle);
+        Assert.Equal(System.Windows.Input.Cursors.ScrollAll, r.cursor);
+        Assert.Equal((150.0, 130.0), r.panned);
+        Assert.Equal((150.0, 130.0), (r.released.HorizontalOffset, r.released.VerticalOffset));
+        Assert.Null(r.released.Cursor);
+        Assert.True(r.space);
+        Assert.Equal(140.0, r.spacePanned);
+    }
+
+    /// <summary>An arrow pressed while a canvas drag runs ends the drag first, as Undo does: the
+    /// drag stays one undo step, the nudge another on top, and the pointer moving on edits nothing.</summary>
+    [Fact]
+    public void A_nudge_during_a_canvas_drag_ends_the_drag_first()
+    {
+        MakeSkin("nudge-drag", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("nudge-drag");
+            var start = Centre(d, SkinLayer.PercentText);
+            d.Overlay.BeginDragAt(() => start);
+            d.Overlay.DragTo(start + new Vector(10, 0), snap: false);
+            d.HandleShortcut(Key.Right, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            int nudged = d.Document.Config.Text!.X;
+            d.Overlay.DragTo(start + new Vector(20, 0), snap: false); // the mouse moving on
+            int afterMove = d.Document.Config.Text!.X;
+            d.History.Undo();
+            int oneBack = d.Document.Config.Text!.X;
+            d.History.Undo();
+            return (nudged, afterMove, oneBack, TwoBack: d.Document.Config.Text!.X, d.History.CanUndo);
+        });
+        _out.WriteLine($"expected nudged 51, still 51 after the move, undo to 50 then 40 with nothing left; actual {r}");
+        Assert.Equal((51, 51, 50, 40, false), r);
+    }
+
+    /// <summary>The mouse-down point is read after the canvas takes the focus: that focus change is
+    /// what commits the field being typed in, which can re-lay the canvas, so a point read before
+    /// it could be stale.</summary>
+    [Fact]
+    public void A_canvas_press_reads_its_point_after_taking_the_focus()
+    {
+        MakeSkin("press", """{"percentText":{"show":true,"x":40,"y":0}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("press");
+            d.Select(SkinLayer.PercentText);
+            StaWpf.Pump();
+            Number(d, "X").Box.Focus();
+            bool overlayFocusedBefore = d.Overlay.IsFocused;
+            bool? focusedWhenRead = null;
+            var start = Centre(d, SkinLayer.PercentText);
+            bool began = d.Overlay.BeginDragAt(() => { focusedWhenRead = d.Overlay.IsFocused; return start; });
+            d.Overlay.FinishDrag();
+            return (overlayFocusedBefore, focusedWhenRead, began);
+        });
+        _out.WriteLine($"expected the overlay unfocused before, focused when the point is read, a drag begun; actual {r}");
+        Assert.False(r.overlayFocusedBefore);
+        Assert.True(r.focusedWhenRead);
+        Assert.True(r.began);
+    }
+
+    /// <summary>The canvas leaves room past the artboards only for what lies past them - text at a
+    /// far edge and its handles, whose size is screen pixels and so grows in skin pixels as the
+    /// canvas zooms out. A skin with nothing past its boards gets no margin at all.</summary>
+    [Fact]
+    public void The_room_past_the_artboards_is_only_for_elements_and_follows_the_zoom()
+    {
+        MakeSkin("plain", "{}");
+        MakeSkin("edge", """{"percentText":{"show":true,"x":195,"y":30}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("plain");
+            d.UpdateLayout();
+            var plain = d.Artboards.Margin;
+            d.LoadSkin("edge");
+            d.SetZoom(8);
+            var near = d.Artboards.Margin;
+            d.SetZoom(0.25);
+            var far = d.Artboards.Margin;
+            return (plain, near, far, Expected: Math.Ceiling(d.Overlay.HitArea.Right - d.Overlay.ActualWidth));
+        });
+        _out.WriteLine($"plain skin margin {r.plain} (expected 0); edge text margin {r.near} at 800%, {r.far} at 25% (expected right {r.Expected})");
+        Assert.Equal(new Thickness(0), r.plain);
+        Assert.True(r.near.Right > 0, "text past the bar's right edge got no room");
+        Assert.True(r.far.Right > r.near.Right, "the handle room did not grow as the canvas zoomed out");
+        Assert.Equal(r.Expected, r.far.Right);
     }
 }
