@@ -67,7 +67,8 @@ internal sealed class FontField : Grid
 
     private void Change(string family)
     {
-        if (family == Value) return;
+        // Font names are case-insensitive: "arial" is the same font, not an edit to undo.
+        if (string.Equals(family, Value, StringComparison.OrdinalIgnoreCase)) return;
         Value = family;
         ValueChanged?.Invoke(family);
     }

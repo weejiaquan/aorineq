@@ -114,9 +114,8 @@ public sealed class SkinView : UserControl
         }
     }
 
-    /// <summary>Decode failures throw the imaging exception family callers already contain
-    /// (NotSupportedException/FileFormatException/IOException/ArgumentException) — the same
-    /// contract <see cref="SkinFrames.Load"/> has always had.</summary>
+    /// <summary>Decode failures throw what <see cref="SkinFrames.IsImagingFailure"/> recognises —
+    /// the same contract <see cref="SkinFrames.Load"/> has.</summary>
     public SkinView(SkinInfo info)
     {
         RequireValid(info);

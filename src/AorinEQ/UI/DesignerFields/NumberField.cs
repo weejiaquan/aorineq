@@ -20,7 +20,7 @@ namespace AorinEQ.UI.DesignerFields;
 /// so they are rejected explicitly - a NaN font size is an exception the moment WPF lays it out.</summary>
 internal sealed class NumberField : Grid
 {
-    /// <summary>Screen pixels of label drag per step.</summary>
+    /// <summary>DIPs of label drag per step.</summary>
     public const double ScrubPixelsPerStep = 2;
 
     private readonly double _min, _max, _step;
@@ -41,6 +41,7 @@ internal sealed class NumberField : Grid
         {
             Text = label, FontSize = 11, VerticalAlignment = VAlign.Center,
             Margin = new Thickness(0, 0, 8, 0), Cursor = Cursors.SizeWE,
+            Focusable = true, FocusVisualStyle = null,
         };
         Box = new TextBox { MinWidth = 56, VerticalContentAlignment = VAlign.Center };
         SetColumn(Box, 1);
@@ -55,10 +56,11 @@ internal sealed class NumberField : Grid
             EditEnded?.Invoke();
         };
         Box.TextChanged += (_, _) => { if (!_setting) ShowInvalid(false); };
+        Label.PreviewKeyDown += OnKeyDown;
         Label.MouseLeftButtonDown += OnScrubStart;
         Label.MouseMove += OnScrubMove;
         Label.MouseLeftButtonUp += OnScrubEnd;
-        Label.LostMouseCapture += (_, _) => _scrubOrigin = null;
+        Label.LostMouseCapture += (_, _) => OnScrubCaptureLost();
         ShowValue(_min);
     }
 
@@ -111,7 +113,7 @@ internal sealed class NumberField : Grid
         Math.Round(Math.Clamp(value + (up ? step : -step) * (large ? 10 : 1), min, max), decimals, MidpointRounding.AwayFromZero);
 
     public static double Scrubbed(double start, double pixels, double step, double min, double max, int decimals) =>
-        Math.Round(Math.Clamp(start + Math.Round(pixels / ScrubPixelsPerStep) * step, min, max), decimals, MidpointRounding.AwayFromZero);
+        Math.Round(Math.Clamp(start + Math.Round(pixels / ScrubPixelsPerStep, MidpointRounding.AwayFromZero) * step, min, max), decimals, MidpointRounding.AwayFromZero);
 
     public static string Format(double value, int decimals) =>
         value.ToString(decimals == 0 ? "0" : "0." + new string('#', decimals), CultureInfo.CurrentCulture);
@@ -138,39 +140,73 @@ internal sealed class NumberField : Grid
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
-        switch (e.Key)
+        if (HandleKey(e.Key, e.KeyboardDevice.Modifiers)) e.Handled = true;
+    }
+
+    /// <summary>The field's keys: Enter commits, ↑/↓ step (by ten with Shift), Esc during a scrub
+    /// puts back the value from before it. Returns whether the key was the field's.</summary>
+    internal bool HandleKey(Key key, ModifierKeys modifiers)
+    {
+        switch (key)
         {
             case Key.Enter:
                 Commit();
                 EditEnded?.Invoke();
-                e.Handled = true;
-                break;
+                return true;
             case Key.Up or Key.Down:
                 double current = TryParse(Box.Text, _min, _max, _decimals, out var typed) ? typed : Value;
-                Change(Stepped(current, e.Key == Key.Up, Keyboard.Modifiers.HasFlag(ModifierKeys.Shift), _step, _min, _max, _decimals));
-                e.Handled = true;
-                break;
+                Change(Stepped(current, key == Key.Up, modifiers.HasFlag(ModifierKeys.Shift), _step, _min, _max, _decimals));
+                return true;
+            case Key.Escape when _scrubOrigin is not null:
+                Change(_scrubStartValue);
+                Label.ReleaseMouseCapture(); // ends the scrub through OnScrubCaptureLost
+                return true;
+            default:
+                return false;
         }
     }
 
     private void OnScrubStart(object sender, MouseButtonEventArgs e)
     {
-        if (!IsEnabled || !Label.CaptureMouse()) return;
-        _scrubOrigin = e.GetPosition(this).X;
+        // Focus first: it commits any typing in the box before the scrub starts from Value, and
+        // puts Esc where the scrub hears it.
+        Label.Focus();
+        if (BeginScrub(e.GetPosition(this).X)) e.Handled = true;
+    }
+
+    /// <summary>Starts a scrub with the pointer at <paramref name="x"/> DIPs into this field;
+    /// false when the label could not take the mouse.</summary>
+    internal bool BeginScrub(double x)
+    {
+        if (!IsEnabled || !Label.CaptureMouse()) return false;
+        _scrubOrigin = x;
         _scrubStartValue = Value;
-        e.Handled = true;
+        return true;
     }
 
     private void OnScrubMove(object sender, MouseEventArgs e)
     {
-        if (_scrubOrigin is not { } origin || e.LeftButton != MouseButtonState.Pressed) return;
-        Change(Scrubbed(_scrubStartValue, e.GetPosition(this).X - origin, _step, _min, _max, _decimals));
+        if (e.LeftButton == MouseButtonState.Pressed) ScrubTo(e.GetPosition(this).X);
     }
 
+    /// <summary>The pointer of a running scrub is at <paramref name="x"/> DIPs into this field.</summary>
+    internal void ScrubTo(double x)
+    {
+        if (_scrubOrigin is { } origin)
+            Change(Scrubbed(_scrubStartValue, x - origin, _step, _min, _max, _decimals));
+    }
+
+    // Every way a scrub ends - the button released, capture taken away, Esc - goes through losing
+    // capture, so the edit ends exactly once and the history's merge run never stays open.
     private void OnScrubEnd(object sender, MouseButtonEventArgs e)
     {
+        if (_scrubOrigin is not null) Label.ReleaseMouseCapture();
+    }
+
+    private void OnScrubCaptureLost()
+    {
         if (_scrubOrigin is null) return;
-        Label.ReleaseMouseCapture();
+        _scrubOrigin = null;
         EditEnded?.Invoke();
     }
 }

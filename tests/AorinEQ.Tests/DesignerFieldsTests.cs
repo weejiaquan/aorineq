@@ -79,6 +79,68 @@ public class DesignerFieldsTests : IDisposable
         Check("Scrubbed(10, +6 px)", 13, NumberField.Scrubbed(10, 6, 1, 0, 100, 0));
         Check("Scrubbed(10, -40 px)", 0, NumberField.Scrubbed(10, -40, 1, 0, 100, 0));
         Check("Scrubbed(1, +20 px, step 0.05)", 1.5, NumberField.Scrubbed(1, 20, 0.05, 0.25, 4, 2));
+        // Half a step rounds away from zero both ways (banker's rounding would give 12 and 8).
+        Check("Scrubbed(10, +5 px)", 13, NumberField.Scrubbed(10, 5, 1, 0, 100, 0));
+        Check("Scrubbed(10, -5 px)", 7, NumberField.Scrubbed(10, -5, 1, 0, 100, 0));
+        Check("Scrubbed(10, +1 px)", 11, NumberField.Scrubbed(10, 1, 1, 0, 100, 0));
+    }
+
+    private static void MouseUp(UIElement element) =>
+        element.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
+        { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+
+    [Fact]
+    public void A_scrub_ends_the_edit_exactly_once_however_it_ends()
+    {
+        var r = Hosted(() => new NumberField("Size", 0, 100), field =>
+        {
+            var changes = new List<double>();
+            int ended = 0;
+            field.ValueChanged += changes.Add;
+            field.EditEnded += () => ended++;
+            field.ShowValue(10);
+            var log = new List<string>();
+
+            // Released over the label: the mouse-up releases capture, and losing it ends the edit.
+            bool began = field.BeginScrub(100);
+            field.ScrubTo(106);
+            MouseUp(field.Label);
+            log.Add($"mouse-up: began {began}, value {field.Value}, ended {ended}, captured {field.Label.IsMouseCaptured}");
+            var released = (began, field.Value, ended);
+
+            // Capture taken away mid-drag (another window, Alt+Tab): the edit still ends, and the
+            // mouse-up that follows does not end it a second time.
+            ended = 0;
+            began = field.BeginScrub(100);
+            field.ScrubTo(110);                          // 13 + 5 steps
+            Mouse.Capture(null);
+            MouseUp(field.Label);
+            field.ScrubTo(140);                          // a stray move after the end changes nothing
+            log.Add($"capture lost: began {began}, value {field.Value}, ended {ended}");
+            var lost = (began, field.Value, ended);
+
+            // Esc mid-drag: back to the value before the drag, reported, then ended once.
+            ended = 0;
+            changes.Clear();
+            began = field.BeginScrub(100);
+            field.ScrubTo(120);
+            Press(field.Label, Key.Escape);
+            MouseUp(field.Label);
+            log.Add($"esc: began {began}, value {field.Value}, ended {ended}, changes [{string.Join(", ", changes)}], " +
+                    $"captured {field.Label.IsMouseCaptured}");
+            var escaped = (began, field.Value, ended, Changes: changes.ToArray());
+
+            // Esc with no scrub running is not the field's key.
+            bool idleEsc = field.HandleKey(Key.Escape, ModifierKeys.None);
+            return (log, released, lost, escaped, idleEsc);
+        });
+        foreach (var line in r.log) _out.WriteLine(line);
+        _out.WriteLine("expected mouse-up (True, 13, 1); capture lost (True, 18, 1); esc (True, 18, 1, [28, 18]); idle esc False");
+        Assert.Equal((true, 13.0, 1), r.released);
+        Assert.Equal((true, 18.0, 1), r.lost);
+        Assert.Equal((true, 18.0, 1), (r.escaped.began, r.escaped.Value, r.escaped.ended));
+        Assert.Equal(new[] { 28.0, 18.0 }, r.escaped.Changes);
+        Assert.False(r.idleEsc);
     }
 
     private void Check(string what, double expected, double actual)
@@ -101,23 +163,28 @@ public class DesignerFieldsTests : IDisposable
             field.EditEnded += () => ended++;
             field.ShowValue(4);                       // programmatic: no event
             Type(field.Box, N(7.5));
-            Press(field.Box, Key.Up);
+            // The modifiers are passed in, never read from the real keyboard, so a held Shift
+            // on the test machine cannot turn the plain step into a large one.
+            bool upHandled = field.HandleKey(Key.Up, ModifierKeys.None);
+            bool shiftUpHandled = field.HandleKey(Key.Up, ModifierKeys.Shift);
+            bool otherHandled = field.HandleKey(Key.A, ModifierKeys.None);
             Type(field.Box, "abc");
             var junk = (field.IsInvalid, field.Box.Text, field.Value, Red: Marked(field.Box));
             field.ShowValue(3);
             return (Changes: changes.ToArray(), ended, junk.IsInvalid, junk.Text, junk.Value, field.ToolTip,
-                junk.Red, Cleared: !Marked(field.Box) && !field.IsInvalid);
+                junk.Red, Cleared: !Marked(field.Box) && !field.IsInvalid, Handled: (upHandled, shiftUpHandled, otherHandled));
         });
-        _out.WriteLine($"expected changes 7.5, 8.5, then junk reverted to 8.5 in red, cleared by ShowValue");
-        _out.WriteLine($"actual {string.Join(", ", r.Changes)}; ended {r.ended}; invalid {r.IsInvalid}; red {r.Red}; " +
+        _out.WriteLine($"expected changes 7.5, 8.5, 18.5; ended 2; handled (True, True, False); junk reverted to 18.5 in red, cleared by ShowValue");
+        _out.WriteLine($"actual {string.Join(", ", r.Changes)}; ended {r.ended}; handled {r.Handled}; invalid {r.IsInvalid}; red {r.Red}; " +
                        $"cleared {r.Cleared}; text '{r.Text}'; tooltip '{r.ToolTip}'");
-        Assert.Equal(new[] { 7.5, 8.5 }, r.Changes);
-        Assert.True(r.ended >= 2);
+        Assert.Equal(new[] { 7.5, 8.5, 18.5 }, r.Changes);
+        Assert.Equal((true, true, false), r.Handled);
+        Assert.Equal(2, r.ended);
         Assert.True(r.IsInvalid);
         Assert.True(r.Red, "junk did not turn the box red");
         Assert.True(r.Cleared, "showing a good value left the box red");
-        Assert.Equal(NumberField.Format(8.5, 1), r.Text);
-        Assert.Equal(8.5, r.Value);
+        Assert.Equal(NumberField.Format(18.5, 1), r.Text);
+        Assert.Equal(18.5, r.Value);
         Assert.Equal(Loc.T("designer.field.range", "0", "100"), r.ToolTip);
     }
 
@@ -218,6 +285,29 @@ public class DesignerFieldsTests : IDisposable
         Assert.Equal(new[] { "#FF00FF00", "#80FF0000" }, r.Seen);
         Assert.Equal("#80FF0000", r.Text);
         Assert.True(r.Asked);
+    }
+
+    [Fact]
+    public void A_font_field_ignores_a_change_of_case_only()
+    {
+        var r = Hosted(() => new FontField("Font"), field =>
+        {
+            var seen = new List<string>();
+            field.ValueChanged += seen.Add;
+            field.ShowValue("Arial");
+            field.Combo.Text = "aRIAL";
+            Press(field.Combo, Key.Enter);
+            var afterCase = (Seen: seen.ToArray(), field.Value);
+            field.Combo.Text = "Consolas";
+            Press(field.Combo, Key.Enter);
+            return (afterCase, Seen: seen.ToArray(), field.Value);
+        });
+        _out.WriteLine($"expected no event for 'aRIAL' (value stays 'Arial'), then [Consolas]; " +
+                       $"actual [{string.Join(", ", r.afterCase.Seen)}] value '{r.afterCase.Value}', then [{string.Join(", ", r.Seen)}] value '{r.Value}'");
+        Assert.Empty(r.afterCase.Seen);
+        Assert.Equal("Arial", r.afterCase.Value);
+        Assert.Equal(new[] { "Consolas" }, r.Seen);
+        Assert.Equal("Consolas", r.Value);
     }
 
     [Fact]
