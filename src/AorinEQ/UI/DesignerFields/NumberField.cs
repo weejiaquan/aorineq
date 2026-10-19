@@ -28,6 +28,7 @@ internal sealed class NumberField : Grid
     private bool _setting;
     private double? _scrubOrigin;
     private double _scrubStartValue;
+    private bool _stepped;
 
     public NumberField(string label, double min, double max, int decimals = 0, double step = 1)
     {
@@ -53,10 +54,14 @@ internal sealed class NumberField : Grid
         Box.LostKeyboardFocus += (_, _) =>
         {
             Commit();
-            EditEnded?.Invoke();
+            EndEdit();
         };
         Box.TextChanged += (_, _) => { if (!_setting) ShowInvalid(false); };
+        // Focusable only so a click can give it focus and Esc reaches a scrub; Tab passes it by.
+        KeyboardNavigation.SetIsTabStop(Label, false);
         Label.PreviewKeyDown += OnKeyDown;
+        // Arrow steps on the label are an edit that leaving it ends, as leaving the box does.
+        Label.LostKeyboardFocus += (_, _) => { if (_stepped) EndEdit(); };
         Label.MouseLeftButtonDown += OnScrubStart;
         Label.MouseMove += OnScrubMove;
         Label.MouseLeftButtonUp += OnScrubEnd;
@@ -151,11 +156,12 @@ internal sealed class NumberField : Grid
         {
             case Key.Enter:
                 Commit();
-                EditEnded?.Invoke();
+                EndEdit();
                 return true;
             case Key.Up or Key.Down:
                 double current = TryParse(Box.Text, _min, _max, _decimals, out var typed) ? typed : Value;
                 Change(Stepped(current, key == Key.Up, modifiers.HasFlag(ModifierKeys.Shift), _step, _min, _max, _decimals));
+                _stepped = true;
                 return true;
             case Key.Escape when _scrubOrigin is not null:
                 Change(_scrubStartValue);
@@ -207,6 +213,12 @@ internal sealed class NumberField : Grid
     {
         if (_scrubOrigin is null) return;
         _scrubOrigin = null;
+        EndEdit();
+    }
+
+    private void EndEdit()
+    {
+        _stepped = false;
         EditEnded?.Invoke();
     }
 }

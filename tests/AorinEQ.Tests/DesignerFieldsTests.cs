@@ -90,6 +90,45 @@ public class DesignerFieldsTests : IDisposable
         { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
 
     [Fact]
+    public void Arrow_steps_on_the_focused_label_end_when_focus_leaves_it()
+    {
+        var r = Hosted(() => new NumberField("Size", 0, 100), field =>
+        {
+            int ended = 0;
+            field.EditEnded += () => ended++;
+            field.ShowValue(10);
+            // A focus change with nothing edited is not an edit ending.
+            bool focused = field.Label.Focus();
+            Keyboard.ClearFocus();
+            int endedIdle = ended;
+
+            ended = 0;
+            field.Label.Focus();
+            field.HandleKey(Key.Up, ModifierKeys.None);
+            field.HandleKey(Key.Up, ModifierKeys.None);
+            int endedWhileFocused = ended;
+            Keyboard.ClearFocus();
+            bool movedAway = !field.Label.IsKeyboardFocused;
+            int endedAfterLeaving = ended;
+            field.Label.Focus();
+            Keyboard.ClearFocus();                   // in and out again, nothing changed
+            return (focused, movedAway, endedIdle, endedWhileFocused, endedAfterLeaving, EndedTotal: ended, field.Value,
+                TabStop: KeyboardNavigation.GetIsTabStop(field.Label), field.Label.Focusable);
+        });
+        _out.WriteLine("expected focused True, moved away True, idle ends 0, ends while focused 0, after leaving 1, total 1, " +
+                       "value 12, tab stop False, focusable True");
+        _out.WriteLine($"actual {r}");
+        Assert.True(r.focused && r.movedAway, "keyboard focus did not move in the host window: the test proves nothing");
+        Assert.Equal(0, r.endedIdle);
+        Assert.Equal(0, r.endedWhileFocused);
+        Assert.Equal(1, r.endedAfterLeaving);
+        Assert.Equal(1, r.EndedTotal);
+        Assert.Equal(12, r.Value);
+        Assert.False(r.TabStop, "every number label became a Tab stop");
+        Assert.True(r.Focusable, "a label that cannot take focus cannot hear Esc during a scrub");
+    }
+
+    [Fact]
     public void A_scrub_ends_the_edit_exactly_once_however_it_ends()
     {
         var r = Hosted(() => new NumberField("Size", 0, 100), field =>
