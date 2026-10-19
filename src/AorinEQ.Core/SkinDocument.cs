@@ -137,7 +137,7 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
         }
 
         if (c.Notice is { HasArt: true } n)
-            Probe(SkinLayer.NoticeArt, n.ArtPath!, "notice", n.ArtIsGif ? 1 : n.ArtFrames);
+            Probe(SkinLayer.NoticeArt, n.ArtPath!, "notice", n.ArtFrames);
 
         if (AirPlayError is { } stripError)
             issues.Add(new SkinIssue(SkinLayer.AirPlay, SkinIssueKind.AirPlayUnloadable, [stripError]));
@@ -182,7 +182,7 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
     /// <summary>A notice placed by the loader's own rules against its art as it is on disk now. A
     /// plate keeps its text position and glyph X (the loader reads them for a plate and the writer
     /// writes them back); its glyph Y is always 0, as the loader reads it. Art that cannot be read
-    /// leaves the notice as it is, with the reason.</summary>
+    /// leaves the notice where it is, its plate values still clamped, with the reason.</summary>
     internal static SkinNotice PlaceNotice(SkinNotice notice, ImageProbe probe, out string? error)
     {
         error = null;
@@ -198,7 +198,7 @@ public sealed record SkinDocument(string Name, string EmptyPath, string FullPath
         if (!art.IsUsable)
         {
             error = art.Error;
-            return notice;
+            return SkinLoader.ClampNotice(notice);
         }
         return SkinLoader.PlaceNoticeArt(SkinLoader.ClampNotice(notice), art.Path, art.IsGif, art.IsGif ? 1 : frames,
             art.LogicalWidth, art.LogicalHeight, notice.Text.X, notice.Text.Y, notice.Glyph.X, notice.Glyph.Y,

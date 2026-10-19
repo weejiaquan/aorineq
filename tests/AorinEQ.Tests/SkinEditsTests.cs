@@ -339,6 +339,21 @@ public class SkinEditsTests : IDisposable
         AssertRoundTrips(far);
     }
 
+    /// <summary>A text on a board with no art to measure it by (none chosen yet, or deleted while
+    /// open) stays where it is: clamping it into a 0x0 board would throw its position away.</summary>
+    [Fact]
+    public void Moving_text_on_a_board_with_no_art_changes_nothing()
+    {
+        var blank = SkinEdits.SetText(SkinDocument.New("blank"), SkinLayer.PercentText, new SkinText(true, 10, 5), _probe);
+        var deleted = Loaded("gone", """{"percentText":{"show":true,"x":10,"y":5}}""");
+        File.Delete(deleted.EmptyPath);
+        var movedBlank = SkinEdits.MoveText(blank, SkinLayer.PercentText, 3, 3, _probe);
+        var movedDeleted = SkinEdits.MoveText(deleted, SkinLayer.PercentText, 3, 3, _probe);
+        _out.WriteLine($"expected (10,5) both; no art {movedBlank.Config.Text}; art deleted {movedDeleted.Config.Text}");
+        Assert.Equal(blank, movedBlank);
+        Assert.Equal(deleted, movedDeleted);
+    }
+
     [Fact]
     public void AddAirPlay_measures_the_strip_and_places_both_labels_and_RemoveAirPlay_takes_it_away()
     {
@@ -408,6 +423,21 @@ public class SkinEditsTests : IDisposable
         _out.WriteLine($"{next.Config.Notice}");
         Assert.Equal((64.0, 0.0), (next.Config.Notice!.CornerRadius, next.Config.Notice.PadX));
         AssertRoundTrips(next);
+    }
+
+    /// <summary>Notice art that cannot be read still gets its plate clamped, so no edit can store a
+    /// value the loader would never give back while the art is missing.</summary>
+    [Fact]
+    public void A_notice_on_missing_art_is_still_clamped()
+    {
+        var doc = SkinEdits.SetArt(SkinEdits.SetNoticeEnabled(Loaded("missing"), true), SkinLayer.NoticeArt,
+            Src("gone.png", 260, 50), 1, _probe);
+        File.Delete(doc.Config.Notice!.ArtPath!);
+        var notice = SkinEdits.SetNotice(doc, doc.Config.Notice with { CornerRadius = 500 }, _probe);
+        var text = SkinEdits.SetText(notice, SkinLayer.NoticeText, new SkinText(true, 48, 15, FontSize: double.NaN), _probe);
+        _out.WriteLine($"expected corner 64, font 14; actual corner {text.Config.Notice!.CornerRadius}, font {text.Config.Notice.Text.FontSize}");
+        Assert.Equal((64.0, SkinClamps.DefaultFontSize), (text.Config.Notice.CornerRadius, text.Config.Notice.Text.FontSize));
+        Assert.True(text.Config.Notice.HasArt);
     }
 
     [Fact]
@@ -500,6 +530,24 @@ public class SkinEditsTests : IDisposable
             _out.WriteLine($"{what}: actual   {actual.Config.Text} / {actual.Config.Notice}");
             Assert.Equal(expected, actual);
         }
+    }
+
+    /// <summary>Review focus: a corner dragged past the strip's edge stops there and the edges it
+    /// does not hold stay put - clamping position and size together would move the far edge.</summary>
+    [Theory]
+    [InlineData(SkinHandle.TopLeft, -500, -500, 0, 0, 120, 25)]
+    [InlineData(SkinHandle.TopLeft, -500, 0, 0, 5, 120, 20)]
+    [InlineData(SkinHandle.TopLeft, 0, -500, 100, 0, 20, 25)]
+    [InlineData(SkinHandle.BottomRight, 500, 500, 100, 5, 200, 25)]
+    public void Resizing_an_area_past_the_strip_moves_only_the_dragged_edges(SkinHandle handle, int dx, int dy,
+        int x, int y, int w, int h)
+    {
+        var doc = SkinEdits.SetHit(Loaded("over" + handle + dx + dy, "{}", strip: true), SkinLayer.AirPlayDropdown,
+            new SkinHitRect(100, 5, 20, 20));
+        var resized = SkinEdits.Drag(doc, SkinLayer.AirPlayDropdown, handle, dx, dy, _probe);
+        _out.WriteLine($"{handle} ({dx},{dy}) on [100,5 20x20] in 300x30: expected {new SkinHitRect(x, y, w, h)}, actual {resized.Config.AirPlay!.DropdownHit}");
+        Assert.Equal(new SkinHitRect(x, y, w, h), resized.Config.AirPlay.DropdownHit);
+        AssertRoundTrips(resized);
     }
 
     [Theory]

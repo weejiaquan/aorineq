@@ -247,6 +247,43 @@ public class SkinDocumentTests : IDisposable
         Assert.Contains(new SkinIssue(SkinLayer.AirPlayFull, SkinIssueKind.ArtUnreadable, ["af.png"]), deleted);
     }
 
+    /// <summary>Issues probes notice art with the frame count placement and the save use, so a
+    /// notice flagged as a GIF on what is really a PNG sheet cannot pass Issues and save broken.</summary>
+    [Fact]
+    public void Issues_judge_notice_art_with_the_frames_a_save_places_it_with()
+    {
+        var folder = Folder("noticeframes");
+        var empty = Path.Combine(folder, "e.png");
+        var full = Path.Combine(folder, "f.png");
+        var art = Path.Combine(folder, "n.png");
+        TestPngs.Write(empty, 300, 40);
+        TestPngs.Write(full, 300, 40);
+        TestPngs.Write(art, 260, 7);
+        var doc = new SkinDocument("frames", empty, full, null, new SkinConfig(null, 1.0, Meta: SkinMeta.None,
+            Notice: SkinLoader.DefaultNotice with { ArtPath = art, ArtIsGif = true, ArtFrames = 2 }));
+        var issues = doc.Issues(_probe);
+        SkinDocument.PlaceNotice(doc.Config.Notice!, _probe, out var placeError);
+        _out.WriteLine($"issues: {string.Join("; ", issues)}");
+        _out.WriteLine($"placement error: {placeError ?? "(none)"}");
+        Assert.NotNull(placeError);
+        Assert.Contains(new SkinIssue(SkinLayer.NoticeArt, SkinIssueKind.FramesDoNotDivide, ["n.png", "7", "2"]), issues);
+    }
+
+    [Fact]
+    public void PlaceNotice_clamps_the_plate_even_when_the_art_cannot_be_read()
+    {
+        var look = SkinLoader.DefaultNotice with
+        {
+            ArtPath = Path.Combine(_root, "missing.png"), CornerRadius = 500,
+            Text = SkinLoader.DefaultNotice.Text with { FontSize = double.NaN },
+        };
+        var placed = SkinDocument.PlaceNotice(look, _probe, out var error);
+        _out.WriteLine($"error {error ?? "(none)"}; expected corner 64 font 14, actual corner {placed.CornerRadius} font {placed.Text.FontSize}");
+        Assert.NotNull(error);
+        Assert.Equal(SkinLoader.ClampNotice(look), placed);
+        Assert.Equal((64.0, SkinClamps.DefaultFontSize), (placed.CornerRadius, placed.Text.FontSize));
+    }
+
     [Fact]
     public void A_valid_skin_has_no_issues_and_every_message_resolves()
     {

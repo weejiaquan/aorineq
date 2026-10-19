@@ -188,6 +188,7 @@ public static class SkinEdits
         var (width, height) = SkinLayers.BoardOf(layer) == SkinLayer.AirPlay
             ? (doc.Config.AirPlay!.Width, doc.Config.AirPlay.Height)
             : VolumeSize(doc, probe);
+        if (width <= 0 || height <= 0) return doc; // no art to measure the board by: nothing to clamp into
         return SetText(doc, layer, text with
         {
             X = Math.Clamp(text.X + dx, 0, Math.Max(0, width)),
@@ -331,7 +332,7 @@ public static class SkinEdits
                         X = Math.Clamp(rect.X + dx, 0, Math.Max(0, strip.Width - rect.Width)),
                         Y = Math.Clamp(rect.Y + dy, 0, Math.Max(0, strip.Height - rect.Height)),
                     }
-                    : Resize(rect, handle, dx, dy));
+                    : Inside(Resize(rect, handle, dx, dy), strip.Width, strip.Height));
             default:
                 return start;
         }
@@ -346,6 +347,16 @@ public static class SkinEdits
         if (handle is SkinHandle.TopRight or SkinHandle.BottomRight) right = Math.Max(right + dx, left + 1);
         if (handle is SkinHandle.TopLeft or SkinHandle.TopRight) top = Math.Min(top + dy, bottom - 1);
         if (handle is SkinHandle.BottomLeft or SkinHandle.BottomRight) bottom = Math.Max(bottom + dy, top + 1);
+        return new SkinHitRect(left, top, right - left, bottom - top);
+    }
+
+    /// <summary>A resized rectangle with each edge pulled inside the strip on its own, so an edge
+    /// dragged past the strip stops at it and the edges not dragged stay where they were (clamping
+    /// position and size together would move the far edge instead).</summary>
+    private static SkinHitRect Inside(SkinHitRect r, int width, int height)
+    {
+        int left = Math.Max(0, r.X), top = Math.Max(0, r.Y);
+        int right = Math.Clamp(r.Right, left, Math.Max(left, width)), bottom = Math.Clamp(r.Bottom, top, Math.Max(top, height));
         return new SkinHitRect(left, top, right - left, bottom - top);
     }
 
