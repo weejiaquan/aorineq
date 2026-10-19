@@ -161,6 +161,7 @@ public partial class App
 
     private void OnAirPlaySettingsChanged(AirPlaySetting setting)
     {
+        var previous = _settings.AirPlay ?? AirPlaySetting.Default;
         _settings = _settings with { AirPlay = setting };
         SaveSettings();
         // AirPlay only switched off mid-stream gives the user their output back now; the stream
@@ -171,8 +172,10 @@ public partial class App
         // effect on the next connection, because changing them mid-stream would mean tearing
         // the session down and rebuilding it under the user.
         AirPlay.SetVolumePercent(setting.VolumePercent);
-        // AirPlay only and the source both decide which endpoint's Equalizer APO the keys answer to.
-        _settingsWindow?.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
+        // AirPlay only and the source both decide which endpoint's Equalizer APO the keys answer to;
+        // nothing else here does, so the machine is only read again when one of them changed.
+        if (setting.AirPlayOnly != previous.AirPlayOnly || setting.SourceEndpointId != previous.SourceEndpointId)
+            _settingsWindow?.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
     }
 
     /// <summary>What the AirPlay strip should be showing right now. One answer, asked by both the

@@ -525,10 +525,13 @@ AorinEQ makes **CABLE Input (VB-Audio Virtual Cable)** Windows' default output f
 (console, multimedia, communications) - every app plays into the virtual device, nothing reaches
 your speakers - and the stream captures that device. When the stream ends (Disconnect, the receiver
 dropping, an idle hang-up, an error, or quitting AorinEQ) each role goes back to the device it was
-on, if that device still exists.
+on. A role whose device has gone in the meantime is moved to another active device rather than left
+on the cable.
 
 - **You pick another output mid-stream:** AorinEQ treats it as your decision and stops managing the
   default; the stream keeps capturing the cable.
+- **You turn AirPlay only off mid-stream:** your output comes back at once. The stream keeps
+  capturing the cable until it ends, so the receiver goes quiet until the next connection.
 - **VB-Cable disappears mid-stream** (disabled or removed): your original devices are put back at once.
 - **AorinEQ is killed mid-stream:** the original defaults were saved to `settings.json` before the
   switch and are put back on the next start.
@@ -548,7 +551,9 @@ toggle runs the same elevated, backed-up, verified repair as the Volume page's b
 cable; turning it off undoes exactly that repair. Each device keeps its own undo record, so
 repairing the cable never touches the undo held for your speakers. **Edit EQ** opens the equalizer
 on the cable's tab, and the Global chain applies to it as well. If Equalizer APO is not installed,
-the toggle opens the setup guide instead.
+the toggle opens the setup guide instead. Turning it off is refused when Equalizer APO was switched
+on for the cable with its own Configurator rather than by this toggle: there is no AorinEQ backup to
+undo from, so switch it off in the Configurator.
 
 ### Playback modes
 
@@ -579,8 +584,8 @@ would expect:
   upstream of the tap, so the volume keys already attenuate the audio before it is packetised. Set
   the receiver to 100% and the existing preamp controls it, exactly like a DAC. Retargeting the keys
   at the receiver as well would attenuate twice, so the setting greys itself out and says so. Without
-  Equalizer APO on that device (VB-Cable with EQ off, say) the preamp reaches nothing, so the keys
-  drive the receiver instead.
+  Equalizer APO on that device (VB-Cable with EQ off, say) the preamp reaches nothing, so with
+  **Volume keys drive the receiver** on, the keys drive the receiver instead.
 - **In Windows volume mode**, endpoint volume reaches the tap only on devices without hardware
   volume, which Microsoft documents as not contractual. Since it is unsafe to rely on in either
   direction, AorinEQ drives the receiver's own volume explicitly.

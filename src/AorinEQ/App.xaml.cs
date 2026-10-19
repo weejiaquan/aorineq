@@ -111,6 +111,9 @@ public partial class App : System.Windows.Application
     private readonly EapoHealthTracker _eapoHealth = new();
     /// <summary>An elevated repair or undo helper is in flight — see <see cref="RunEapoRepairHelperAsync"/>.</summary>
     private bool _eapoRepairRunning;
+    /// <summary>The <c>--endpoint</c> of the run in flight (null: the default device). Only
+    /// meaningful while <see cref="_eapoRepairRunning"/> is set.</summary>
+    private string? _eapoRepairEndpointGuid;
     private System.Windows.Threading.DispatcherTimer? _healthTimer;
     private bool _healthEventsSubscribed;
     /// <summary>Whether <see cref="EapoDependency"/> said yes at the last check — the edge is what
@@ -1879,9 +1882,16 @@ public partial class App : System.Windows.Application
     /// (VB-Cable) instead of the default.</summary>
     private async Task<bool> RunEapoRepairHelperAsync(string flag, string busyText, string? endpointGuid = null)
     {
-        if (_eapoRepairRunning) return false;
+        if (_eapoRepairRunning)
+        {
+            // Said on the surface that asked: the run holding the helper reports elsewhere, so a
+            // silent drop would read as a click that did nothing.
+            ShowRepairStatus(_settingsWindow, endpointGuid, Loc.T("app.aorineq-is-already-changing-this-pc"), busy: false);
+            return false;
+        }
         _eapoRepairRunning = true;
-        ShowRepairStatus(endpointGuid, busyText, busy: true);
+        _eapoRepairEndpointGuid = endpointGuid;
+        ShowRepairStatus(_settingsWindow, endpointGuid, busyText, busy: true);
         var token = EapoRepair.NewToken();
         try
         {
@@ -1899,14 +1909,14 @@ public partial class App : System.Windows.Application
             }
             catch (System.ComponentModel.Win32Exception)
             {
-                ShowRepairStatus(endpointGuid,
+                ShowRepairStatus(_settingsWindow, endpointGuid,
                     Loc.T("app.administrator-permission-is-needed-to-change"),
                     busy: false);
                 return false;
             }
             if (proc is null)
             {
-                ShowRepairStatus(endpointGuid, Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
+                ShowRepairStatus(_settingsWindow, endpointGuid, Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
                 return false;
             }
             int exitCode;
@@ -1920,7 +1930,7 @@ public partial class App : System.Windows.Application
             // shown as this one's outcome.
             var result = EapoRepair.ReadResult(token);
             var message = result?.Message ?? NoVerdictMessage(exitCode, endpointGuid);
-            ShowRepairStatus(endpointGuid, message, busy: false);
+            ShowRepairStatus(_settingsWindow, endpointGuid, message, busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
                 _tray?.ShowInfo(Loc.T("app.equalizer-apo-is-switched-on-for"));
             // Anything short of success is said in a dialog, not only in the status line. The user
@@ -1953,15 +1963,23 @@ public partial class App : System.Windows.Application
 
     /// <summary>Where a repair's progress and verdict are shown: the Volume page's status line for
     /// the default device, and for VB-Cable the AirPlay page's EQ card — the control that started
-    /// it (its toggle is already disabled while the helper runs, so <paramref name="busy"/> only
-    /// matters to the Volume page).</summary>
-    private void ShowRepairStatus(string? endpointGuid, string text, bool busy)
+    /// it. <paramref name="busy"/> drives only the Volume page's buttons; the EQ toggle disables
+    /// itself when clicked and <see cref="UI.SettingsWindow.SetAirPlayEqStream"/> re-enables it.
+    /// So neither surface is locked by the other's run: a click there meanwhile is refused with
+    /// a message on its own surface (see <see cref="RunEapoRepairHelperAsync"/>).</summary>
+    internal static void ShowRepairStatus(UI.SettingsWindow? window, string? endpointGuid, string text, bool busy)
     {
         if (endpointGuid is null)
-            _settingsWindow?.SetEapoRepairStatus(text, busy);
+            window?.SetEapoRepairStatus(text, busy);
         else
-            _settingsWindow?.SetAirPlayEqStreamStatus(text);
+            window?.SetAirPlayEqStreamStatus(text);
     }
+
+    /// <summary>Whether the helper in flight is aimed at <paramref name="endpointGuid"/>:
+    /// <paramref name="running"/> and the run's <c>--endpoint</c> (null for the default device).
+    /// Endpoint guids are compared case-insensitively, as Windows writes them either way.</summary>
+    internal static bool RepairRunningOn(bool running, string? runningEndpointGuid, string endpointGuid) =>
+        running && string.Equals(runningEndpointGuid, endpointGuid, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>What to say when the helper exited without leaving a verdict for THIS run — it was
     /// killed, or it died before it could record anything.

@@ -31,9 +31,11 @@ public partial class App
             VirtualCable.StateFor(cable is not null, VirtualCable.IsInstalledButInactive(),
                 _settings.VirtualCablePendingReboot),
             cable?.Id);
-        // While the helper runs, the toggle is showing the user's request, not the machine: the UAC
-        // prompt deactivates and reactivates the window, and that activation must not flip it back.
-        if (!_eapoRepairRunning)
+        // While the cable's own repair runs, the toggle is showing the user's request, not the
+        // machine: the UAC prompt deactivates and reactivates the window, and that activation must
+        // not flip it back. Any other run (the default device's) leaves it showing the machine, so a
+        // request dropped because of that run snaps straight back.
+        if (cable is null || !RepairRunningOn(_eapoRepairRunning, _eapoRepairEndpointGuid, cable.Guid))
             window.SetAirPlayEqStream(cable is not null && EapoDetection.IsActiveOnEndpoint(cable.Guid));
         window.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
     }

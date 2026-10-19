@@ -208,4 +208,75 @@ public class AirPlayCablePageTests
         Assert.Equal((Visibility.Visible, busy), r.Shown);
         Assert.Equal(Visibility.Collapsed, r.After);
     }
+
+    [Fact]
+    public void What_App_tells_the_page_is_not_the_user_acting_so_it_raises_nothing()
+    {
+        var r = With(WithAirPlay(AirPlaySetting.Default with { AirPlayOnly = true }), w =>
+        {
+            var toggled = new List<bool>();
+            var settings = new List<AirPlaySetting>();
+            w.AirPlayEqStreamToggled += toggled.Add;
+            w.AirPlaySettingsChanged += settings.Add;
+            w.SetAirPlayEqStream(true);
+            w.SetAirPlayEqStream(false);
+            // A made-up id is enough here: nothing is selected by it, only hidden and shown.
+            w.SetVirtualCable(VirtualCableState.Present, "{0.0.0.00000000}.{00000000-0000-0000-0000-000000000000}");
+            w.SetVirtualCable(VirtualCableState.Inactive, null);
+            w.SetVirtualCable(VirtualCableState.Missing, null);
+            return (Toggled: toggled.Count, Settings: settings.Count);
+        });
+        _out.WriteLine($"after programmatic pushes: toggled raised {r.Toggled}, settings raised {r.Settings}");
+        Assert.Equal(0, r.Toggled);
+        Assert.Equal(0, r.Settings);
+    }
+
+    // ---------------------------------------------------------------- App's repair routing
+
+    /// <summary>The toggle keeps showing the user's request only while the CABLE'S OWN repair runs;
+    /// while the default device's runs, it shows the machine, so a request refused because of that
+    /// run snaps back at once instead of staying greyed out.</summary>
+    [Theory]
+    [InlineData(false, null, "{AAAA}", false)]                // nothing running
+    [InlineData(true, null, "{AAAA}", false)]                 // the default device's repair
+    [InlineData(true, "{BBBB}", "{AAAA}", false)]             // some other named endpoint
+    [InlineData(true, "{AAAA}", "{AAAA}", true)]              // the cable's own repair
+    [InlineData(true, "{aaaa}", "{AAAA}", true)]              // case is not identity
+    [InlineData(false, "{AAAA}", "{AAAA}", false)]            // a stale guid after the run ended
+    public void The_eq_toggle_holds_the_users_request_only_during_the_cables_own_repair(
+        bool running, string? runningGuid, string cableGuid, bool expected)
+    {
+        bool holds = App.RepairRunningOn(running, runningGuid, cableGuid);
+        _out.WriteLine($"running={running} run's endpoint={runningGuid ?? "(default)"} cable={cableGuid} -> holds={holds}");
+        Assert.Equal(expected, holds);
+    }
+
+    /// <summary>A refused request (another repair holds the helper) is said on the surface that
+    /// asked: the cable's on the EQ card, the default device's on the Volume page — never on the
+    /// other one, which may be showing the run that holds it.</summary>
+    [Fact]
+    public void A_refusal_is_said_where_it_was_asked()
+    {
+        var refused = Loc.T("app.aorineq-is-already-changing-this-pc");
+        var busy = Loc.T("app.repairing");
+        var r = With(Settings.Default, w =>
+        {
+            // The default device's repair is running and reporting on the Volume page...
+            App.ShowRepairStatus(w, null, busy, busy: true);
+            // ...when the cable's toggle asks.
+            App.ShowRepairStatus(w, "{AAAA}", refused, busy: false);
+            var cableAsked = (Volume: w.EapoRepairStatusText.Text, Eq: w.AirPlayEqStreamStatus.Text,
+                EqShown: w.AirPlayEqStreamStatus.Visibility, RepairButton: w.RepairEapoButton.IsEnabled);
+            // And the other way round: the cable's repair is reporting on the EQ card when the
+            // Volume page asks.
+            App.ShowRepairStatus(w, "{AAAA}", busy, busy: true);
+            App.ShowRepairStatus(w, null, refused, busy: false);
+            var defaultAsked = (Volume: w.EapoRepairStatusText.Text, Eq: w.AirPlayEqStreamStatus.Text);
+            return (CableAsked: cableAsked, DefaultAsked: defaultAsked);
+        });
+        _out.WriteLine($"cable asked during the default's run: {r.CableAsked}");
+        _out.WriteLine($"default asked during the cable's run: {r.DefaultAsked}");
+        Assert.Equal((busy, refused, Visibility.Visible, false), r.CableAsked); // the Volume page still shows its run
+        Assert.Equal((refused, busy), r.DefaultAsked);                         // the EQ card still shows its run
+    }
 }
