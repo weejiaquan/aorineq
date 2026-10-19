@@ -231,40 +231,8 @@ public static class SkinPreview
         return FontStyle.Regular;
     }
 
-    /// <summary>Parses the same colour spellings the UI layer accepts — #RGB, #ARGB, #RRGGBB,
-    /// #AARRGGBB and the named colours — returning null on anything else so the caller falls back
-    /// instead of throwing on an author-supplied string.</summary>
-    private static Color? ParseColor(string? value)
-    {
-        var text = value?.Trim();
-        if (string.IsNullOrEmpty(text)) return null;
-
-        if (text[0] == '#')
-        {
-            var hex = text[1..];
-            if (!uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var raw))
-                return null;
-            return hex.Length switch
-            {
-                // Shorthand digits double, exactly like the WPF converter: #F0C -> #FFFF00CC.
-                3 => FromArgb(0xF, (raw >> 8) & 0xF, (raw >> 4) & 0xF, raw & 0xF, doubled: true),
-                4 => FromArgb((raw >> 12) & 0xF, (raw >> 8) & 0xF, (raw >> 4) & 0xF, raw & 0xF, doubled: true),
-                6 => FromArgb(0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF, doubled: false),
-                8 => FromArgb((raw >> 24) & 0xFF, (raw >> 16) & 0xFF, (raw >> 8) & 0xFF, raw & 0xFF, doubled: false),
-                _ => null,
-            };
-        }
-
-        var named = Color.FromName(text);
-        return named.IsKnownColor ? named : null;
-    }
-
-    private static Color FromArgb(uint a, uint r, uint g, uint b, bool doubled)
-    {
-        if (doubled)
-        {
-            a = a * 17; r = r * 17; g = g * 17; b = b * 17; // 0xF -> 0xFF
-        }
-        return Color.FromArgb((int)a, (int)r, (int)g, (int)b);
-    }
+    /// <summary>A skin colour as a GDI+ colour, through <see cref="SkinColor"/> - the parser the
+    /// WPF renderers use, so the preview cannot accept a spelling the OSD rejects.</summary>
+    private static Color? ParseColor(string? value) =>
+        SkinColor.Parse(value) is { } c ? Color.FromArgb(c.A, c.R, c.G, c.B) : null;
 }
