@@ -277,6 +277,9 @@ public partial class SkinDesignerWindow
     }
 
     private double _zoom = 1;
+    /// <summary>Ctrl+wheel's accumulator: a precision touchpad's pinch sends fractions of a notch,
+    /// and only whole notches step the zoom.</summary>
+    private readonly ScrollStep _zoomScroll = new();
     private Point? _panOrigin;
     private Point _panStartOffset;
 
@@ -360,12 +363,14 @@ public partial class SkinDesignerWindow
         };
     }
 
-    /// <summary>Ctrl+wheel zooms one step at <paramref name="cursor"/> (viewport pixels); a plain
-    /// wheel is not taken, and scrolls. Whether it was taken.</summary>
+    /// <summary>Ctrl+wheel zooms one stop per whole notch at <paramref name="cursor"/> (viewport
+    /// pixels), a part notch carried to the next delta; a plain wheel is not taken, and scrolls.
+    /// Whether it was taken.</summary>
     internal bool HandleWheel(int delta, ModifierKeys modifiers, Point cursor)
     {
         if (!modifiers.HasFlag(ModifierKeys.Control)) return false;
-        ZoomAt(CanvasZoom.WheelZoom(_zoom, delta), cursor);
+        int notches = _zoomScroll.Feed(delta, 1, inverted: false);
+        if (notches != 0) ZoomAt(CanvasZoom.Stepped(_zoom, notches), cursor);
         return true;
     }
 

@@ -29,9 +29,15 @@ public class CanvasZoomTests
         Assert.Equal(0.33, CanvasZoom.In(0.3));
         Assert.Equal(8.0, CanvasZoom.In(8));
         Assert.Equal(0.25, CanvasZoom.Out(0.25));
-        Assert.Equal(CanvasZoom.In(2), CanvasZoom.WheelZoom(2, 120));
-        Assert.Equal(CanvasZoom.Out(2), CanvasZoom.WheelZoom(2, -120));
-        Assert.Equal(2, CanvasZoom.WheelZoom(2, 0));
+    }
+
+    [Fact]
+    public void Notches_step_one_stop_each_and_stop_at_the_ends()
+    {
+        var r = (In1: CanvasZoom.Stepped(2, 1), Out1: CanvasZoom.Stepped(2, -1), None: CanvasZoom.Stepped(2, 0),
+            In3: CanvasZoom.Stepped(1, 3), Out2: CanvasZoom.Stepped(1, -2), PastMax: CanvasZoom.Stepped(4, 20), PastMin: CanvasZoom.Stepped(0.5, -20));
+        _out.WriteLine($"expected (3, 1.5, 2, 3, 0.5, 8, 0.25); actual {r}");
+        Assert.Equal((3.0, 1.5, 2.0, 3.0, 0.5, 8.0, 0.25), r);
     }
 
     /// <summary>Review focus: a 1×1 image and a 4000 px strip both get a usable zoom.</summary>

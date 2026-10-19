@@ -1366,6 +1366,38 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.Equal((2.0, 2.0), (r.After, r.OverlayZoom));
     }
 
+    /// <summary>Ctrl+wheel zooms by whole notches: a precision touchpad's pinch sends deltas far
+    /// smaller than one, which add up to a stop instead of each taking one; a full notch steps
+    /// once; a fast wheel's several notches in one delta step several stops; a reversal starts over.</summary>
+    [Fact]
+    public void Ctrl_wheel_zooms_one_stop_per_whole_notch()
+    {
+        MakeSkin("pinch", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("pinch");
+            d.SetZoom(1);
+            d.UpdateLayout();
+            var cursor = new Point(10, 10);
+            var zooms = new List<double>();
+            foreach (var delta in new[] { 30, 30, 30 }) { d.HandleWheel(delta, ModifierKeys.Control, cursor); zooms.Add(d.Zoom); }
+            d.HandleWheel(30, ModifierKeys.Control, cursor);     // the fourth quarter: one notch
+            double afterPinch = d.Zoom;
+            d.HandleWheel(120, ModifierKeys.Control, cursor);
+            double afterNotch = d.Zoom;
+            d.HandleWheel(360, ModifierKeys.Control, cursor);
+            double afterThree = d.Zoom;
+            d.HandleWheel(90, ModifierKeys.Control, cursor);     // carried...
+            d.HandleWheel(-120, ModifierKeys.Control, cursor);   // ...and thrown away by the reversal
+            double afterReversal = d.Zoom;
+            return (Small: string.Join(", ", zooms), afterPinch, afterNotch, afterThree, afterReversal);
+        });
+        _out.WriteLine($"expected: three quarter-notches leave 1, 1, 1; the fourth steps to 1.5; a notch to 2; three notches to 6; " +
+                       $"a reversal after a part notch steps one out to 4; actual {r}");
+        Assert.Equal("1, 1, 1", r.Small);
+        Assert.Equal((1.5, 2.0, 6.0, 4.0), (r.afterPinch, r.afterNotch, r.afterThree, r.afterReversal));
+    }
+
     /// <summary>Middle-drag pans; a left drag pans only with Space held; letting go (the capture
     /// lost) ends the pan, and the pointer moving on scrolls nothing.</summary>
     [Fact]

@@ -1,6 +1,6 @@
 namespace AorinEQ.Core;
 
-/// <summary>The designer canvas's zoom: 25 %-800 %, stepped by the buttons and Ctrl+wheel through
+/// <summary>The designer canvas's zoom: 25 %-800 %, stepped by the buttons and Ctrl+wheel notches through
 /// the stops image editors use, fitted to the window by Ctrl+0, and anchored at the cursor.</summary>
 public static class CanvasZoom
 {
@@ -15,8 +15,14 @@ public static class CanvasZoom
 
     public static double Out(double zoom) => Steps.LastOrDefault(s => s < zoom - 1e-9, Min);
 
-    /// <summary>One wheel notch: positive deltas zoom in.</summary>
-    public static double WheelZoom(double zoom, int delta) => delta > 0 ? In(zoom) : delta < 0 ? Out(zoom) : zoom;
+    /// <summary>The zoom <paramref name="notches"/> stops in (positive) or out (negative) from
+    /// <paramref name="zoom"/>: one stop per whole wheel notch, as <see cref="ScrollStep"/> counts them.</summary>
+    public static double Stepped(double zoom, int notches)
+    {
+        for (; notches > 0; notches--) zoom = In(zoom);
+        for (; notches < 0; notches++) zoom = Out(zoom);
+        return zoom;
+    }
 
     /// <summary>The zoom that shows the whole content in the viewport, clamped; 100 % when there is
     /// nothing to fit or nowhere to fit it.</summary>
