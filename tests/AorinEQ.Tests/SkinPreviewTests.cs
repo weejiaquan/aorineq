@@ -441,4 +441,37 @@ public class SkinPreviewTests : IDisposable
             default: Assert.InRange((minX + maxX) / 2, 135, 165); break;
         }
     }
+
+    /// <summary>The style the preview draws in, for families that lack some styles. Every family
+    /// tried on Windows - installed ones, and Tahoma loaded on its own (Regular and Bold files
+    /// only) - reports every style available, because GDI+ simulates the rest; so the families
+    /// here are their availability, written out, and a real one is checked alongside.
+    /// R = Regular, B = Bold, I = Italic, BI = Bold Italic.</summary>
+    [Theory]
+    [InlineData("R B I BI", 700, true, "Bold, Italic")]
+    [InlineData("R B", 700, true, "Bold")]          // no bold italic: keep the bold rather than drop both
+    [InlineData("R I", 700, true, "Italic")]        // no bold at all: keep the italic
+    [InlineData("R", 700, true, "Regular")]
+    [InlineData("B", 300, false, "Bold")]           // a bold-only family: what it has
+    [InlineData("R B I BI", 600, true, "Italic")]   // 600 is Regular in GDI+, italic still asked
+    public void Preview_style_keeps_what_the_family_can_of_the_weight_and_slant(string has, int weight, bool italic, string expected)
+    {
+        var styles = has.Split(' ').Select(s => s switch
+        {
+            "R" => FontStyle.Regular, "B" => FontStyle.Bold, "I" => FontStyle.Italic, _ => FontStyle.Bold | FontStyle.Italic,
+        }).ToHashSet();
+        var picked = SkinPreview.PickStyle(styles.Contains, weight, italic);
+        _out.WriteLine($"family with [{has}], weight {weight}, italic {italic}: expected {expected}, picked {picked}");
+        Assert.Equal(Enum.Parse<FontStyle>(expected), picked);
+    }
+
+    [Fact]
+    public void Preview_style_of_a_real_family_with_every_style_is_exactly_what_was_asked()
+    {
+        using var family = new FontFamily("Segoe UI");
+        var r = (BoldItalic: SkinPreview.PickStyle(family.IsStyleAvailable, 700, true),
+            Regular: SkinPreview.PickStyle(family.IsStyleAvailable, 400, false));
+        _out.WriteLine($"Segoe UI: 700 italic -> {r.BoldItalic}, 400 upright -> {r.Regular}");
+        Assert.Equal((FontStyle.Bold | FontStyle.Italic, FontStyle.Regular), r);
+    }
 }

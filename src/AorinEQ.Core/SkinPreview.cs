@@ -172,7 +172,7 @@ public static class SkinPreview
     {
         string text = percent.ToString(CultureInfo.InvariantCulture);
         using var family = ResolveFamily(style.FontFamily);
-        var fontStyle = PickStyle(family, style.Weight, style.Italic);
+        var fontStyle = PickStyle(family.IsStyleAvailable, style.Weight, style.Italic);
         float emSize = (float)Math.Max(1.0, style.FontSize);
 
         // GenericTypographic measures the glyph advance without GDI's extra padding, which is
@@ -238,14 +238,14 @@ public static class SkinPreview
     }
 
     /// <summary>The weight as GDI+'s two can say it - Bold from <see cref="BoldFromWeight"/> up,
-    /// Regular below - italic when asked, when the family has that style; otherwise whatever the
-    /// family does have.</summary>
-    private static FontStyle PickStyle(FontFamily family, int weight, bool italic)
+    /// Regular below - italic when asked, when the family has that style. A family without it
+    /// keeps what it can of it: bold alone, then italic alone, before anything else it has.
+    /// <paramref name="available"/> is the family's <see cref="FontFamily.IsStyleAvailable"/>.</summary>
+    internal static FontStyle PickStyle(Func<FontStyle, bool> available, int weight, bool italic)
     {
         var wanted = (weight >= BoldFromWeight ? FontStyle.Bold : FontStyle.Regular) | (italic ? FontStyle.Italic : FontStyle.Regular);
-        if (family.IsStyleAvailable(wanted)) return wanted;
-        foreach (var candidate in new[] { FontStyle.Regular, FontStyle.Bold, FontStyle.Italic })
-            if (family.IsStyleAvailable(candidate)) return candidate;
+        foreach (var candidate in new[] { wanted, wanted & ~FontStyle.Italic, wanted & ~FontStyle.Bold, FontStyle.Regular, FontStyle.Bold, FontStyle.Italic })
+            if (available(candidate)) return candidate;
         return FontStyle.Regular;
     }
 
