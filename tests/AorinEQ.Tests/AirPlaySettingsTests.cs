@@ -379,4 +379,29 @@ public class AirPlaySettingsTests
         Assert.Equal(setting, setting.ForStream(null));  // no cable: the stream is exactly what the user set
         Assert.Equal(setting with { AirPlayOnly = false }, (setting with { AirPlayOnly = false }).ForStream(CableId));
     }
+
+    /// <summary>The off→on edge of AirPlay only while a stream runs with the cable present is the
+    /// ONE case App reconnects for (so the capture and the default move to the cable at once). Every
+    /// other combination of before, after, streaming and cable leaves the stream alone — in
+    /// particular off (handled by putting the default back, no reconnect) and a setting that was
+    /// already on (a slider moved under a running AirPlay-only stream must not rebuild it).</summary>
+    [Theory]
+    [MemberData(nameof(EveryAirPlayOnlyEdge))]
+    public void Only_turning_AirPlay_only_on_mid_stream_with_the_cable_reconnects(
+        bool before, bool after, bool streaming, string? cable)
+    {
+        var previous = AirPlaySetting.Default with { AirPlayOnly = before, SourceEndpointId = Chosen };
+        var next = previous with { AirPlayOnly = after, VolumePercent = 40 };
+        bool reconnect = next.TurnsAirPlayOnlyOnMidStream(previous, streaming, cable);
+        bool expected = (before, after, streaming, cable) == (false, true, true, CableId);
+        _out.WriteLine($"AirPlayOnly {before}->{after} streaming={streaming} cable={cable ?? "(none)"} -> reconnect={reconnect}");
+        Assert.Equal(expected, reconnect);
+    }
+
+    public static IEnumerable<object?[]> EveryAirPlayOnlyEdge() =>
+        from before in new[] { false, true }
+        from after in new[] { false, true }
+        from streaming in new[] { false, true }
+        from cable in new[] { CableId, null, "" }
+        select new object?[] { before, after, streaming, cable };
 }

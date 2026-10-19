@@ -144,6 +144,14 @@ public sealed record AirPlaySetting(
     public bool AirPlayOnlyInEffect(string? cableEndpointId) =>
         AirPlayOnly && !string.IsNullOrEmpty(cableEndpointId);
 
+    /// <summary>Whether this setting, replacing <paramref name="previous"/>, turns AirPlay only ON
+    /// under a running stream with a cable present — the one change that needs the stream rebuilt
+    /// to take effect now: the capture moves to the cable and the default with it, which only a
+    /// connection does. Turning it off needs no reconnect (the default comes back on its own), and
+    /// any other change, or no stream, or no cable, leaves the stream as it is.</summary>
+    public bool TurnsAirPlayOnlyOnMidStream(AirPlaySetting previous, bool streaming, string? cableEndpointId) =>
+        streaming && !previous.AirPlayOnly && AirPlayOnlyInEffect(cableEndpointId);
+
     /// <summary>The setting a stream starts with. With AirPlay only in effect the capture is the
     /// cable and local mute is off (nothing plays on the speakers to mute — and muting would not
     /// be undone by the default switching back). Otherwise exactly what the user set.</summary>

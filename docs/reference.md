@@ -530,6 +530,8 @@ on the cable.
 
 - **You pick another output mid-stream:** AorinEQ treats it as your decision and stops managing the
   default; the stream keeps capturing the cable.
+- **You turn AirPlay only on mid-stream:** it takes effect at once - AorinEQ reconnects to the same
+  receiver (a brief gap) so the stream captures VB-Cable and your speakers go quiet.
 - **You turn AirPlay only off mid-stream:** your output comes back at once. The stream keeps
   capturing the cable until it ends, so the receiver goes quiet until the next connection.
 - **VB-Cable disappears mid-stream** (disabled or removed): your original devices are put back at once.

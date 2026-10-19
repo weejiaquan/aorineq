@@ -170,6 +170,12 @@ public partial class App
         // AirPlay only switched off mid-stream gives the user their output back now; the stream
         // goes on capturing the cable until it ends, as the source only changes on the next connect.
         if (!setting.AirPlayOnly) EndAirPlayOnly();
+        // Switched ON mid-stream, it takes effect now too: reconnecting to the same receiver is what
+        // moves the capture to the cable and the default with it (ConnectAirPlay → BeginAirPlayOnly).
+        // The cable is only looked up when the switch itself flipped, not on every slider tick.
+        else if (setting.AirPlayOnly != previous.AirPlayOnly && _airPlay?.Current is { } receiver
+                 && setting.TurnsAirPlayOnlyOnMidStream(previous, _airPlay.IsStreaming, VirtualCable.Find()?.Id))
+            ConnectAirPlay(receiver);
 
         // The receiver's own level applies immediately; the queue depth and source only take
         // effect on the next connection, because changing them mid-stream would mean tearing
