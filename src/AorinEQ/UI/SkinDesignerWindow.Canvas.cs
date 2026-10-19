@@ -31,8 +31,12 @@ public partial class SkinDesignerWindow
     private string PreviewDeviceName =>
         string.IsNullOrWhiteSpace(PreviewDevice.Text) ? Loc.T("designer.notice.sample") : PreviewDevice.Text;
 
+    /// <summary>The three artboards' hosts, which carry the checkerboard behind the art.</summary>
+    private Border[] BoardHosts => [VolumeBoard, AirPlayBoard, NoticeBoard];
+
     private void RefreshCanvas()
     {
+        _snapshot = null; // what the eyedropper samples has changed: it is retaken on its next use
         PreviewFillLabel.Text = PreviewPercent + "%";
         RefreshVolumeBoard();
         RefreshAirPlayBoard();
@@ -137,6 +141,8 @@ public partial class SkinDesignerWindow
         Overlay.SamplePicked += PickSample;
         // The picker is pinned open while the eyedropper waits: in another app it would float on top.
         Deactivated += (_, _) => StopEyedropper();
+        // Scrolled or zoomed, other device pixels are on screen than the snapshot holds.
+        CanvasScroll.ScrollChanged += (_, _) => _snapshot = null;
         Overlay.PointerMoved += (board, x, y) =>
             CursorText.Text = board is null ? "" : Loc.T("designer.status.cursor", x, y);
     }
@@ -287,6 +293,7 @@ public partial class SkinDesignerWindow
         RenderOptions.SetBitmapScalingMode(Artboards, _zoom >= 2 ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.Unspecified);
         // Snap thresholds and handle sizes are screen pixels: the overlay converts them by this.
         Overlay.Zoom = _zoom;
+        _snapshot = null; // the eyedropper samples at the zoomed pixel density
         ApplyOverhang(); // the handles' room past the artboards is screen pixels too
         ZoomText.Text = Math.Round(_zoom * 100).ToString(CultureInfo.CurrentCulture) + "%";
     }
@@ -418,9 +425,10 @@ public partial class SkinDesignerWindow
 
     /// <summary>Ctrl+S saves (committing the field being typed in first), Ctrl+0 fits, Ctrl+1 is
     /// 100 %, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo and redo unless a text input has the keyboard
-    /// (then they are its own). Esc cancels the eyedropper, or else deselects, unless a text input
-    /// has the keyboard. With the canvas focused: arrows nudge 1 skin px (Shift: 10), Delete
-    /// clears optional art or the power area.
+    /// (then they are its own). Esc cancels the eyedropper whatever has the keyboard (a text box
+    /// leaves Esc to the window; a scrub label running takes it first, to revert), or else
+    /// deselects unless a text input has it. With the canvas focused: arrows nudge 1 skin px
+    /// (Shift: 10), Delete clears optional art or the power area.
     /// Whether the key was taken.</summary>
     internal bool HandleShortcut(Key key, ModifierKeys modifiers, KeyboardTarget target)
     {
@@ -450,13 +458,13 @@ public partial class SkinDesignerWindow
             return false;
         }
 
+        if (key == Key.Escape && Overlay.EyedropperActive)
+        {
+            StopEyedropper(); // only that: the selection and the history stay as they are
+            return true;
+        }
         if (key == Key.Escape && target != KeyboardTarget.Text)
         {
-            if (Overlay.EyedropperActive)
-            {
-                StopEyedropper(); // only that: the selection and the history stay as they are
-                return true;
-            }
             Overlay.FinishDrag(); // as for Undo: the drag ends as one step, not carried on deselected
             Select(SkinLayer.SkinInfo);
             return true;
@@ -493,36 +501,60 @@ public partial class SkinDesignerWindow
     }
 
     private ArtboardSnapshot? _snapshot;
+    private string _statusBeforeEyedropper = "";
 
-    /// <summary>The picker's eyedropper: a snapshot of the artboards WITHOUT the overlay (so the
-    /// selection outline cannot be picked), then the next canvas press samples it. The picker is
-    /// pinned open meanwhile - the press on the canvas would otherwise close it - and the canvas
-    /// takes the keyboard, so Esc reaches it.</summary>
+    /// <summary>The picker's eyedropper: the next click on an artboard samples the canvas as it is
+    /// shown. The picker is pinned open meanwhile - the click on the canvas would otherwise close
+    /// it - and the canvas takes the keyboard.</summary>
     internal void StartEyedropper()
     {
-        Overlay.Visibility = Visibility.Hidden;
-        Artboards.UpdateLayout();
-        _snapshot = new ArtboardSnapshot(Artboards, VisualTreeHelper.GetDpi(this).DpiScaleX);
-        Overlay.Visibility = Visibility.Visible;
+        _snapshot = null;
         Overlay.EyedropperActive = true;
-        Overlay.Magnifier = point => _snapshot?.Region(Overlay.TranslatePoint(point, Artboards), 5);
+        Overlay.Magnifier = point => Snapshot().Region(Overlay.TranslatePoint(point, Artboards), 5);
         if (_picker is not null) _picker.StaysOpen = true;
+        _statusBeforeEyedropper = StatusText.Text;
         StatusText.Text = Loc.T("designer.status.eyedropper");
         Overlay.Focus();
     }
 
-    /// <summary>The eyedropper pressed at <paramref name="overlayPoint"/>: the colour there goes to
-    /// the picker as if picked in it (so into the field it is open on, in that opening's undo
-    /// step), and the eyedropper ends. Off the artboards it just ends.</summary>
+    /// <summary>The snapshot the eyedropper samples, taken now if the canvas changed since the last.
+    /// It is the artboards WITHOUT the overlay (so the selection outline cannot be picked) or the
+    /// checkerboard behind the art (so translucent art samples as itself, alpha and all), at the
+    /// screen's pixel density, of the part of the canvas on screen.</summary>
+    private ArtboardSnapshot Snapshot()
+    {
+        if (_snapshot is { } taken) return taken;
+        // Opacity, not Visibility: a hidden overlay would lose the keyboard focus.
+        Overlay.Opacity = 0;
+        foreach (var board in BoardHosts) board.Background = null;
+        try
+        {
+            Artboards.UpdateLayout();
+            var onScreen = CanvasScroll.TransformToDescendant(Artboards).TransformBounds(new Rect(CanvasScroll.RenderSize));
+            return _snapshot = new ArtboardSnapshot(Artboards, VisualTreeHelper.GetDpi(this).DpiScaleX, _zoom, onScreen);
+        }
+        finally
+        {
+            Overlay.Opacity = 1;
+            foreach (var board in BoardHosts) board.Background = DesignerBrushes.Checkerboard;
+        }
+    }
+
+    /// <summary>The eyedropper clicked <paramref name="overlayPoint"/>. On an artboard, the colour
+    /// shown there goes to the picker as if picked in it (so into the field it is open on, in that
+    /// opening's undo step) and the eyedropper ends. Between the artboards there is nothing to
+    /// pick: it keeps waiting.</summary>
     internal void PickSample(Point overlayPoint)
     {
-        if (_snapshot?.ColorAt(Overlay.TranslatePoint(overlayPoint, Artboards)) is { } colour)
+        if (!Overlay.Scene.Boards.Any(b => b.Bounds.Contains(overlayPoint))) return;
+        if (Snapshot().ColorAt(Overlay.TranslatePoint(overlayPoint, Artboards)) is { } colour)
             _picker?.SetColor(colour.ToHex());
         StopEyedropper();
     }
 
     /// <summary>Ends the eyedropper, if on: the snapshot and the magnified pixels let go, the picker
-    /// unpinned. Nothing in the document changes.</summary>
+    /// unpinned, the status line back to what it said (unless something has said more since).
+    /// Nothing in the document changes.</summary>
     internal void StopEyedropper()
     {
         if (!Overlay.EyedropperActive) return;
@@ -530,5 +562,6 @@ public partial class SkinDesignerWindow
         Overlay.Magnifier = null;
         _snapshot = null;
         if (_picker is not null) _picker.StaysOpen = false;
+        if (StatusText.Text == Loc.T("designer.status.eyedropper")) StatusText.Text = _statusBeforeEyedropper;
     }
 }

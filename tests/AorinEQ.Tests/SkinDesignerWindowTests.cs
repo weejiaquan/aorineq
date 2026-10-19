@@ -1613,6 +1613,7 @@ public class SkinDesignerWindowTests : IDisposable
             var before = d.Document.Config.Text!.Color;
             Click(PercentTextColours(d)[0].Swatch);
             d.Picker!.SetColor("#FFFF0000");
+            var status = d.StatusText.Text;
             Click(d.Picker.EyedropperButton);
             var active = (d.Overlay.EyedropperActive, d.Picker.StaysOpen, Magnifier: d.Overlay.Magnifier is not null, d.StatusText.Text);
             // 5 px into the volume bar, where the fill (62 %) shows the full layer: lime.
@@ -1620,14 +1621,16 @@ public class SkinDesignerWindowTests : IDisposable
             d.PickSample(at);
             var after = (Colour: d.Document.Config.Text!.Color, d.Overlay.EyedropperActive, d.Picker.StaysOpen,
                 Magnifier: d.Overlay.Magnifier is not null, d.Picker.IsOpen, d.Selection);
+            var statusAfter = (Before: status, After: d.StatusText.Text);
             d.History.Undo();
-            return (before, active, after, Undone: d.Document.Config.Text!.Color, d.History.CanUndo);
+            return (before, active, after, statusAfter, Undone: d.Document.Config.Text!.Color, d.History.CanUndo);
         });
         _out.WriteLine($"expected: eyedropper on, picker pinned, magnifier set, status {Loc.T("designer.status.eyedropper")}; " +
                        "after the pick #FF00FF00 with the eyedropper off, the picker unpinned and still open on PercentText; " +
                        $"one undo back to {r.before} with nothing left to undo");
-        _out.WriteLine($"actual  : on {r.active}; after {r.after}; undone {r.Undone}, canUndo={r.CanUndo}");
+        _out.WriteLine($"actual  : on {r.active}; after {r.after}; status before/after {r.statusAfter}; undone {r.Undone}, canUndo={r.CanUndo}");
         Assert.Equal((true, true, true, Loc.T("designer.status.eyedropper")), r.active);
+        Assert.Equal(r.statusAfter.Before, r.statusAfter.After);
         Assert.Equal(("#FF00FF00", false, false, false, true, SkinLayer.PercentText), r.after);
         Assert.Equal(r.before, r.Undone);
         Assert.False(r.CanUndo);
@@ -1719,5 +1722,126 @@ public class SkinDesignerWindowTests : IDisposable
         _out.WriteLine($"expected: active with the eyedropper on, then inactive with it off and the picker unpinned; actual {r.before} then {r.After}");
         Assert.Equal((true, true), r.before);
         Assert.Equal((false, false, false), r.After);
+    }
+
+    /// <summary>The overlay spans the gap rows between the artboards and the room beside narrower
+    /// ones, where nothing is drawn: a click there picks nothing (not a transparent black) and the
+    /// eyedropper keeps waiting for a click on art.</summary>
+    [Fact]
+    public void A_click_between_the_artboards_picks_nothing_and_keeps_waiting()
+    {
+        MakeSkin("dropper-gap", """{"percentText":{"show":true,"x":150,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-gap");
+            var before = d.Document.Config.Text!.Color;
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            var gap = d.AirPlayBoard.TranslatePoint(new Point(2, d.AirPlayBoard.ActualHeight + 12), d.Overlay);
+            bool gapOnABoard = d.Overlay.Scene.Boards.Any(b => b.Bounds.Contains(gap));
+            d.PickSample(gap);
+            var inGap = (d.Document.Config.Text!.Color, d.Overlay.EyedropperActive, d.Picker.StaysOpen, d.History.CanUndo);
+            d.PickSample(d.VolumeBoard.TranslatePoint(new Point(5, 5), d.Overlay));
+            return (before, gap, gapOnABoard, inGap, OnArt: (d.Document.Config.Text!.Color, d.Overlay.EyedropperActive));
+        });
+        _out.WriteLine($"expected: the gap point is on no board; there colour {r.before} kept, still waiting and pinned, no history; " +
+                       "then on the bar #FF00FF00 and done");
+        _out.WriteLine($"actual  : gap {r.gap} on a board={r.gapOnABoard}; in the gap {r.inGap}; on the art {r.OnArt}");
+        Assert.False(r.gapOnABoard);
+        Assert.Equal((r.before, true, true, false), r.inGap);
+        Assert.Equal(("#FF00FF00", false), r.OnArt);
+    }
+
+    /// <summary>The artboards' checkerboard is the canvas's, not the art's: translucent art is
+    /// picked as itself, alpha and all, not blended with the checker grey behind it.</summary>
+    [Fact]
+    public void Translucent_art_is_picked_with_its_own_alpha()
+    {
+        var folder = MakeSkin("dropper-alpha", """{"percentText":{"show":true,"x":150,"y":5}}""");
+        RealPngs.WriteSolid(Path.Combine(folder, "full.png"), 200, 40, Color.FromArgb(0x80, 0xFF, 0, 0));
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-alpha");
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            d.PickSample(d.VolumeBoard.TranslatePoint(new Point(5, 5), d.Overlay));
+            return (Picked: d.Document.Config.Text!.Color, Checker: ReferenceEquals(d.VolumeBoard.Background, DesignerBrushes.Checkerboard));
+        });
+        _out.WriteLine($"expected #80FF0000 with the checkerboard back behind the bar; actual {r}");
+        Assert.Equal("#80FF0000", r.Picked);
+        Assert.True(r.Checker);
+    }
+
+    /// <summary>The canvas can change while the eyedropper waits - Ctrl+Z with the canvas focused,
+    /// a preview slider. The pick is of what is on screen then, not of the picture taken before.</summary>
+    [Fact]
+    public void Undo_while_the_eyedropper_waits_picks_what_is_shown_after_it()
+    {
+        MakeSkin("dropper-undo", """{"percentText":{"show":true,"x":150,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-undo");
+            d.Commit(d.Document with { FullPath = Src("blue.png", 200, 40, Color.Blue) });
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            var at = d.VolumeBoard.TranslatePoint(new Point(5, 5), d.Overlay);
+            var magnified = d.Overlay.Magnifier!(at)!; // takes the snapshot, as the first move over the canvas does
+            var centre = new byte[4];
+            magnified.CopyPixels(new Int32Rect(magnified.PixelWidth / 2, magnified.PixelHeight / 2, 1, 1), centre, 4, 0);
+            bool undone = d.HandleShortcut(Key.Z, ModifierKeys.Control, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var waiting = d.Overlay.EyedropperActive;
+            d.PickSample(at);
+            return (Before: string.Join(",", centre), undone, waiting, Picked: d.Document.Config.Text!.Color);
+        });
+        _out.WriteLine($"expected: magnifier showed blue (BGRA 255,0,0,255) before the undo; undo taken with the eyedropper still waiting; picked lime #FF00FF00; actual {r}");
+        Assert.Equal("255,0,0,255", r.Before);
+        Assert.True(r.undone);
+        Assert.True(r.waiting);
+        Assert.Equal("#FF00FF00", r.Picked);
+    }
+
+    /// <summary>Esc cancels the eyedropper whatever has the keyboard - a Properties text box
+    /// included, through the real key routing - and the box keeps what it shows.</summary>
+    [Fact]
+    public void Esc_in_a_text_box_cancels_the_eyedropper()
+    {
+        MakeSkin("dropper-box", """{"percentText":{"show":true,"x":40}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-box");
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            var box = Number(d, "X").Box;
+            bool focused = TakeKeyboardFocus(d, box);
+            bool handled = Press(box, Key.Escape);
+            return (focused, handled, d.Overlay.EyedropperActive, d.Selection, box.Text, d.History.CanUndo);
+        });
+        _out.WriteLine($"expected: box focused, Esc handled, eyedropper off, PercentText still selected, box still {N(40)}, no history; actual {r}");
+        Assert.True(r.focused);
+        Assert.Equal((true, false, SkinLayer.PercentText, N(40), false), (r.handled, r.EyedropperActive, r.Selection, r.Text, r.CanUndo));
+    }
+
+    /// <summary>A real click - routed MouseLeftButtonDown, then MouseLeftButtonUp - on the canvas
+    /// in eyedropper mode leaves the picker open. Raised events cannot reproduce the popup's own
+    /// capture closing it on a real release; that part is a manual check.</summary>
+    [Fact]
+    public void A_click_on_the_canvas_in_eyedropper_mode_leaves_the_picker_open()
+    {
+        MakeSkin("dropper-click", """{"percentText":{"show":true}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-click");
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            d.Overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent });
+            var afterDown = (d.Overlay.EyedropperActive, d.Selection, d.Overlay.IsMouseCaptured);
+            d.Overlay.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonUpEvent });
+            StaWpf.Pump();
+            return (afterDown, Open: d.Picker.IsOpen, d.Selection);
+        });
+        _out.WriteLine($"expected: after the press still waiting on PercentText, no capture; after the release the picker open on PercentText; actual {r}");
+        Assert.Equal((true, SkinLayer.PercentText, false), r.afterDown);
+        Assert.True(r.Open);
+        Assert.Equal(SkinLayer.PercentText, r.Selection);
     }
 }

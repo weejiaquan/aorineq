@@ -252,11 +252,13 @@ public class DesignerOverlayTests
         Assert.Equal((SkinLayer.AirPlayPower, SkinLayer.PercentText, SkinLayer.PercentText), (r.OnPower!.Value, r.OnBarItself!.Value, r.OnBareStrip!.Value));
     }
 
-    /// <summary>While the eyedropper is on, a press on the canvas is a sample and nothing else:
-    /// no layer clicked, no drag, no capture - even on the selected element. Off again, the same
-    /// press selects as usual.</summary>
+    /// <summary>While the eyedropper is on, the press on the canvas does nothing at all - no
+    /// focus, no layer clicked, no drag, no capture, even on the selected element - and the release
+    /// is the sample (a pick on the press would unpin the picker, whose popup then closes on the
+    /// release). Off again, the same press selects as usual. Real routed events, at wherever the
+    /// real pointer is: the point does not matter here.</summary>
     [Fact]
-    public void The_eyedropper_takes_a_press_as_a_sample_not_a_click_or_a_drag()
+    public void The_eyedropper_samples_on_the_release_and_the_press_does_nothing()
     {
         var r = _sta.Run(() =>
         {
@@ -271,25 +273,29 @@ public class DesignerOverlayTests
                 overlay.DragStarted += () => drags++;
                 overlay.EyedropperActive = true;
                 var cursor = overlay.Cursor;
-                var press = Press(overlay);
-                var on = (samples, clicks, drags, press.Handled, overlay.IsMouseCaptured);
+                var press = Raise(overlay, UIElement.MouseLeftButtonDownEvent);
+                var down = (samples, clicks, drags, press.Handled, overlay.IsMouseCaptured, overlay.IsFocused);
+                var release = Raise(overlay, UIElement.MouseLeftButtonUpEvent);
+                var up = (samples, clicks, drags, release.Handled);
                 overlay.EyedropperActive = false;
-                Press(overlay);
-                overlay.FinishDrag(); // the real pointer may have been over the text, starting a drag
-                return (Cursor: cursor == Cursors.Cross, on, Off: (samples, clicks), CursorOff: overlay.Cursor);
+                Raise(overlay, UIElement.MouseLeftButtonDownEvent);
+                Raise(overlay, UIElement.MouseLeftButtonUpEvent);
+                return (Cursor: cursor == Cursors.Cross, down, up, Off: (samples, clicks), CursorOff: overlay.Cursor);
             }
             finally { window.Close(); }
         });
-        _out.WriteLine($"expected: cross cursor; on (1 sample, 0 clicks, 0 drags, handled, not captured); off (still 1 sample, 1 click), no cursor; actual {r}");
+        _out.WriteLine("expected: cross cursor; down (0 samples, 0 clicks, 0 drags, handled, not captured, not focused); " +
+                       $"up (1 sample, 0 clicks, 0 drags, handled); off (still 1 sample, 1 click), no cursor; actual {r}");
         Assert.True(r.Cursor);
-        Assert.Equal((1, 0, 0, true, false), r.on);
+        Assert.Equal((0, 0, 0, true, false, false), r.down);
+        Assert.Equal((1, 0, 0, true), r.up);
         Assert.Equal((1, 1), r.Off);
         Assert.Null(r.CursorOff);
     }
 
-    private static MouseButtonEventArgs Press(UIElement element)
+    private static MouseButtonEventArgs Raise(UIElement element, RoutedEvent routedEvent)
     {
-        var e = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent };
+        var e = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = routedEvent };
         element.RaiseEvent(e);
         return e;
     }

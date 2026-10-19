@@ -104,7 +104,7 @@ internal sealed class DesignerOverlay : FrameworkElement
     private Point _pointer;
     private BitmapSource? _magnified;
 
-    /// <summary>While on, a press samples instead of selecting, and a magnifier follows the pointer.
+    /// <summary>While on, a click samples instead of selecting, and a magnifier follows the pointer.
     /// Turning it off drops the magnified pixels.</summary>
     public bool EyedropperActive
     {
@@ -121,7 +121,7 @@ internal sealed class DesignerOverlay : FrameworkElement
     /// <summary>The pixels around an overlay point, for the magnifier.</summary>
     public Func<Point, BitmapSource?>? Magnifier { get; set; }
 
-    /// <summary>The eyedropper pressed at an overlay point.</summary>
+    /// <summary>The eyedropper clicked an overlay point (the button released there).</summary>
     public event Action<Point>? SamplePicked;
 
     /// <summary>Where the overlay takes the mouse, in its own coordinates: all of it, and whatever
@@ -260,13 +260,10 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
-        if (_eyedropper)
-        {
-            SamplePicked?.Invoke(e.GetPosition(this));
-            e.Handled = true;
-            return;
-        }
-        if (BeginDragAt(() => e.GetPosition(this))) e.Handled = true;
+        // The eyedropper samples on the release: a pick on the press would unpin the picker, whose
+        // popup takes the mouse back and closes on that release. The press does nothing at all.
+        if (_eyedropper) e.Handled = true;
+        else if (BeginDragAt(() => e.GetPosition(this))) e.Handled = true;
     }
 
     /// <summary>The mouse went down at <paramref name="pointAt"/> (overlay coordinates): the canvas
@@ -338,6 +335,12 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonUp(e);
+        if (_eyedropper)
+        {
+            SamplePicked?.Invoke(e.GetPosition(this));
+            e.Handled = true;
+            return;
+        }
         FinishDrag();
     }
 

@@ -60,7 +60,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         var settings = currentSettings();
         LayersColumn.Width = new GridLength(settings.DesignerLayersWidth);
         PropertiesColumn.Width = new GridLength(settings.DesignerPropertiesWidth);
-        foreach (var board in new[] { VolumeBoard, AirPlayBoard, NoticeBoard })
+        foreach (var board in BoardHosts)
             board.Background = DesignerBrushes.Checkerboard;
         PreviewDevice.Text = Loc.T("designer.notice.sample");
         _history = new DesignerHistory(SkinDocument.New(Loc.T("designer.untitled")));
