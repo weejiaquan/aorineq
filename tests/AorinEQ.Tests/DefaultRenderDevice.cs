@@ -26,6 +26,17 @@ internal static class DefaultRenderDevice
                 $"IPolicyConfig.SetDefaultEndpoint('{endpointId}') failed for at least one role");
     }
 
+    /// <summary>Each role back exactly as found — not via the code under test. Every test that can
+    /// move a default leaves through this in a finally.</summary>
+    public static void PutBack(DefaultRenderRecord original)
+    {
+        SetDefaultAndSettle(original.Multimedia!);
+        if (original.Console is { } console)
+            DefaultEndpointSwitcher.SetDefault(console, AudioEndpoint.ERole.Console);
+        if (original.Communications is { } comms)
+            DefaultEndpointSwitcher.SetDefault(comms, AudioEndpoint.ERole.Communications);
+    }
+
     /// <summary>The endpoint the machine should be switched TO from <paramref name="current"/> —
     /// the first active render endpoint that is not the current default. Null when the machine has
     /// only one, in which case there is no device change to observe.</summary>

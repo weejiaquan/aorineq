@@ -53,7 +53,7 @@ public class RepairHelperTests
 
     [Fact]
     [Trait(Requires.Key, Requires.AudioEndpoint)]
-    [Trait(Requires.Key, Requires.MultipleRenderEndpoints)]
+    [Trait(Requires.Key, Requires.MultipleNonCableRenderEndpoints)]
     public void A_present_endpoint_that_is_neither_the_default_nor_VB_Cable_is_refused()
     {
         // The elevated helper never takes an arbitrary target from its command line: a real device

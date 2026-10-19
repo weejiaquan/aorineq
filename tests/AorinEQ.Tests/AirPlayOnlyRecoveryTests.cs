@@ -60,9 +60,7 @@ public class AirPlayOnlyRecoveryTests : IDisposable
         }
         finally
         {
-            DefaultRenderDevice.SetDefaultAndSettle(before.Multimedia!);
-            if (before.Console is { } c) DefaultEndpointSwitcher.SetDefault(c, AudioEndpoint.ERole.Console);
-            if (before.Communications is { } m) DefaultEndpointSwitcher.SetDefault(m, AudioEndpoint.ERole.Communications);
+            DefaultRenderDevice.PutBack(before);
         }
     }
 
@@ -98,7 +96,8 @@ public class AirPlayOnlyRecoveryTests : IDisposable
 
     /// <summary>The user's devices were unplugged (or uninstalled) while the app was dead: every
     /// recorded endpoint is gone. Windows' own choice stays, and the record is still cleared, so
-    /// the next start does not try again forever.</summary>
+    /// the next start does not try again forever. The restore under test CAN move a default (a role
+    /// on VB-Cable goes to another device), so the defaults are put back whatever it did.</summary>
     [Fact]
     [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void A_record_of_devices_that_are_gone_is_forgotten_and_windows_choice_stays()
@@ -106,13 +105,19 @@ public class AirPlayOnlyRecoveryTests : IDisposable
         const string gone = "{0.0.0.00000000}.{deadbeef-0000-0000-0000-000000000000}";
         var before = DefaultEndpointSwitcher.Capture();
         var settings = Settings.Default with { Percent = 37, AirPlayRestoreDefault = new DefaultRenderRecord(gone, gone, gone) };
-
-        var (after, movedTo) = DefaultEndpointSwitcher.RestoreRecorded(settings);
-        _out.WriteLine($"vanished record: moved {movedTo ?? "(nothing)"}; default {DefaultEndpointSwitcher.Capture()}; "
-            + $"record after: {after.AirPlayRestoreDefault?.ToString() ?? "(none)"}");
-        Assert.Null(movedTo);
-        Assert.Equal(before, DefaultEndpointSwitcher.Capture());
-        Assert.Equal(settings with { AirPlayRestoreDefault = null }, after);
+        try
+        {
+            var (after, movedTo) = DefaultEndpointSwitcher.RestoreRecorded(settings);
+            _out.WriteLine($"vanished record: moved {movedTo ?? "(nothing)"}; default {DefaultEndpointSwitcher.Capture()}; "
+                + $"record after: {after.AirPlayRestoreDefault?.ToString() ?? "(none)"}");
+            Assert.Null(movedTo);
+            Assert.Equal(before, DefaultEndpointSwitcher.Capture());
+            Assert.Equal(settings with { AirPlayRestoreDefault = null }, after);
+        }
+        finally
+        {
+            DefaultRenderDevice.PutBack(before);
+        }
     }
 
     [Fact]

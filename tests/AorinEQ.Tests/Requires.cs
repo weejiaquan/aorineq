@@ -40,6 +40,12 @@ public static class Requires
     /// rest of the audio tests make when they move the real volume.</summary>
     public const string MultipleRenderEndpoints = "MultipleRenderEndpoints";
 
+    /// <summary>TWO OR MORE active render endpoints that are NOT VB-Cable: the default plus a
+    /// bystander that is neither the default nor the cable. <see cref="MultipleRenderEndpoints"/>
+    /// is satisfied by a machine whose second endpoint is CABLE Input, and a test about "a device
+    /// AorinEQ may not touch" cannot use the cable for it, because the cable is one it may.</summary>
+    public const string MultipleNonCableRenderEndpoints = "MultipleNonCableRenderEndpoints";
+
     /// <summary>The public internet — specifically a THIRD-PARTY server (VB-Audio's cable page and
     /// download host). These tests prove the real vendor page and package still pass every gate,
     /// which no saved copy can; CI must not go red because somebody else's server is slow or

@@ -19,16 +19,6 @@ public class DefaultEndpointSwitcherTests
     private const string Headphones = "{0.0.0.00000000}.{33333333-0000-0000-0000-000000000000}";
     private static readonly DefaultRenderRecord Recorded = new(Speakers, Speakers, Speakers);
 
-    /// <summary>Each role back exactly as found — not via the code under test.</summary>
-    private static void PutBack(DefaultRenderRecord original)
-    {
-        DefaultRenderDevice.SetDefaultAndSettle(original.Multimedia!);
-        if (original.Console is { } console)
-            DefaultEndpointSwitcher.SetDefault(console, AudioEndpoint.ERole.Console);
-        if (original.Communications is { } comms)
-            DefaultEndpointSwitcher.SetDefault(comms, AudioEndpoint.ERole.Communications);
-    }
-
     [Fact]
     [Trait(Requires.Key, Requires.AudioEndpoint)]
     public void Capture_reads_each_role_and_multimedia_is_the_app_wide_default()
@@ -65,7 +55,7 @@ public class DefaultEndpointSwitcherTests
         }
         finally
         {
-            PutBack(before);
+            DefaultRenderDevice.PutBack(before);
         }
     }
 
@@ -86,7 +76,7 @@ public class DefaultEndpointSwitcherTests
         }
         finally
         {
-            PutBack(before);
+            DefaultRenderDevice.PutBack(before);
         }
     }
 
@@ -111,7 +101,7 @@ public class DefaultEndpointSwitcherTests
         }
         finally
         {
-            PutBack(before);
+            DefaultRenderDevice.PutBack(before);
         }
     }
 
@@ -157,7 +147,7 @@ public class DefaultEndpointSwitcherTests
         }
         finally
         {
-            PutBack(before);
+            DefaultRenderDevice.PutBack(before);
         }
     }
 
@@ -491,7 +481,7 @@ public class DefaultEndpointSwitcherTests
         }
         finally
         {
-            PutBack(before);
+            DefaultRenderDevice.PutBack(before);
             DeleteFolderOf(path);
         }
     }
@@ -569,7 +559,7 @@ public class DefaultEndpointSwitcherTests
         }
         finally
         {
-            PutBack(before);
+            DefaultRenderDevice.PutBack(before);
             DeleteFolderOf(path);
         }
     }
