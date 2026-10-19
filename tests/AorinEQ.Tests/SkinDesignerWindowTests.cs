@@ -1599,4 +1599,125 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.True(r.rightTaken);
         Assert.Equal(11, r.NudgedX);
     }
+
+    /// <summary>The picker's eyedropper samples the canvas into the field the picker is open on,
+    /// with the picker pinned open while it waits for the click (the click would close it), and the
+    /// pick is part of that opening's one undo step.</summary>
+    [Fact]
+    public void The_eyedropper_picks_a_colour_off_the_canvas_into_the_open_field()
+    {
+        MakeSkin("dropper", """{"percentText":{"show":true,"x":150,"y":5}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper");
+            var before = d.Document.Config.Text!.Color;
+            Click(PercentTextColours(d)[0].Swatch);
+            d.Picker!.SetColor("#FFFF0000");
+            Click(d.Picker.EyedropperButton);
+            var active = (d.Overlay.EyedropperActive, d.Picker.StaysOpen, Magnifier: d.Overlay.Magnifier is not null, d.StatusText.Text);
+            // 5 px into the volume bar, where the fill (62 %) shows the full layer: lime.
+            var at = d.VolumeBoard.TranslatePoint(new Point(5, 5), d.Overlay);
+            d.PickSample(at);
+            var after = (Colour: d.Document.Config.Text!.Color, d.Overlay.EyedropperActive, d.Picker.StaysOpen,
+                Magnifier: d.Overlay.Magnifier is not null, d.Picker.IsOpen, d.Selection);
+            d.History.Undo();
+            return (before, active, after, Undone: d.Document.Config.Text!.Color, d.History.CanUndo);
+        });
+        _out.WriteLine($"expected: eyedropper on, picker pinned, magnifier set, status {Loc.T("designer.status.eyedropper")}; " +
+                       "after the pick #FF00FF00 with the eyedropper off, the picker unpinned and still open on PercentText; " +
+                       $"one undo back to {r.before} with nothing left to undo");
+        _out.WriteLine($"actual  : on {r.active}; after {r.after}; undone {r.Undone}, canUndo={r.CanUndo}");
+        Assert.Equal((true, true, true, Loc.T("designer.status.eyedropper")), r.active);
+        Assert.Equal(("#FF00FF00", false, false, false, true, SkinLayer.PercentText), r.after);
+        Assert.Equal(r.before, r.Undone);
+        Assert.False(r.CanUndo);
+    }
+
+    /// <summary>Esc while the eyedropper waits cancels it - and only it: the selection, the
+    /// history and the picker are left as they were. The next Esc deselects as usual.</summary>
+    [Fact]
+    public void Esc_cancels_the_eyedropper_before_it_deselects()
+    {
+        MakeSkin("dropper-esc", """{"percentText":{"show":true}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-esc");
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            bool focused = d.Overlay.IsKeyboardFocused;
+            bool taken = d.HandleShortcut(Key.Escape, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            var first = (taken, d.Overlay.EyedropperActive, d.Overlay.Magnifier is null, d.Picker.IsOpen, d.Picker.StaysOpen,
+                d.Selection, d.History.CanUndo);
+            d.HandleShortcut(Key.Escape, ModifierKeys.None, SkinDesignerWindow.KeyboardTarget.Canvas);
+            return (focused, first, Second: d.Selection);
+        });
+        _out.WriteLine("expected: canvas focused for Esc; first Esc taken, eyedropper off, magnifier dropped, picker open and unpinned, " +
+                       "PercentText still selected, no history; second Esc selects SkinInfo");
+        _out.WriteLine($"actual  : focused={r.focused}; first {r.first}; second {r.Second}");
+        Assert.True(r.focused);
+        Assert.Equal((true, false, true, true, false, SkinLayer.PercentText, false), r.first);
+        Assert.Equal(SkinLayer.SkinInfo, r.Second);
+    }
+
+    /// <summary>Whatever ends the picker's opening ends the eyedropper with it - another
+    /// selection, another swatch - so the picker is never left pinned open and the canvas never
+    /// left sampling for a field that has gone.</summary>
+    [Fact]
+    public void Ending_the_opening_ends_the_eyedropper()
+    {
+        MakeSkin("dropper-end", """{"percentText":{"show":true}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-end");
+            var colours = PercentTextColours(d);
+            Click(colours[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            Click(colours[1].Swatch);  // the outline colour, while the eyedropper waits
+            var reopened = (d.Overlay.EyedropperActive, d.Picker.StaysOpen, d.Picker.IsOpen);
+            Click(d.Picker.EyedropperButton);
+            d.Select(SkinLayer.VolumeBar);
+            var reselected = (d.Overlay.EyedropperActive, d.Picker.StaysOpen, d.Picker.IsOpen, d.Overlay.Magnifier is null);
+            return (reopened, reselected, Text: d.Document.Config.Text);
+        });
+        _out.WriteLine("expected: another swatch -> eyedropper off, picker unpinned and open; another selection -> " +
+                       "eyedropper off, picker unpinned and closed, magnifier dropped; colours untouched");
+        _out.WriteLine($"actual  : swatch {r.reopened}; selection {r.reselected}; text {r.Text}");
+        Assert.Equal((false, false, true), r.reopened);
+        Assert.Equal((false, false, false, true), r.reselected);
+        Assert.Null(r.Text!.OutlineColor);
+    }
+
+    /// <summary>Switching to another app while the eyedropper waits ends it: the pinned picker
+    /// would otherwise float over that app. Needs a desktop that can activate windows.</summary>
+    [Fact]
+    public void Leaving_the_window_ends_the_eyedropper()
+    {
+        MakeSkin("dropper-away", """{"percentText":{"show":true}}""");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("dropper-away");
+            d.Activate();
+            Click(PercentTextColours(d)[0].Swatch);
+            Click(d.Picker!.EyedropperButton);
+            var before = (d.IsActive, d.Overlay.EyedropperActive);
+            // Its own empty style: WPF-UI's implicit window style (the fixture's ControlsDictionary)
+            // reached it after Show here and set AllowsTransparency, which then throws.
+            var other = new Window { Width = 100, Height = 100, Style = new Style(typeof(Window)) };
+            other.Show();
+            try
+            {
+                other.Activate();
+                StaWpf.Pump();
+                return (before, After: (d.IsActive, d.Overlay.EyedropperActive, d.Picker.StaysOpen));
+            }
+            finally
+            {
+                other.Close();
+                StaWpf.Pump();
+            }
+        });
+        _out.WriteLine($"expected: active with the eyedropper on, then inactive with it off and the picker unpinned; actual {r.before} then {r.After}");
+        Assert.Equal((true, true), r.before);
+        Assert.Equal((false, false, false), r.After);
+    }
 }

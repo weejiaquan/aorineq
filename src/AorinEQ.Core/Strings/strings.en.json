@@ -256,6 +256,7 @@
   "designer.share.tooltip": "Export the zip and copy an aorineq:// install link to the clipboard",
   "designer.test.label": "Test on desktop",
   "designer.status.text": "Pick two images (or an existing skin) to start. Change the name before saving to create a copy.",
+  "designer.status.eyedropper": "Click the canvas to pick a colour. Esc cancels.",
   "designer.zoom.out.tooltip": "Zoom out (Ctrl+wheel)",
   "designer.zoom.in.tooltip": "Zoom in (Ctrl+wheel)",
   "designer.zoom.fit.label": "Fit",

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using AorinEQ.Core;
 // WPF and WinForms are both referenced by this project, so the names below are
 // ambiguous without an explicit alias. Every one of these is the WPF type.
@@ -78,6 +79,7 @@ internal sealed class DesignerOverlay : FrameworkElement
     {
         Focusable = true;
         FocusVisualStyle = null;
+        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.NearestNeighbor); // the magnifier shows pixels, not a blur
     }
 
     public DesignerScene Scene
@@ -97,6 +99,30 @@ internal sealed class DesignerOverlay : FrameworkElement
         get => _zoom;
         set { _zoom = CanvasZoom.Clamp(value); InvalidateVisual(); }
     }
+
+    private bool _eyedropper;
+    private Point _pointer;
+    private BitmapSource? _magnified;
+
+    /// <summary>While on, a press samples instead of selecting, and a magnifier follows the pointer.
+    /// Turning it off drops the magnified pixels.</summary>
+    public bool EyedropperActive
+    {
+        get => _eyedropper;
+        set
+        {
+            _eyedropper = value;
+            _magnified = null;
+            Cursor = value ? Cursors.Cross : null;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The pixels around an overlay point, for the magnifier.</summary>
+    public Func<Point, BitmapSource?>? Magnifier { get; set; }
+
+    /// <summary>The eyedropper pressed at an overlay point.</summary>
+    public event Action<Point>? SamplePicked;
 
     /// <summary>Where the overlay takes the mouse, in its own coordinates: all of it, and whatever
     /// of the scene lies past it (text stopped at an artboard's far edge, and the handles on it),
@@ -234,6 +260,12 @@ internal sealed class DesignerOverlay : FrameworkElement
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
+        if (_eyedropper)
+        {
+            SamplePicked?.Invoke(e.GetPosition(this));
+            e.Handled = true;
+            return;
+        }
         if (BeginDragAt(() => e.GetPosition(this))) e.Handled = true;
     }
 
@@ -270,6 +302,11 @@ internal sealed class DesignerOverlay : FrameworkElement
         else PointerMoved?.Invoke(over.Layer, (int)Math.Floor((point.X - over.Origin.X) / over.Scale),
             (int)Math.Floor((point.Y - over.Origin.Y) / over.Scale));
 
+        if (_eyedropper)
+        {
+            MagnifyAt(point);
+            return;
+        }
         if (_drag is null || e.LeftButton != MouseButtonState.Pressed)
         {
             var hit = HitTest(point);
@@ -277,6 +314,14 @@ internal sealed class DesignerOverlay : FrameworkElement
             return;
         }
         DragTo(point, snap: !Keyboard.Modifiers.HasFlag(ModifierKeys.Alt));
+    }
+
+    /// <summary>The eyedropper's pointer is at <paramref name="point"/>: the magnifier shows what is under it.</summary>
+    internal void MagnifyAt(Point point)
+    {
+        _pointer = point;
+        _magnified = Magnifier?.Invoke(point);
+        InvalidateVisual();
     }
 
     /// <summary>The pointer of a running drag is at <paramref name="point"/>; snapped unless
@@ -365,6 +410,15 @@ internal sealed class DesignerOverlay : FrameworkElement
                     dc.DrawLine(guide, drag.Board.ToOverlay(target.Position, 0), drag.Board.ToOverlay(target.Position, drag.Board.Height));
                 else
                     dc.DrawLine(guide, drag.Board.ToOverlay(0, target.Position), drag.Board.ToOverlay(drag.Board.Width, target.Position));
+        }
+
+        if (_eyedropper && _magnified is { } pixels)
+        {
+            // Ten times the pixels, beside the pointer, at a fixed SCREEN size whatever the zoom.
+            double size = 10 * pixels.PixelWidth / _zoom, offset = 16 / _zoom;
+            var box = new Rect(_pointer.X + offset, _pointer.Y + offset, size, size * pixels.PixelHeight / pixels.PixelWidth);
+            dc.DrawImage(pixels, box);
+            dc.DrawRectangle(null, MakePen(Accent, 2 * px), box);
         }
     }
 

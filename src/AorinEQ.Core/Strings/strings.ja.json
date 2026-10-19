@@ -256,6 +256,7 @@
   "designer.share.tooltip": "zip を書き出し、aorineq:// のインストールリンクをクリップボードにコピーします",
   "designer.test.label": "デスクトップで試す",
   "designer.status.text": "画像を 2 枚 (または既存のスキンを) 選んで始めます。保存前に名前を変えると別のスキンとして保存されます。",
+  "designer.status.eyedropper": "キャンバスをクリックして色を拾います。Esc で取り消し。",
   "designer.zoom.out.tooltip": "縮小 (Ctrl+ホイール)",
   "designer.zoom.in.tooltip": "拡大 (Ctrl+ホイール)",
   "designer.zoom.fit.label": "全体表示",

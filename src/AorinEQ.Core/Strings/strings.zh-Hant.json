@@ -256,6 +256,7 @@
   "designer.share.tooltip": "匯出 zip 並把 aorineq:// 安裝連結複製到剪貼簿",
   "designer.test.label": "在桌面上測試",
   "designer.status.text": "選兩張圖片（或一套已有的外觀）開始。儲存前改一下名稱就會另存為副本。",
+  "designer.status.eyedropper": "按一下畫布取色。按 Esc 取消。",
   "designer.zoom.out.tooltip": "縮小 (Ctrl+滾輪)",
   "designer.zoom.in.tooltip": "放大 (Ctrl+滾輪)",
   "designer.zoom.fit.label": "符合",

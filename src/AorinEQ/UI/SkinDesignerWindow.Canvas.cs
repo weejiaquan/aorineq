@@ -134,6 +134,9 @@ public partial class SkinDesignerWindow
         Overlay.DragStarted += BeginDrag;
         Overlay.Dragged += ApplyDrag;
         Overlay.DragCompleted += EndDrag;
+        Overlay.SamplePicked += PickSample;
+        // The picker is pinned open while the eyedropper waits: in another app it would float on top.
+        Deactivated += (_, _) => StopEyedropper();
         Overlay.PointerMoved += (board, x, y) =>
             CursorText.Text = board is null ? "" : Loc.T("designer.status.cursor", x, y);
     }
@@ -415,8 +418,9 @@ public partial class SkinDesignerWindow
 
     /// <summary>Ctrl+S saves (committing the field being typed in first), Ctrl+0 fits, Ctrl+1 is
     /// 100 %, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo and redo unless a text input has the keyboard
-    /// (then they are its own). Esc deselects unless a text input has the keyboard. With the canvas
-    /// focused: arrows nudge 1 skin px (Shift: 10), Delete clears optional art or the power area.
+    /// (then they are its own). Esc cancels the eyedropper, or else deselects, unless a text input
+    /// has the keyboard. With the canvas focused: arrows nudge 1 skin px (Shift: 10), Delete
+    /// clears optional art or the power area.
     /// Whether the key was taken.</summary>
     internal bool HandleShortcut(Key key, ModifierKeys modifiers, KeyboardTarget target)
     {
@@ -448,6 +452,11 @@ public partial class SkinDesignerWindow
 
         if (key == Key.Escape && target != KeyboardTarget.Text)
         {
+            if (Overlay.EyedropperActive)
+            {
+                StopEyedropper(); // only that: the selection and the history stay as they are
+                return true;
+            }
             Overlay.FinishDrag(); // as for Undo: the drag ends as one step, not carried on deselected
             Select(SkinLayer.SkinInfo);
             return true;
@@ -481,5 +490,45 @@ public partial class SkinDesignerWindow
     {
         Overlay.FinishDrag();
         Commit(edit(_history.Current));
+    }
+
+    private ArtboardSnapshot? _snapshot;
+
+    /// <summary>The picker's eyedropper: a snapshot of the artboards WITHOUT the overlay (so the
+    /// selection outline cannot be picked), then the next canvas press samples it. The picker is
+    /// pinned open meanwhile - the press on the canvas would otherwise close it - and the canvas
+    /// takes the keyboard, so Esc reaches it.</summary>
+    internal void StartEyedropper()
+    {
+        Overlay.Visibility = Visibility.Hidden;
+        Artboards.UpdateLayout();
+        _snapshot = new ArtboardSnapshot(Artboards, VisualTreeHelper.GetDpi(this).DpiScaleX);
+        Overlay.Visibility = Visibility.Visible;
+        Overlay.EyedropperActive = true;
+        Overlay.Magnifier = point => _snapshot?.Region(Overlay.TranslatePoint(point, Artboards), 5);
+        if (_picker is not null) _picker.StaysOpen = true;
+        StatusText.Text = Loc.T("designer.status.eyedropper");
+        Overlay.Focus();
+    }
+
+    /// <summary>The eyedropper pressed at <paramref name="overlayPoint"/>: the colour there goes to
+    /// the picker as if picked in it (so into the field it is open on, in that opening's undo
+    /// step), and the eyedropper ends. Off the artboards it just ends.</summary>
+    internal void PickSample(Point overlayPoint)
+    {
+        if (_snapshot?.ColorAt(Overlay.TranslatePoint(overlayPoint, Artboards)) is { } colour)
+            _picker?.SetColor(colour.ToHex());
+        StopEyedropper();
+    }
+
+    /// <summary>Ends the eyedropper, if on: the snapshot and the magnified pixels let go, the picker
+    /// unpinned. Nothing in the document changes.</summary>
+    internal void StopEyedropper()
+    {
+        if (!Overlay.EyedropperActive) return;
+        Overlay.EyedropperActive = false;
+        Overlay.Magnifier = null;
+        _snapshot = null;
+        if (_picker is not null) _picker.StaysOpen = false;
     }
 }

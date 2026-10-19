@@ -1,9 +1,11 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using AorinEQ.Core;
 using AorinEQ.UI;
 using Xunit.Abstractions;
+using Cursors = System.Windows.Input.Cursors;
 using Point = System.Windows.Point;
 
 namespace AorinEQ.Tests;
@@ -248,5 +250,90 @@ public class DesignerOverlayTests
         });
         _out.WriteLine($"expected (AirPlayPower, PercentText, PercentText); actual {r}");
         Assert.Equal((SkinLayer.AirPlayPower, SkinLayer.PercentText, SkinLayer.PercentText), (r.OnPower!.Value, r.OnBarItself!.Value, r.OnBareStrip!.Value));
+    }
+
+    /// <summary>While the eyedropper is on, a press on the canvas is a sample and nothing else:
+    /// no layer clicked, no drag, no capture - even on the selected element. Off again, the same
+    /// press selects as usual.</summary>
+    [Fact]
+    public void The_eyedropper_takes_a_press_as_a_sample_not_a_click_or_a_drag()
+    {
+        var r = _sta.Run(() =>
+        {
+            var overlay = new DesignerOverlay { Scene = Scene(1), Selected = SkinLayer.PercentText, Zoom = 1 };
+            var window = new Window { Content = overlay, Width = 400, Height = 200, ShowActivated = false };
+            window.Show();
+            try
+            {
+                int samples = 0, clicks = 0, drags = 0;
+                overlay.SamplePicked += _ => samples++;
+                overlay.LayerClicked += _ => clicks++;
+                overlay.DragStarted += () => drags++;
+                overlay.EyedropperActive = true;
+                var cursor = overlay.Cursor;
+                var press = Press(overlay);
+                var on = (samples, clicks, drags, press.Handled, overlay.IsMouseCaptured);
+                overlay.EyedropperActive = false;
+                Press(overlay);
+                overlay.FinishDrag(); // the real pointer may have been over the text, starting a drag
+                return (Cursor: cursor == Cursors.Cross, on, Off: (samples, clicks), CursorOff: overlay.Cursor);
+            }
+            finally { window.Close(); }
+        });
+        _out.WriteLine($"expected: cross cursor; on (1 sample, 0 clicks, 0 drags, handled, not captured); off (still 1 sample, 1 click), no cursor; actual {r}");
+        Assert.True(r.Cursor);
+        Assert.Equal((1, 0, 0, true, false), r.on);
+        Assert.Equal((1, 1), r.Off);
+        Assert.Null(r.CursorOff);
+    }
+
+    private static MouseButtonEventArgs Press(UIElement element)
+    {
+        var e = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent };
+        element.RaiseEvent(e);
+        return e;
+    }
+
+    /// <summary>The magnifier draws the pixels it is given ten times over, beside the pointer, at
+    /// a fixed screen size whatever the zoom - and is gone, bitmap and all, once the eyedropper ends.</summary>
+    [Fact]
+    public void The_magnifier_follows_the_pointer_and_goes_with_the_eyedropper()
+    {
+        var r = _sta.Run(() =>
+        {
+            var green = BitmapSource.Create(3, 3, 96, 96, PixelFormats.Bgra32, null,
+                Enumerable.Repeat(new byte[] { 0, 0xFF, 0, 0xFF }, 9).SelectMany(b => b).ToArray(), 12);
+            Point? asked = null;
+            var overlay = new DesignerOverlay
+            {
+                Scene = Scene(1), Zoom = 2, EyedropperActive = true,
+                Magnifier = p => { asked = p; return green; },
+            };
+            overlay.Measure(new Size(400, 200));
+            overlay.Arrange(new Rect(0, 0, 400, 200));
+            overlay.MagnifyAt(new Point(50, 50));
+            // At 200 % the box starts 16/2 = 8 px past the pointer and is 10*3/2 = 15 px wide.
+            var inside = Pixel(overlay, 60, 60);
+            var past = Pixel(overlay, 75, 75);
+            overlay.EyedropperActive = false;
+            return (asked, inside, past, After: Pixel(overlay, 60, 60));
+        });
+        _out.WriteLine($"expected: asked at 50,50; BGRA 0,255,0,255 inside the box, not past it nor after; " +
+                       $"actual asked {r.asked}, inside {string.Join(",", r.inside)}, past {string.Join(",", r.past)}, after {string.Join(",", r.After)}");
+        Assert.Equal(new Point(50, 50), r.asked);
+        Assert.Equal(new byte[] { 0, 0xFF, 0, 0xFF }, r.inside);
+        Assert.NotEqual(new byte[] { 0, 0xFF, 0, 0xFF }, r.past);
+        Assert.NotEqual(new byte[] { 0, 0xFF, 0, 0xFF }, r.After);
+    }
+
+    /// <summary>One pixel of the element as drawn now: a change since its last layout is drawn first.</summary>
+    private static byte[] Pixel(FrameworkElement element, int x, int y)
+    {
+        element.Arrange(new Rect(element.RenderSize));
+        var bitmap = new RenderTargetBitmap((int)element.ActualWidth, (int)element.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(element);
+        var bgra = new byte[4];
+        bitmap.CopyPixels(new Int32Rect(x, y, 1, 1), bgra, 4, 0);
+        return bgra;
     }
 }

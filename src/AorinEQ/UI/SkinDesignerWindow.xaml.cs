@@ -466,6 +466,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         ClosePicker();
         if (_picker is not null)
         {
+            _picker.EyedropperRequested -= StartEyedropper;
             _picker.ColorChanged -= OnPickerColorChanged;
             _picker.Closed -= OnPickerClosed;
             _picker.RecentsChanged -= OnPickerRecentsChanged;

@@ -473,6 +473,7 @@ public partial class SkinDesignerWindow
     /// one step in the history even when the same field is picked twice in a row.</summary>
     private void OpenPicker(ColorField field)
     {
+        StopEyedropper(); // it was sampling for the opening this one ends
         _picker ??= CreatePicker();
         _picker.Open(field.Swatch, field.Value, _currentSettings().RecentColors ?? []);
         EndMerge();
@@ -481,7 +482,8 @@ public partial class SkinDesignerWindow
 
     private ColorPickerPopup CreatePicker()
     {
-        var picker = new ColorPickerPopup { EyedropperAvailable = false };
+        var picker = new ColorPickerPopup { EyedropperAvailable = true };
+        picker.EyedropperRequested += StartEyedropper;
         picker.ColorChanged += OnPickerColorChanged;
         picker.Closed += OnPickerClosed;
         picker.RecentsChanged += OnPickerRecentsChanged;
@@ -507,6 +509,7 @@ public partial class SkinDesignerWindow
     /// another document, the window disposed), so nothing may wait for the late Closed.</summary>
     private void ClosePicker()
     {
+        StopEyedropper();
         if (_picker is null || _pickerField is null) return;
         _picker.Commit();
         _picker.IsOpen = false;
