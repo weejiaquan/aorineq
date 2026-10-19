@@ -145,13 +145,15 @@ public partial class SkinOsdWindow : Window
     /// skin PNG would lock its own folder against the fix), and WPF's process-wide bitmap cache
     /// keys on the URI alone, so a skin whose PNGs were edited in place (same path, new bytes)
     /// could be served the stale image. A stream has no URI to cache on.</summary>
-    internal static BitmapImage LoadBitmap(string path)
+    internal static BitmapImage LoadBitmap(string path, int decodePixelHeight = 0)
     {
         using var stream = File.OpenRead(path);
         var bmp = new BitmapImage();
         bmp.BeginInit();
         bmp.CacheOption = BitmapCacheOption.OnLoad;
         bmp.StreamSource = stream;
+        // A thumbnail decodes small rather than holding a full sheet in memory to show 80 px of it.
+        if (decodePixelHeight > 0) bmp.DecodePixelHeight = decodePixelHeight;
         bmp.EndInit();
         bmp.Freeze();
         return bmp;

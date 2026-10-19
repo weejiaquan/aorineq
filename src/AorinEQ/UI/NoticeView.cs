@@ -1,4 +1,3 @@
-using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -91,11 +90,7 @@ public sealed class NoticeView : UserControl
                 // an animation timer for it would cost more than it is worth.
                 frame = SkinFrames.Load(look.ArtPath!, look.ArtFrames, 10).Frames[0];
             }
-            catch (Exception ex) when (ex is NotSupportedException or FileFormatException
-                                           or IOException or ArgumentException
-                                           or UnauthorizedAccessException
-                                           or System.Runtime.InteropServices.COMException
-                                           or OverflowException)
+            catch (Exception ex) when (SkinFrames.IsImagingFailure(ex))
             {
                 // Runs inside the device-change handler: whatever WIC throws for art it cannot
                 // decode (a raw COMException for some codec failures, OverflowException for
