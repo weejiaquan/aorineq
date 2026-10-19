@@ -44,7 +44,14 @@ public partial class App
         window.AirPlayPollRequested += () =>
             window.SetAirPlayState(AirPlay.Snapshot(), AirPlay.IsStreaming);
 
-        window.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
+        window.AirPlayEqStreamToggled += on => _ = SetAirPlayEqStreamAsync(on);
+        window.AirPlayEqEditRequested += OpenEqEditorOnAirPlayCable;
+        // VB-Cable can be installed, enabled or removed while the window is hidden or behind
+        // another one — the user turns CABLE Input on in Windows' Sound settings and comes back —
+        // so the page is told afresh every time the window is activated, and once now. The push
+        // includes the volume-key note the replaced line used to set.
+        window.Activated += (_, _) => PushVirtualCableState(window);
+        PushVirtualCableState(window);
         if (_airPlayDevices.Count > 0) window.SetAirPlayDevices(_airPlayDevices);
     }
 
@@ -164,6 +171,8 @@ public partial class App
         // effect on the next connection, because changing them mid-stream would mean tearing
         // the session down and rebuilding it under the user.
         AirPlay.SetVolumePercent(setting.VolumePercent);
+        // AirPlay only and the source both decide which endpoint's Equalizer APO the keys answer to.
+        _settingsWindow?.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
     }
 
     /// <summary>What the AirPlay strip should be showing right now. One answer, asked by both the

@@ -22,6 +22,17 @@ public partial class SettingsWindow
     private AirPlaySetting _airPlay = AirPlaySetting.Default;
     private string _airPlayVolumeMode = VolumeModes.Eapo;
     private bool _airPlaySourceEapoActive;
+
+    /// <summary>The active VB-Cable endpoint, or null when there is none — App's last word on it.</summary>
+    private string? _cableEndpointId;
+    private bool _airPlayStreaming;
+
+    /// <summary>The user flipped "EQ the AirPlay stream". App runs the elevated helper and answers
+    /// with <see cref="SetAirPlayEqStream"/>.</summary>
+    public event Action<bool>? AirPlayEqStreamToggled;
+
+    /// <summary>"Edit EQ": open the equalizer on VB-Cable's tab.</summary>
+    public event Action? AirPlayEqEditRequested;
     private DispatcherTimer? _airPlayTimer;
 
     /// <summary>The user asked to rescan for receivers. App discovers and calls
@@ -41,7 +52,6 @@ public partial class SettingsWindow
         _airPlay = settings.AirPlay ?? AirPlaySetting.Default;
         _airPlayVolumeMode = settings.VolumeMode;
 
-        PopulateAirPlaySources();
         AirPlayEnabledBox.IsChecked = _airPlay.Enabled;
         SelectByTag(AirPlayModeCombo, _airPlay.Mode);
         SelectByTag(AirPlayBarCombo, AirPlayBarVisibility.Normalize(_airPlay.BarVisibility));
@@ -56,6 +66,7 @@ public partial class SettingsWindow
         AirPlayIdleSecondsBox.Text = _airPlay.IdleDisconnectSeconds.ToString();
         AirPlayIdleSecondsBox.IsEnabled = !_airPlay.StandbyEnabled;
 
+        ApplyAirPlayOnly();
         ApplyRetargetAvailability();
         UpdateAirPlayButtons(streaming: false);
     }
@@ -79,6 +90,58 @@ public partial class SettingsWindow
         _airPlayVolumeMode = volumeMode;
         _airPlaySourceEapoActive = eapoActiveOnSource;
         ApplyRetargetAvailability();
+    }
+
+    /// <summary>App tells the page what VB-Cable is on this machine right now — whenever the window
+    /// is activated, when the default device changes, and after an install. With a cable the AirPlay
+    /// only and EQ rows appear; without one they are hidden.</summary>
+    public void SetVirtualCable(VirtualCableState state, string? cableEndpointId)
+    {
+        _cableEndpointId = state == VirtualCableState.Present ? cableEndpointId : null;
+        var present = _cableEndpointId is not null ? Visibility.Visible : Visibility.Collapsed;
+        AirPlayOnlyCard.Visibility = present;
+        AirPlayEqStreamCard.Visibility = present;
+        ApplyAirPlayOnly();
+    }
+
+    /// <summary>Whether Equalizer APO is on VB-Cable — read from the machine by App, never stored.
+    /// Also ends the busy state the toggle entered when it was clicked.</summary>
+    public void SetAirPlayEqStream(bool active)
+    {
+        AirPlayEqStreamBox.IsChecked = active;
+        AirPlayEqStreamBox.IsEnabled = true;
+        AirPlayEqEditButton.IsEnabled = active;
+    }
+
+    /// <summary>The cable repair's progress and verdict, under the EQ card's subtitle. Null hides it.</summary>
+    public void SetAirPlayEqStreamStatus(string? text)
+    {
+        AirPlayEqStreamStatus.Text = text ?? "";
+        AirPlayEqStreamStatus.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Source, mute and AirPlay only, from one rule: with AirPlay only in effect the Source
+    /// combo shows VB-Cable and is locked, and "Mute this PC" is hidden (there is nothing on the
+    /// speakers to mute). The stored source is never touched, so it comes back on its own. The
+    /// Source list is refilled here, so a cable installed or enabled since the window was built is
+    /// listed — and refilling, like showing the cable, is not the user choosing a source.</summary>
+    private void ApplyAirPlayOnly()
+    {
+        bool inEffect = _airPlay.AirPlayOnlyInEffect(_cableEndpointId);
+        bool wasInitializing = _initializing;
+        _initializing = true;
+        try
+        {
+            AirPlayOnlyBox.IsChecked = _airPlay.AirPlayOnly;
+            PopulateAirPlaySources(); // selects the stored source, falling back to "Default playback device"
+            if (inEffect) SelectByTag(AirPlaySourceCombo, _cableEndpointId!);
+        }
+        finally
+        {
+            _initializing = wasInitializing;
+        }
+        AirPlaySourceCombo.IsEnabled = !_airPlayStreaming && !inEffect;
+        AirPlayMuteLocalCard.Visibility = inEffect ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void PopulateAirPlaySources()
@@ -153,7 +216,8 @@ public partial class SettingsWindow
             ? new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.Stop24)
             : new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.Play24);
         AirPlayDeviceCombo.IsEnabled = !streaming;
-        AirPlaySourceCombo.IsEnabled = !streaming;
+        _airPlayStreaming = streaming;
+        AirPlaySourceCombo.IsEnabled = !streaming && !_airPlay.AirPlayOnlyInEffect(_cableEndpointId);
     }
 
     /// <summary>Starts polling the session while the AirPlay page is visible. Stopped when the
@@ -290,6 +354,24 @@ public partial class SettingsWindow
             MuteLocalWhileStreaming = AirPlayMuteLocalBox.IsChecked == true,
         });
     }
+
+    private void OnAirPlayOnlyChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        RaiseAirPlay(_airPlay with { AirPlayOnly = AirPlayOnlyBox.IsChecked == true });
+        ApplyAirPlayOnly();
+    }
+
+    /// <summary>Disabled until App answers: the helper prompts for elevation and restarts audio,
+    /// and a second click meanwhile would only be dropped.</summary>
+    private void OnAirPlayEqStreamChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        AirPlayEqStreamBox.IsEnabled = false;
+        AirPlayEqStreamToggled?.Invoke(AirPlayEqStreamBox.IsChecked == true);
+    }
+
+    private void OnAirPlayEqEdit(object sender, RoutedEventArgs e) => AirPlayEqEditRequested?.Invoke();
 
     private void OnAirPlayDitherChanged(object sender, RoutedEventArgs e)
     {

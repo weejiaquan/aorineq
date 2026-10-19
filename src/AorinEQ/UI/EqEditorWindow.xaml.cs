@@ -192,6 +192,16 @@ public partial class EqEditorWindow : Wpf.Ui.Controls.FluentWindow
         LoadScope(_scopeDeviceId);
     }
 
+    /// <summary>Puts the editor on <paramref name="deviceId"/>'s tab, exactly as if the user had
+    /// clicked it — AirPlay's "Edit EQ" opens it on VB-Cable. Before the window has loaded this
+    /// only records the choice; the first tab build honours it.</summary>
+    public void SelectScope(string deviceId)
+    {
+        _scopeDeviceId = deviceId;
+        _scopeChosen = true;
+        if (IsLoaded) PopulateScopeTabs();
+    }
+
     // ---- Scope tabs ----
 
     private void PopulateScopeTabs()

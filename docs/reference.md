@@ -514,9 +514,41 @@ the RTSP handshake running on the UI thread; a known rough edge rather than a ha
 Which of this PC's playback devices is captured and sent.
 
 Left on the default, whatever you are already listening to is what gets streamed - so it plays in
-both places at once. To hear it **only** on the receiver, install a virtual audio device, select it
-here, and play into it. That is the dependable route; see "Mute this PC while streaming" below for
-why the obvious alternative is not.
+both places at once. To hear it **only** on the receiver, turn on **AirPlay only** below; it needs
+VB-Audio's free virtual cable. While AirPlay only is on, Source is locked to VB-Cable, and your own
+choice here comes back when you turn it off.
+
+### AirPlay only
+
+Plays AirPlay on the receiver and nowhere else, by routing rather than muting. While a stream runs,
+AorinEQ makes **CABLE Input (VB-Audio Virtual Cable)** Windows' default output for all three roles
+(console, multimedia, communications) - every app plays into the virtual device, nothing reaches
+your speakers - and the stream captures that device. When the stream ends (Disconnect, the receiver
+dropping, an idle hang-up, an error, or quitting AorinEQ) each role goes back to the device it was
+on, if that device still exists.
+
+- **You pick another output mid-stream:** AorinEQ treats it as your decision and stops managing the
+  default; the stream keeps capturing the cable.
+- **VB-Cable disappears mid-stream** (disabled or removed): your original devices are put back at once.
+- **AorinEQ is killed mid-stream:** the original defaults were saved to `settings.json` before the
+  switch and are put back on the next start.
+- **Windows refuses the switch:** the stream still captures VB-Cable, but the default stays where it
+  was, so this once you also hear it locally.
+- The switch and the switch back are AorinEQ's own, so they raise no device notice, no Equalizer APO
+  health warning (neither "isn't running" for the cable nor "working again" afterwards) and no repair
+  prompt.
+
+The cable is recognised by its hardware id (`VBAudioVACWDM`), not its name, so renaming it in Sound
+settings changes nothing.
+
+### EQ the AirPlay stream
+
+VB-Cable is its own playback device, so Equalizer APO has to be switched on for it separately. The
+toggle runs the same elevated, backed-up, verified repair as the Volume page's button, aimed at the
+cable; turning it off undoes exactly that repair. Each device keeps its own undo record, so
+repairing the cable never touches the undo held for your speakers. **Edit EQ** opens the equalizer
+on the cable's tab, and the Global chain applies to it as well. If Equalizer APO is not installed,
+the toggle opens the setup guide instead.
 
 ### Playback modes
 
@@ -543,10 +575,12 @@ keeping up, and a longer queue is the fix.
 The stream is captured from a loopback tap that sits **after** Equalizer APO. That inverts what you
 would expect:
 
-- **In Equalizer APO preamp mode**, the preamp is upstream of the tap, so the volume keys already
-  attenuate the audio before it is packetised. Set the receiver to 100% and the existing preamp
-  controls it, exactly like a DAC. Retargeting the keys at the receiver as well would attenuate
-  twice, so the setting greys itself out and says so rather than silently disappearing.
+- **In Equalizer APO preamp mode**, with Equalizer APO on the device being streamed, the preamp is
+  upstream of the tap, so the volume keys already attenuate the audio before it is packetised. Set
+  the receiver to 100% and the existing preamp controls it, exactly like a DAC. Retargeting the keys
+  at the receiver as well would attenuate twice, so the setting greys itself out and says so. Without
+  Equalizer APO on that device (VB-Cable with EQ off, say) the preamp reaches nothing, so the keys
+  drive the receiver instead.
 - **In Windows volume mode**, endpoint volume reaches the tap only on devices without hardware
   volume, which Microsoft documents as not contractual. Since it is unsafe to rely on in either
   direction, AorinEQ drives the receiver's own volume explicitly.
@@ -567,8 +601,8 @@ timeout that hangs up after a period of quiet.
 
 Silences the local endpoint so sound comes only from the receiver. **Off by default, deliberately.**
 Whether endpoint mute reaches the loopback tap is a hardware lottery: on the losing side it mutes
-the AirPlay stream too, and you get silence everywhere. Choosing a virtual device as the Source is
-the route that always works.
+the AirPlay stream too, and you get silence everywhere. **AirPlay only** is the route that always
+works, and while it is on this switch is hidden - there is nothing left for it to do.
 
 ### Session details
 

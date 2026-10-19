@@ -1881,7 +1881,7 @@ public partial class App : System.Windows.Application
     {
         if (_eapoRepairRunning) return false;
         _eapoRepairRunning = true;
-        _settingsWindow?.SetEapoRepairStatus(busyText, busy: true);
+        ShowRepairStatus(endpointGuid, busyText, busy: true);
         var token = EapoRepair.NewToken();
         try
         {
@@ -1899,14 +1899,14 @@ public partial class App : System.Windows.Application
             }
             catch (System.ComponentModel.Win32Exception)
             {
-                _settingsWindow?.SetEapoRepairStatus(
+                ShowRepairStatus(endpointGuid,
                     Loc.T("app.administrator-permission-is-needed-to-change"),
                     busy: false);
                 return false;
             }
             if (proc is null)
             {
-                _settingsWindow?.SetEapoRepairStatus(Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
+                ShowRepairStatus(endpointGuid, Loc.T("app.couldn-t-start-the-repair-helper"), busy: false);
                 return false;
             }
             int exitCode;
@@ -1920,7 +1920,7 @@ public partial class App : System.Windows.Application
             // shown as this one's outcome.
             var result = EapoRepair.ReadResult(token);
             var message = result?.Message ?? NoVerdictMessage(exitCode, endpointGuid);
-            _settingsWindow?.SetEapoRepairStatus(message, busy: false);
+            ShowRepairStatus(endpointGuid, message, busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
                 _tray?.ShowInfo(Loc.T("app.equalizer-apo-is-switched-on-for"));
             // Anything short of success is said in a dialog, not only in the status line. The user
@@ -1949,6 +1949,18 @@ public partial class App : System.Windows.Application
             _eapoRepairRunning = false;
             _settingsWindow?.SetEapoUndoAvailable(DefaultEndpointBackup() is not null);
         }
+    }
+
+    /// <summary>Where a repair's progress and verdict are shown: the Volume page's status line for
+    /// the default device, and for VB-Cable the AirPlay page's EQ card — the control that started
+    /// it (its toggle is already disabled while the helper runs, so <paramref name="busy"/> only
+    /// matters to the Volume page).</summary>
+    private void ShowRepairStatus(string? endpointGuid, string text, bool busy)
+    {
+        if (endpointGuid is null)
+            _settingsWindow?.SetEapoRepairStatus(text, busy);
+        else
+            _settingsWindow?.SetAirPlayEqStreamStatus(text);
     }
 
     /// <summary>What to say when the helper exited without leaving a verdict for THIS run — it was
@@ -2553,6 +2565,8 @@ public partial class App : System.Windows.Application
         SaveSettings();
         _eqEditor?.OnActiveDeviceChanged(); // retab, if the editor is open
         _hud?.OnDeviceChanged();            // re-attach the SHARED capture to the new endpoint
+        // A cable that appeared or vanished changes the AirPlay page's rows and its Source list.
+        if (_settingsWindow is { IsVisible: true } window) PushVirtualCableState(window);
         // Equalizer APO is registered PER DEVICE, so this is the one moment the answer is
         // guaranteed to have changed — plugging in headphones moves the user onto a device that
         // may never have been ticked. Forced, because collapsing it against an unrelated probe

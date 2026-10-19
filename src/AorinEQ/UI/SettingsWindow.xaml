@@ -782,6 +782,39 @@
                                   SelectionChanged="OnAirPlaySourceChanged" />
                     </ui:CardControl>
 
+                    <ui:CardControl x:Name="AirPlayOnlyCard" Visibility="Collapsed" Margin="{StaticResource RowMargin}"
+                                    help:Help.Topic="settings.air-play-only">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.air-play-only.title}" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="{loc:T settings.air-play-only.subtitle}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch x:Name="AirPlayOnlyBox" Click="OnAirPlayOnlyChanged" />
+                    </ui:CardControl>
+
+                    <ui:CardControl x:Name="AirPlayEqStreamCard" Visibility="Collapsed" Margin="{StaticResource RowMargin}"
+                                    help:Help.Topic="settings.air-play-eq-stream">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.air-play-eq-stream.title}" />
+                                <ui:TextBlock Style="{StaticResource RowSubtitle}"
+                                              Text="{loc:T settings.air-play-eq-stream.subtitle}" />
+                                <!-- The cable repair's progress and verdict: on the card that started it,
+                                     not on the Volume page's status line. -->
+                                <ui:TextBlock x:Name="AirPlayEqStreamStatus" Style="{StaticResource RowSubtitle}"
+                                              Margin="0,4,0,0" Visibility="Collapsed" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button x:Name="AirPlayEqEditButton" Margin="0,0,8,0" IsEnabled="False"
+                                       Content="{loc:T settings.air-play-eq-stream.edit}"
+                                       Icon="{ui:SymbolIcon Options24}" Click="OnAirPlayEqEdit" />
+                            <ui:ToggleSwitch x:Name="AirPlayEqStreamBox" Click="OnAirPlayEqStreamChanged" />
+                        </StackPanel>
+                    </ui:CardControl>
+
                     <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-mode">
                         <ui:CardControl.Header>
                             <StackPanel>
@@ -831,7 +864,7 @@
                         <ui:ToggleSwitch x:Name="AirPlayRetargetBox" Click="OnAirPlayRetargetChanged" />
                     </ui:CardControl>
 
-                    <ui:CardControl Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-mute-local">
+                    <ui:CardControl x:Name="AirPlayMuteLocalCard" Margin="{StaticResource RowMargin}" help:Help.Topic="settings.air-play-mute-local">
                         <ui:CardControl.Header>
                             <StackPanel>
                                 <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.air-play-mute-local.title}" />
