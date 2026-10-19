@@ -9,78 +9,59 @@ namespace AorinEQ.Tests;
 /// This is the rule the whole feature turns on, and it is counter-intuitive, so it lives in a
 /// pure static function rather than being buried in event wiring.
 ///
-/// The AirPlay stream is fed from a loopback tap that sits AFTER Equalizer APO. So in APO mode
-/// the preamp has already attenuated the samples before they are packetised — the volume keys
-/// control the receiver for free, and retargeting them would attenuate twice. In system mode
-/// the endpoint volume may or may not reach the tap depending on whether the device has
-/// hardware volume, which Microsoft documents as not contractual, so relying on it is unsafe
-/// in both directions and the sender drives the receiver explicitly instead.</summary>
+/// The AirPlay stream is fed from a loopback tap that sits AFTER Equalizer APO. In APO mode WITH
+/// Equalizer APO on the source, the preamp has already attenuated the samples before they are
+/// packetised — retargeting would attenuate twice. In APO mode WITHOUT it on the source
+/// (VB-Cable with no EQ, say) the preamp touches nothing, so the keys must drive the receiver. In
+/// system mode the endpoint volume may or may not reach the tap, so the sender drives the
+/// receiver explicitly.</summary>
 public class AirPlayControllerTests
 {
     private readonly ITestOutputHelper _out;
     public AirPlayControllerTests(ITestOutputHelper output) => _out = output;
 
-    [Fact]
-    public void Apo_mode_never_retargets_even_when_the_setting_is_on()
+    [Theory]
+    // mode, autoRetarget, streaming, eapoActiveOnSource -> retarget
+    [InlineData(VolumeModes.Eapo, true, true, true, false)]   // preamp already upstream of the tap
+    [InlineData(VolumeModes.Eapo, true, true, false, true)]   // preamp reaches nothing: drive the receiver
+    [InlineData(VolumeModes.Eapo, false, true, false, false)] // the user said no
+    [InlineData(VolumeModes.Eapo, true, false, false, false)] // nothing streaming
+    [InlineData(VolumeModes.Eapo, false, false, true, false)]
+    [InlineData(VolumeModes.System, true, true, true, true)]
+    [InlineData(VolumeModes.System, true, true, false, true)]
+    [InlineData(VolumeModes.System, false, true, false, false)]
+    [InlineData(VolumeModes.System, true, false, true, false)]
+    [InlineData(VolumeModes.System, false, false, false, false)]
+    [InlineData("something-else", true, true, false, false)]  // an unknown mode never starts driving the receiver
+    [InlineData("something-else", true, true, true, false)]
+    public void Volume_keys_drive_the_receiver_exactly_when_nothing_upstream_of_the_tap_would(
+        string mode, bool autoRetarget, bool streaming, bool eapoOnSource, bool expected)
     {
-        bool retarget = AirPlayController.ShouldRetargetVolume(
-            VolumeModes.Eapo, autoRetarget: true, streaming: true);
-        _out.WriteLine($"eapo + autoRetarget + streaming -> retarget={retarget}");
-        _out.WriteLine("(the preamp is already upstream of the tap; retargeting would double-attenuate)");
+        bool retarget = AirPlayController.ShouldRetargetVolume(mode, autoRetarget, streaming, eapoOnSource);
+        _out.WriteLine($"mode={mode} autoRetarget={autoRetarget} streaming={streaming} eapoOnSource={eapoOnSource} -> retarget={retarget}");
+        Assert.Equal(expected, retarget);
+    }
 
-        Assert.False(retarget);
+    [Theory]
+    [InlineData(VolumeModes.Eapo, true, false)]
+    [InlineData(VolumeModes.Eapo, false, true)]
+    [InlineData(VolumeModes.System, true, true)]
+    [InlineData(VolumeModes.System, false, true)]
+    [InlineData("something-else", false, false)]
+    public void The_setting_is_meaningful_wherever_the_keys_could_be_retargeted(
+        string mode, bool eapoOnSource, bool expected)
+    {
+        bool applies = AirPlayController.RetargetSettingApplies(mode, eapoOnSource);
+        _out.WriteLine($"mode={mode} eapoOnSource={eapoOnSource} -> applies={applies}");
+        Assert.Equal(expected, applies);
     }
 
     [Fact]
-    public void System_mode_retargets_while_streaming()
+    public void A_fresh_controller_captures_nothing()
     {
-        bool retarget = AirPlayController.ShouldRetargetVolume(
-            VolumeModes.System, autoRetarget: true, streaming: true);
-        _out.WriteLine($"system + autoRetarget + streaming -> retarget={retarget}");
-
-        Assert.True(retarget);
-    }
-
-    [Fact]
-    public void Nothing_retargets_when_no_stream_is_running()
-    {
-        foreach (var mode in new[] { VolumeModes.Eapo, VolumeModes.System })
-        {
-            bool retarget = AirPlayController.ShouldRetargetVolume(mode, true, streaming: false);
-            _out.WriteLine($"{mode} + not streaming -> retarget={retarget}");
-            Assert.False(retarget);
-        }
-    }
-
-    [Fact]
-    public void System_mode_respects_the_setting_being_off()
-    {
-        bool retarget = AirPlayController.ShouldRetargetVolume(
-            VolumeModes.System, autoRetarget: false, streaming: true);
-        _out.WriteLine($"system + autoRetarget OFF + streaming -> retarget={retarget}");
-
-        Assert.False(retarget);
-    }
-
-    [Fact]
-    public void An_unknown_volume_mode_does_not_retarget()
-    {
-        // Defensive: a settings file naming a mode this build does not know must not silently
-        // start driving the receiver from the volume keys.
-        bool retarget = AirPlayController.ShouldRetargetVolume("something-else", true, true);
-        _out.WriteLine($"unknown mode -> retarget={retarget}");
-        Assert.False(retarget);
-    }
-
-    [Fact]
-    public void The_setting_is_only_meaningful_in_system_mode()
-    {
-        _out.WriteLine($"eapo -> applies={AirPlayController.RetargetSettingApplies(VolumeModes.Eapo)}");
-        _out.WriteLine($"system -> applies={AirPlayController.RetargetSettingApplies(VolumeModes.System)}");
-
-        // Drives whether the Settings checkbox is enabled or shown greyed with an explanation.
-        Assert.False(AirPlayController.RetargetSettingApplies(VolumeModes.Eapo));
-        Assert.True(AirPlayController.RetargetSettingApplies(VolumeModes.System));
+        using var controller = new AirPlayController();
+        _out.WriteLine($"source endpoint while idle: {controller.SourceEndpointId ?? "(none)"}");
+        Assert.Null(controller.SourceEndpointId);
     }
 
     [Fact]

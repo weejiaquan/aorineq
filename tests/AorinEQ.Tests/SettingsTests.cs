@@ -430,4 +430,52 @@ public class SettingsTests : IDisposable
         Assert.Equal(73, loaded.Percent);
         Assert.Null(loaded.EapoAutoRepairDeclined);
     }
+
+    [Fact]
+    public void The_airplay_restore_record_and_install_state_round_trip()
+    {
+        var record = new DefaultRenderRecord("{0.0.0.00000000}.{a}", "{0.0.0.00000000}.{b}", null);
+        (Settings.Default with
+        {
+            AirPlayRestoreDefault = record,
+            VirtualCablePendingReboot = true,
+            VirtualCablePendingStarts = 2,
+            AirPlay = AirPlaySetting.Default with { AirPlayOnly = true },
+        }).Save(_path);
+        _out.WriteLine(File.ReadAllText(_path));
+
+        var loaded = Settings.Load(_path);
+        Assert.Equal(record, loaded.AirPlayRestoreDefault);
+        Assert.True(loaded.VirtualCablePendingReboot);
+        Assert.Equal(2, loaded.VirtualCablePendingStarts);
+        Assert.True(loaded.AirPlay!.AirPlayOnly);
+    }
+
+    [Fact]
+    public void A_settings_file_from_before_airplay_only_loads_with_nothing_pending()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, """{ "Percent": 40, "Muted": false, "AirPlay": { "Enabled": true } }""");
+        var loaded = Settings.Load(_path);
+        _out.WriteLine($"restore={loaded.AirPlayRestoreDefault?.ToString() ?? "(none)"} pending={loaded.VirtualCablePendingReboot} starts={loaded.VirtualCablePendingStarts} only={loaded.AirPlay!.AirPlayOnly}");
+        Assert.Null(loaded.AirPlayRestoreDefault);
+        Assert.False(loaded.VirtualCablePendingReboot);
+        Assert.Equal(0, loaded.VirtualCablePendingStarts);
+        Assert.False(loaded.AirPlay.AirPlayOnly);
+    }
+
+    [Fact]
+    public void A_hand_edited_record_with_nothing_in_it_and_a_wild_start_count_are_normalised()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        File.WriteAllText(_path, """
+            { "Percent": 40, "Muted": false,
+              "AirPlayRestoreDefault": { "Console": null, "Multimedia": null, "Communications": null },
+              "VirtualCablePendingReboot": true, "VirtualCablePendingStarts": 99 }
+            """);
+        var loaded = Settings.Load(_path);
+        _out.WriteLine($"restore={loaded.AirPlayRestoreDefault?.ToString() ?? "(none)"} starts={loaded.VirtualCablePendingStarts}");
+        Assert.Null(loaded.AirPlayRestoreDefault); // an empty record restores nothing; null says so
+        Assert.Equal(VirtualCableInstaller.PendingStartLimit, loaded.VirtualCablePendingStarts);
+    }
 }

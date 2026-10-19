@@ -93,10 +93,16 @@ public static class AirPlayVolume
 /// render endpoint"; naming one pins the stream's source, which is how a virtual device gets
 /// tapped without the local speakers hearing it.
 ///
-/// <paramref name="AutoRetargetVolume"/> only has meaning in <see cref="VolumeModes.System"/>.
-/// In Equalizer APO mode the preamp already sits upstream of the loopback tap, so the volume
-/// keys attenuate the stream before it is ever packetised and retargeting would attenuate it
-/// twice.</summary>
+/// <paramref name="AutoRetargetVolume"/> has meaning wherever the volume keys would otherwise not
+/// reach the stream: in <see cref="VolumeModes.System"/>, and in Equalizer APO mode when Equalizer
+/// APO is NOT on the source endpoint (see <see cref="AirPlayController.RetargetSettingApplies"/>).
+/// In Equalizer APO mode with it on the source, the preamp already sits upstream of the loopback
+/// tap, so the keys attenuate the stream before it is ever packetised and retargeting would
+/// attenuate it twice.
+///
+/// <paramref name="AirPlayOnly"/> routes the stream through VB-Cable (see <see cref="ForStream"/>);
+/// it never overwrites <paramref name="SourceEndpointId"/>, so turning it off brings the user's own
+/// source back.</summary>
 public sealed record AirPlaySetting(
     bool Enabled = false,
     string DeviceName = "",
@@ -110,7 +116,8 @@ public sealed record AirPlaySetting(
     bool StandbyEnabled = true,
     int IdleDisconnectSeconds = 300,
     bool MuteLocalWhileStreaming = false,
-    string BarVisibility = AirPlayBarVisibility.Connected)
+    string BarVisibility = AirPlayBarVisibility.Connected,
+    bool AirPlayOnly = false)
 {
     public static AirPlaySetting Default { get; } = new();
 
@@ -132,6 +139,18 @@ public sealed record AirPlaySetting(
         DeviceId = deviceId,
         DeviceName = deviceName,
     };
+
+    /// <summary>Whether AirPlay only actually applies: switched on AND a cable to route through.</summary>
+    public bool AirPlayOnlyInEffect(string? cableEndpointId) =>
+        AirPlayOnly && !string.IsNullOrEmpty(cableEndpointId);
+
+    /// <summary>The setting a stream starts with. With AirPlay only in effect the capture is the
+    /// cable and local mute is off (nothing plays on the speakers to mute — and muting would not
+    /// be undone by the default switching back). Otherwise exactly what the user set.</summary>
+    public AirPlaySetting ForStream(string? cableEndpointId) =>
+        AirPlayOnlyInEffect(cableEndpointId)
+            ? this with { SourceEndpointId = cableEndpointId!, MuteLocalWhileStreaming = false }
+            : this;
 
     /// <summary>Seconds of continuous silence after which the session is dropped, or 0 to stay
     /// connected indefinitely. Standby IS staying connected, so enabling it means no timeout.</summary>

@@ -56,19 +56,32 @@ public sealed class AirPlayController : IDisposable
         get { lock (_gate) return _volumePercent; }
     }
 
+    /// <summary>The endpoint the running stream captures, or null for the default endpoint or
+    /// when nothing is being captured. What the volume-key rule asks Equalizer APO about.</summary>
+    public string? SourceEndpointId
+    {
+        get { lock (_gate) return _capture?.EndpointId; }
+    }
+
     /// <summary>Whether the volume keys should drive the RECEIVER rather than Windows.
     ///
-    /// False in Equalizer APO mode however the setting is left, and that is not a limitation
-    /// but the point: the preamp sits upstream of the loopback tap, so the keys have ALREADY
-    /// attenuated the samples by the time they are packetised. Retargeting as well would apply
-    /// the same attenuation twice — once digitally and once at the receiver.
-    ///
-    /// True in system mode while streaming, because endpoint volume reaches the tap only on
-    /// devices without hardware volume, and Microsoft documents that behaviour as not
-    /// contractual. Neither outcome can be relied on, so the sender sets the receiver's volume
-    /// explicitly instead.</summary>
-    public static bool ShouldRetargetVolume(string volumeMode, bool autoRetarget, bool streaming) =>
-        streaming && autoRetarget && volumeMode == VolumeModes.System;
+    /// The stream is a loopback tap AFTER Equalizer APO. In APO preamp mode with Equalizer APO on
+    /// the SOURCE endpoint, the keys already attenuate the samples before they are packetised, so
+    /// retargeting as well would attenuate twice — false. With Equalizer APO NOT on the source
+    /// (VB-Cable without EQ, say) the preamp reaches nothing and the keys would do nothing — so
+    /// they drive the receiver. In system mode endpoint volume reaches the tap only on devices
+    /// without hardware volume, which Microsoft documents as not contractual, so the sender sets
+    /// the receiver's volume explicitly.</summary>
+    public static bool ShouldRetargetVolume(string volumeMode, bool autoRetarget, bool streaming,
+        bool eapoActiveOnSource) =>
+        streaming && autoRetarget && RetargetSettingApplies(volumeMode, eapoActiveOnSource);
+
+    /// <summary>Whether the AutoRetargetVolume setting means anything for this mode and source.
+    /// The Settings page greys the checkbox and explains itself when this is false. An unknown
+    /// mode never qualifies: a settings file from a newer build must not start driving the
+    /// receiver from the keys.</summary>
+    public static bool RetargetSettingApplies(string volumeMode, bool eapoActiveOnSource) =>
+        volumeMode == VolumeModes.System || (volumeMode == VolumeModes.Eapo && !eapoActiveOnSource);
 
     /// <summary>Whether the AutoRetargetVolume setting means anything in this volume mode. The
     /// Settings page greys the checkbox and explains itself when this is false.</summary>

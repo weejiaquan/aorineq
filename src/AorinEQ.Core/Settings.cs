@@ -61,7 +61,15 @@ public sealed record Settings(
     // Endpoint GUIDs whose automatic Equalizer APO repair the user declined or that the repair
     // refused — never offered unprompted again (see EapoAutoRepair). A driver update gives the
     // device a NEW GUID, so this cannot suppress the post-update repair it exists for.
-    IReadOnlyList<string>? EapoAutoRepairDeclined = null)
+    IReadOnlyList<string>? EapoAutoRepairDeclined = null,
+    // Windows' default playback device per role, recorded by AirPlay only BEFORE it moved the
+    // default to VB-Cable, and cleared when it is put back. Still set at startup means the last
+    // session died mid-stream: App restores it then.
+    DefaultRenderRecord? AirPlayRestoreDefault = null,
+    // VB-Audio's setup ran but no cable appeared within ten seconds: Windows needs a restart. The
+    // count is starts since then; VirtualCableInstaller.NextPendingState gives up at the limit.
+    bool VirtualCablePendingReboot = false,
+    int VirtualCablePendingStarts = 0)
 {
     public static Settings Default { get; } = new(50, false);
 
@@ -117,6 +125,12 @@ public sealed record Settings(
             // Absent for everyone upgrading into this feature, so a missing block becomes the
             // default (disabled) rather than a null the UI has to guard on everywhere.
             AirPlay = NormalizeAirPlay(s.AirPlay ?? AirPlaySetting.Default),
+            // A record naming no device at all restores nothing; null is what says "none held".
+            AirPlayRestoreDefault = s.AirPlayRestoreDefault is { Console: null, Multimedia: null, Communications: null }
+                ? null
+                : s.AirPlayRestoreDefault,
+            VirtualCablePendingStarts =
+                Math.Clamp(s.VirtualCablePendingStarts, 0, VirtualCableInstaller.PendingStartLimit),
         };
     }
 

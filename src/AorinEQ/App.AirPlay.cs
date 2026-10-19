@@ -39,7 +39,7 @@ public partial class App
         window.AirPlayPollRequested += () =>
             window.SetAirPlayState(AirPlay.Snapshot(), AirPlay.IsStreaming);
 
-        window.SetAirPlayVolumeMode(_settings.VolumeMode);
+        window.SetAirPlayVolumeMode(_settings.VolumeMode, EapoActiveOnAirPlaySource());
         if (_airPlayDevices.Count > 0) window.SetAirPlayDevices(_airPlayDevices);
     }
 
@@ -138,16 +138,42 @@ public partial class App
         });
     }
 
-    /// <summary>Whether a volume key press should drive the AirPlay receiver instead of Windows.
-    ///
-    /// False in Equalizer APO mode however the setting is left: the preamp already sits upstream
-    /// of the loopback tap, so the key has attenuated the stream before it is packetised and
-    /// retargeting would attenuate it twice.</summary>
-    private bool AirPlayOwnsVolume() =>
-        AirPlayController.ShouldRetargetVolume(
+    /// <summary>Whether a volume key press should drive the AirPlay receiver instead of Windows —
+    /// <see cref="AirPlayController.ShouldRetargetVolume"/>'s rule, asked about the endpoint the
+    /// stream really captures.</summary>
+    private bool AirPlayOwnsVolume()
+    {
+        bool streaming = _airPlay?.IsStreaming == true;
+        return AirPlayController.ShouldRetargetVolume(
             _settings.VolumeMode,
             (_settings.AirPlay ?? AirPlaySetting.Default).AutoRetargetVolume,
-            _airPlay?.IsStreaming == true);
+            streaming,
+            eapoActiveOnSource: streaming && EapoActiveOnAirPlaySource());
+    }
+
+    /// <summary>The setting the next stream starts with, and the cable it routes through (null when
+    /// AirPlay only is off or there is no cable). The ONE place that decides whether a stream
+    /// captures VB-Cable: <see cref="ConnectAirPlay"/> starts streams with it and
+    /// <see cref="AirPlaySourceEndpointId"/> answers from it, so the two cannot disagree.</summary>
+    private (AirPlaySetting Stream, RenderEndpoint? Cable) AirPlayStreamSetting()
+    {
+        var setting = _settings.AirPlay ?? AirPlaySetting.Default;
+        var cable = setting.AirPlayOnly ? VirtualCable.Find() : null;
+        return (setting.ForStream(cable?.Id), cable);
+    }
+
+    /// <summary>The endpoint the running stream captures — or, with nothing running, the one the
+    /// next stream would: the cable under AirPlay only, the chosen source, else the default.</summary>
+    private string? AirPlaySourceEndpointId()
+    {
+        if (_airPlay?.IsStreaming == true)
+            return _airPlay.SourceEndpointId ?? AudioEndpoint.GetDefaultRenderEndpointId();
+        var source = AirPlayStreamSetting().Stream.SourceEndpointId;
+        return source is { Length: > 0 } ? source : AudioEndpoint.GetDefaultRenderEndpointId();
+    }
+
+    private bool EapoActiveOnAirPlaySource() =>
+        EapoDetection.IsActiveOnEndpoint(AudioEndpoint.EndpointGuid(AirPlaySourceEndpointId()));
 
     /// <summary>Applies a volume step to the receiver. Returns false when AirPlay does not own
     /// the volume, so the caller falls through to its normal path.</summary>

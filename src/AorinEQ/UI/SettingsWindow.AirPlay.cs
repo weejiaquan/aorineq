@@ -21,6 +21,7 @@ public partial class SettingsWindow
     private IReadOnlyList<RenderEndpoint> _airPlayEndpoints = [];
     private AirPlaySetting _airPlay = AirPlaySetting.Default;
     private string _airPlayVolumeMode = VolumeModes.Eapo;
+    private bool _airPlaySourceEapoActive;
     private DispatcherTimer? _airPlayTimer;
 
     /// <summary>The user asked to rescan for receivers. App discovers and calls
@@ -59,26 +60,24 @@ public partial class SettingsWindow
         UpdateAirPlayButtons(streaming: false);
     }
 
-    /// <summary>The AutoRetargetVolume switch is meaningless in Equalizer APO mode and says so
-    /// rather than sitting there doing nothing.
-    ///
-    /// In that mode the preamp already sits upstream of the loopback tap, so the volume keys
-    /// have attenuated the stream before it is packetised. Retargeting as well would apply the
-    /// same attenuation twice.</summary>
+    /// <summary>The AutoRetargetVolume switch says so when it is meaningless: in Equalizer APO mode
+    /// with Equalizer APO on the source, the preamp already attenuates upstream of the tap and
+    /// retargeting would attenuate twice.</summary>
     private void ApplyRetargetAvailability()
     {
-        bool applies = AirPlayController.RetargetSettingApplies(_airPlayVolumeMode);
+        bool applies = AirPlayController.RetargetSettingApplies(_airPlayVolumeMode, _airPlaySourceEapoActive);
         AirPlayRetargetBox.IsEnabled = applies;
         AirPlayRetargetNote.Text = applies
             ? Loc.T("settings.airplay.while-streaming-the-volume-keys-set")
             : Loc.T("settings.airplay.not-needed-in-equalizer-apo-mode");
     }
 
-    /// <summary>Called by App when the volume mode changes, so the note above stays honest
-    /// without reopening the window.</summary>
-    public void SetAirPlayVolumeMode(string volumeMode)
+    /// <summary>Called by App when the volume mode, the source, or Equalizer APO on the source
+    /// changes, so the note above stays honest without reopening the window.</summary>
+    public void SetAirPlayVolumeMode(string volumeMode, bool eapoActiveOnSource)
     {
         _airPlayVolumeMode = volumeMode;
+        _airPlaySourceEapoActive = eapoActiveOnSource;
         ApplyRetargetAvailability();
     }
 

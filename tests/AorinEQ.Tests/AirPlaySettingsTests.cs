@@ -336,4 +336,47 @@ public class AirPlaySettingsTests
         Assert.Equal("second@Bedroom", after.DeviceId);
         Assert.Equal("Bedroom", after.DeviceName);
     }
+
+    // ---- AirPlay only -------------------------------------------------------------------
+
+    private const string CableId = "{0.0.0.00000000}.{11111111-0000-0000-0000-000000000000}";
+    private const string Chosen = "{0.0.0.00000000}.{22222222-0000-0000-0000-000000000000}";
+
+    [Fact]
+    public void AirPlay_only_is_off_unless_asked_for()
+    {
+        _out.WriteLine($"default AirPlayOnly={AirPlaySetting.Default.AirPlayOnly}");
+        Assert.False(AirPlaySetting.Default.AirPlayOnly);
+    }
+
+    [Theory]
+    [InlineData(true, CableId, true)]
+    [InlineData(true, null, false)]   // switched on, but the cable is missing: nothing to route through
+    [InlineData(true, "", false)]
+    [InlineData(false, CableId, false)]
+    public void AirPlay_only_takes_effect_only_with_a_cable_present(bool on, string? cable, bool expected)
+    {
+        var setting = AirPlaySetting.Default with { AirPlayOnly = on };
+        bool inEffect = setting.AirPlayOnlyInEffect(cable);
+        _out.WriteLine($"AirPlayOnly={on} cable={cable ?? "(none)"} -> in effect={inEffect}");
+        Assert.Equal(expected, inEffect);
+    }
+
+    [Fact]
+    public void Streaming_with_AirPlay_only_captures_the_cable_without_muting_or_forgetting_the_users_source()
+    {
+        var setting = AirPlaySetting.Default with
+        {
+            AirPlayOnly = true, SourceEndpointId = Chosen, MuteLocalWhileStreaming = true,
+        };
+
+        var forStream = setting.ForStream(CableId);
+        _out.WriteLine($"stored source={setting.SourceEndpointId}; stream source={forStream.SourceEndpointId}; mute={forStream.MuteLocalWhileStreaming}");
+        Assert.Equal(CableId, forStream.SourceEndpointId);
+        Assert.False(forStream.MuteLocalWhileStreaming); // redundant, and it would mute the speakers nothing plays to
+        Assert.Equal(Chosen, setting.SourceEndpointId);  // the user's own choice survives
+
+        Assert.Equal(setting, setting.ForStream(null));  // no cable: the stream is exactly what the user set
+        Assert.Equal(setting with { AirPlayOnly = false }, (setting with { AirPlayOnly = false }).ForStream(CableId));
+    }
 }

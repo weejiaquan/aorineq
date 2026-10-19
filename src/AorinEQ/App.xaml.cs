@@ -2677,7 +2677,7 @@ public partial class App : System.Windows.Application
         SaveSettings();
         // Whether the AirPlay volume-retarget switch means anything depends on the mode, so the
         // page's explanation of itself is refreshed rather than left stale until reopened.
-        _settingsWindow?.SetAirPlayVolumeMode(mode);
+        _settingsWindow?.SetAirPlayVolumeMode(mode, EapoActiveOnAirPlaySource());
         // Flushed, not just posted: everything above has already happened to the audio chain (the
         // preamp is parked or re-applied, on disk, through the writer's own Flush), so leaving the
         // mode itself 50 ms behind in the coalescer is the one window where settings.json and the
