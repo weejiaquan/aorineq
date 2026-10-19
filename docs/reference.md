@@ -167,7 +167,7 @@ A skin is a folder in `%APPDATA%\AorinEQ\skins\<name>\`:
 | `notice.png` or `.gif` | optional — the device-changed notice's artwork |
 | `skin.json` | optional — everything below |
 
-`.png` wins over `.gif` if both exist. All layers must share one logical frame size.
+`.png` wins over `.gif` if both exist. `empty`, `full` and `muted` must share one logical frame size; the AirPlay strip's two layers share their own, and the notice art has its own.
 
 ### The skins that ship
 
@@ -206,7 +206,7 @@ transparent pixels click through to whatever is beneath, opaque pixels take clic
 wheel. Clicking jumps straight to that position like a normal slider.
 
 When the bar occupies only part of a wider decorative image, set `fillStartX`/`fillEndX` (or drag
-the two coloured handles in the designer). 0 % and 100 % then land exactly on the bar's pixel
+the two fill-range lines in the designer). 0 % and 100 % then land exactly on the bar's pixel
 edges, for the fill and for clicks alike; clicks in the decorative margins clamp to the ends. Keep
 `full`'s lit pixels inside that range and put static decoration in `empty`.
 
@@ -278,6 +278,12 @@ static skin with no number.
   "sourceUrl": "https://example.com/mika-bar"   // https only, dropped otherwise
 }
 ```
+
+A `percentText` with `"show": false` hides the number but keeps its position and styling, so
+turning it back on is not starting over. `nameText` and `percentText` in the `airplay` block take
+every field the volume bar's `percentText` takes — outline and shadow included — and are drawn by
+the same renderer; an unbold label is drawn at normal weight, as it always has been (the number's
+own unbold weight stays semibold).
 
 ### The AirPlay strip
 
@@ -398,31 +404,58 @@ cannot write outside the skin folder; the old folder is moved aside and restored
 
 ## Skin designer
 
-Settings → **Skin designer…**, or `aorineq://open?page=designer`. It builds and edits skins
-without hand-editing anything:
+Settings → **Skin designer…**, or `aorineq://open?page=designer`. It builds and edits every part of
+a skin without hand-editing anything, laid out like an image editor: **Layers** on the left, the
+skin in the middle, and the selected layer's **Properties** on the right. Drag the dividers to
+resize the side panels; the designer remembers their widths.
 
-- Pick the empty / full / muted layers (**Browse…**), or assemble a sprite sheet from a frame
-  sequence (**Frames…**).
-- Scrub the fill slider to preview any level; **Preview mute** shows the muted state, with the
-  **Mute dim** slider for skins with no muted artwork.
-- Drag the two coloured handles to set the fill range, or type the pixel values.
-- Drag the percentage number where you want it, and set font, size, bold, colour, alignment,
-  outline and shadow.
-- Style the device notice: tick **Style the device notice**, then either pick notice art
-  (**Browse…**) and place its text box and glyph, or leave the art off and set the plate's colours,
-  corner radius, font, size, bold and glyph. **Border** is a tick box like the outline: untick it
-  for no border (a new one starts from the plate colour, fully opaque). **Same as text** under the
-  icon colour makes the icon follow the text colour again. It previews on its own checkerboard
-  beside the OSD at the size the OSD draws it (art at the skin's scale, a plate at 1x); with the
-  option off the skin saves no notice and the preview shows the dark pill. Turning it off
-  for a skin that had a notice, or for one of the shipped skins, writes `"notice": false`, so the
-  shipped notice is not restored on the next start.
-- Set the scale, and fill in the optional details (title, author, description, version, tags,
-  source URL) that the picker and the gallery show.
-- **Test on desktop** shows the draft as a real OSD at your configured position — clicking,
-  dragging and scrolling behave exactly as they will in use, and drive the designer's fill slider.
-- **Save** under a name. Changing the name before saving makes a copy. The skin appears in the
-  picker immediately, and if you edited the skin currently on screen, the live OSD reloads.
+- **Layers** mirrors the skin: *Skin info*; the *Volume bar* with its empty, full and (optional)
+  muted art and the percent text; the *AirPlay strip* with its art, name and level text, dropdown
+  area and optional power-button area; and the *Device notice* with its optional art, text and
+  icon. Layers not in use are dimmed, and a layer with a problem carries ⚠ — hover it for the
+  reason. A skin without a strip offers **Add AirPlay strip…**, which asks for its empty and full
+  art.
+- **Properties** shows only what the selected layer has. Number boxes scrub when you drag their
+  label, step with ↑/↓ (Shift: 10) and pull out-of-range values into range; anything that is not
+  a number turns the box red and puts the last value back. Colours open a picker with opacity, hex
+  (`#RGB`, `#RRGGBB`, `#AARRGGBB`), your twelve recent colours — shared with the HUD widget menu —
+  and an eyedropper: it samples the canvas pixel under the pointer when you release the button,
+  and Esc cancels it. **Frames…** builds a sprite sheet from a numbered PNG sequence.
+- **The canvas** draws the skin with the same code as the OSD: the volume bar, the AirPlay strip
+  directly under it, and the notice below. Drag the percent text, the AirPlay labels, the text
+  (and its right edge, for its width) and icon on notice art, the fill-range lines, and the
+  dropdown and power areas (their corners resize them). Within 4 screen pixels they snap to the
+  art's edges and centre, its fill lines and each other, shown by magenta guides; hold **Alt** not
+  to snap. Arrows nudge the selection 1 px (Shift: 10), Delete removes the selected muted art,
+  notice art or power area, and Esc deselects. **Ctrl+wheel** zooms at the pointer (25–800 %),
+  **Ctrl+0** fits, **Ctrl+1** is 100 %, and Space+drag or the middle button pans; the plain wheel
+  scrolls. The toolbar and zoom buttons don't take the keyboard focus, so the canvas keeps its keys
+  after you click one. The strip under the canvas previews any fill level, mute, the AirPlay strip
+  connected, disconnected or with no receiver, the receiver's level and a sample device name —
+  none of it is saved.
+- **Undo / redo**: Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z, up to 200 steps back (in a text box they
+  are the box's own). A drag, a run of typing in one box and one use of the colour picker are one
+  step each. The title shows **•** while there are unsaved changes. Switching skin, **New**,
+  **Import…**, closing the designer, the tray's **Exit**, restarting for an update and relaunching
+  as administrator all ask first: **Save**, **Don't save** or **Cancel**. Windows logging off or
+  shutting down closes the designer without asking, and its unsaved changes are lost.
+- **Save** (Ctrl+S) is disabled while the skin has any problem, and its tooltip lists them by
+  layer. It looks at the art on disk again before writing, so art deleted or broken since the last
+  edit stops the save instead of being saved over. Saving under another existing skin's name asks
+  before overwriting it; changing a loaded skin's name saves a copy. The skin appears in the picker
+  at once, and if it is the skin on screen, the live OSD reloads.
+- **Test on desktop** shows the draft as a real OSD at your configured position, with the AirPlay
+  strip in the preview's state; clicking, dragging and scrolling it drive the preview's fill.
+  **Show notice** puts the device notice on the desktop with the sample device name. Every problem
+  that blocks Save blocks these too — the tooltip says which — except a name that can't be used:
+  the test copy is saved under a name of its own.
+
+Turning the notice off for a skin that had one, or for one of the shipped skins, writes
+`"notice": false`, so the shipped notice is not restored on the next start. If a skin has AirPlay
+strip or notice art that can't be loaded, the designer leaves it out of the drawing, marks its
+layer with ⚠ saying why, and keeps **Save** off until you decide: **Remove AirPlay strip** (or
+**Add AirPlay strip…** to replace it), or **Turn the notice off** (or **Choose new notice art…**).
+Nothing is deleted from the skin until you have.
 
 ## Equalizer
 
@@ -618,8 +651,8 @@ have seen it once, after which Settings opens on Volume.
 
 **The (?) beside a setting** opens a paragraph explaining what that setting does, when you would
 want it, and what happens if you get it wrong. Every settings row has one. Controls in the EQ editor
-and skin designer carry the same text as a tooltip instead, and both windows have a (?) in their
-title bar listing every topic for that window.
+carry the same text as a tooltip instead, and that window has a (?) in its title bar listing every
+topic for it.
 
 **The search box** above the sidebar searches the help text, not just labels - so "homepod" finds
 the AirPlay receiver row even though no visible label contains that word. It searches your language
