@@ -134,9 +134,10 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         _loadedName = loadedName;
         _selection = SkinLayer.SkinInfo;
         CleanupTestOsd();
+        // Before the canvas draws: a decode failure it reports must not be overwritten by this.
+        StatusText.Text = status;
         OnDocumentChanged();
         RefreshProperties(rebuild: true);
-        StatusText.Text = status;
     }
 
     /// <summary>Everything drawn is re-derived from the document here, after every change.</summary>
@@ -144,6 +145,12 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     {
         _info = _history.Current.ToInfo(_probe);
         _issues = _history.Current.Issues(_probe);
+        if (ShownLayer(_selection) is var shown && shown != _selection)
+        {
+            // The selected part left the tree (an undone "Add AirPlay strip"): its parent instead.
+            ClosePicker();
+            _selection = shown;
+        }
         RefreshTitle();
         RefreshLayers();
         RefreshProperties();
@@ -164,21 +171,30 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         UndoButton.IsEnabled = _history.CanUndo;
         RedoButton.IsEnabled = _history.CanRedo;
         SaveButton.IsEnabled = _issues.Count == 0;
-        SaveButton.ToolTip = _issues.Count == 0
-            ? null
-            : Loc.T("designer.save.blocked",
-                string.Join(Environment.NewLine, _issues.Select(i => LayerName(i.Layer) + ": " + i.Message)));
+        SaveButton.ToolTip = _issues.Count == 0 ? null : BlockedMessage();
         TestButton.IsEnabled = _info.IsValid;
         ExportZipButton.IsEnabled = _loadedName is not null;
         ShareButton.IsEnabled = _loadedName is not null;
     }
 
+    private string BlockedMessage() =>
+        Loc.T("designer.save.blocked", string.Join(Environment.NewLine, _issues.Select(i => LayerName(i.Layer) + ": " + i.Message)));
+
     /// <summary>Writes the document with <see cref="SkinWriter"/>. Saving under the name of a
     /// DIFFERENT existing skin overwrites it, so that is confirmed first; re-saving the skin being
-    /// edited is a plain save.</summary>
+    /// edited is a plain save.
+    ///
+    /// The art is looked at again first: the issues are only re-derived on an edit, and art deleted
+    /// or replaced on disk since would otherwise be saved over (the writer skips copying a file
+    /// onto itself) or leave a half-written copy.</summary>
     internal bool Save()
     {
-        if (_issues.Count > 0) return false;
+        OnDocumentChanged();
+        if (_issues.Count > 0)
+        {
+            StatusText.Text = BlockedMessage();
+            return false;
+        }
         var doc = _history.Current;
         var name = doc.Name.Trim();
         if (!string.Equals(name, _loadedName, StringComparison.OrdinalIgnoreCase)
@@ -241,7 +257,8 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     private void OnSkinSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_populatingSkins || SkinSelect.SelectedItem is not ComboBoxItem { Tag: string name }) return;
-        LoadSkin(name);
+        // A skin that broke after the list was read: the picker goes back to what is still open.
+        if (!LoadSkin(name)) SelectSkinItem(_loadedName);
     }
 
     private void OnNew(object sender, RoutedEventArgs e) => NewDocument();
@@ -400,6 +417,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
     /// the new language; XAML strings repaint through their bindings.</summary>
     private void OnLanguageChanged()
     {
+        ClosePicker(); // the panel it edits is rebuilt below
         RefreshTitle();
         RefreshLayers();
         RefreshProperties(rebuild: true);

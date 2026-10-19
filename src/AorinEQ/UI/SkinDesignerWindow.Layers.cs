@@ -63,6 +63,11 @@ public partial class SkinDesignerWindow
         };
     }
 
+    /// <summary>The node the tree shows <paramref name="layer"/> as: while there is no strip its
+    /// parts are not in the tree, so they are the strip's own node.</summary>
+    private SkinLayer ShownLayer(SkinLayer layer) =>
+        SkinLayers.BoardOf(layer) == SkinLayer.AirPlay && _history.Current.Config.AirPlay is null ? SkinLayer.AirPlay : layer;
+
     private void RefreshLayers()
     {
         _refreshingLayers = true;

@@ -283,6 +283,56 @@ public class DesignerFieldsTests : IDisposable
         Assert.Equal(new[] { "right" }, r.Seen);
     }
 
+    /// <summary>A new range is quiet - it reports nothing and leaves the value until it is shown
+    /// or committed - and then bounds typing, steps and the tooltip.</summary>
+    [Fact]
+    public void A_number_fields_range_can_change_in_place()
+    {
+        var r = Hosted(() => new NumberField("X", 0, 100), field =>
+        {
+            var seen = new List<double>();
+            field.ValueChanged += seen.Add;
+            field.ShowValue(80);
+            field.SetRange(0, 40);
+            var quiet = (field.Value, Reported: seen.Count, Tip: field.ToolTip as string);
+            Type(field.Box, "70");
+            var typed = field.Value;
+            field.HandleKey(Key.Up, ModifierKeys.None);
+            var stepped = field.Value;
+            field.SetRange(0, 200);
+            field.ShowValue(150);
+            return (quiet, typed, stepped, Widened: field.Value, Seen: seen.ToArray());
+        });
+        _out.WriteLine($"expected value 80 kept quietly with tooltip {Loc.T("designer.field.range", "0", "40")}, typing 70 -> 40, " +
+                       $"Up stays 40, widened shows 150, reports [40]; actual {r.quiet} typed {r.typed} stepped {r.stepped} " +
+                       $"widened {r.Widened} reports [{string.Join(", ", r.Seen)}]");
+        Assert.Equal((80.0, 0), (r.quiet.Value, r.quiet.Reported));
+        Assert.Equal(Loc.T("designer.field.range", "0", "40"), r.quiet.Tip);
+        Assert.Equal(40, r.typed);
+        Assert.Equal(40, r.stepped);
+        Assert.Equal(150, r.Widened);
+        Assert.Equal(new[] { 40.0 }, r.Seen);
+    }
+
+    [Fact]
+    public void A_rect_fields_area_can_change_in_place()
+    {
+        var r = Hosted(() => new RectField("X", "Y", "W", "H", 300, 30), field =>
+        {
+            var seen = new List<SkinHitRect>();
+            field.ValueChanged += seen.Add;
+            field.ShowValue(new SkinHitRect(0, 0, 100, 10));
+            field.SetArea(120, 12);
+            Type(field.W.Box, "999");
+            Type(field.H.Box, "999");
+            Type(field.X.Box, "999");
+            return seen.ToArray();
+        });
+        var expected = new[] { new SkinHitRect(0, 0, 120, 10), new SkinHitRect(0, 0, 120, 12), new SkinHitRect(120, 0, 120, 12) };
+        _out.WriteLine($"expected [{string.Join<SkinHitRect>(", ", expected)}], actual [{string.Join<SkinHitRect>(", ", r)}]");
+        Assert.Equal(expected, r);
+    }
+
     [Fact]
     public void A_rect_field_reports_the_whole_rectangle()
     {

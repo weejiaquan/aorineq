@@ -582,6 +582,194 @@ public class SkinDesignerWindowTests : IDisposable
         Assert.True(r.Undos);
     }
 
+    private static Dictionary<string, byte[]> Snapshot(string folder) =>
+        Directory.GetFiles(folder).ToDictionary(f => Path.GetFileName(f), File.ReadAllBytes);
+
+    /// <summary>Art deleted from disk with no edit since: the issue list from the last edit is
+    /// stale, so Save must look again - otherwise a same-folder save "succeeds" (the writer skips
+    /// copying a file onto itself) and leaves a skin that will not load.</summary>
+    [Fact]
+    public void Save_looks_at_the_art_again_and_refuses_when_it_has_gone()
+    {
+        var folder = MakeSkin("gone", """{"scale":1.5}""");
+        var r = WithDesigner(d =>
+        {
+            var saved = new List<string>();
+            d.SkinSaved += saved.Add;
+            d.LoadSkin("gone");
+            File.Delete(Path.Combine(folder, "empty.png"));
+            var before = Snapshot(folder);
+            bool ok = d.Save();
+            return (ok, before, After: Snapshot(folder), Issues: d.Issues.ToArray(), d.SaveButton.IsEnabled,
+                d.StatusText.Text, Saved: saved.Count, Dirty: d.History.IsDirty);
+        });
+        var issue = new SkinIssue(SkinLayer.VolumeEmpty, SkinIssueKind.ArtUnreadable, ["empty.png"]);
+        _out.WriteLine($"expected: refused, files unchanged, issue '{issue.Message}' shown, save disabled, no SkinSaved");
+        _out.WriteLine($"actual  : saved={r.ok} files [{string.Join(", ", r.After.Keys)}] issues [{string.Join("; ", r.Issues.AsEnumerable())}] " +
+                       $"enabled={r.IsEnabled} status '{r.Text}' skinSaved={r.Saved} dirty={r.Dirty}");
+        Assert.False(r.ok);
+        Assert.Equal(r.before.Keys.Order(), r.After.Keys.Order());
+        foreach (var (file, bytes) in r.before) Assert.Equal(bytes, r.After[file]);
+        Assert.Contains(issue, r.Issues);
+        Assert.False(r.IsEnabled);
+        Assert.Contains(issue.Message, r.Text);
+        Assert.Equal(0, r.Saved);
+    }
+
+    /// <summary>The same under a new name: no half-written copy is left behind.</summary>
+    [Fact]
+    public void Save_as_with_art_gone_creates_no_folder()
+    {
+        var folder = MakeSkin("source", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("source");
+            d.Commit(SkinEdits.SetName(d.Document, "copy"));
+            File.Delete(Path.Combine(folder, "full.png"));
+            return (Saved: d.Save(), Copy: Directory.Exists(Path.Combine(_root, "copy")), Dirty: d.History.IsDirty);
+        });
+        _out.WriteLine($"expected: refused, no 'copy' folder, still dirty; actual {r}");
+        Assert.False(r.Saved);
+        Assert.False(r.Copy);
+        Assert.True(r.Dirty);
+    }
+
+    /// <summary>A write that fails (skin.json held open elsewhere) is not a save: the skin stays
+    /// dirty, the status line says why and the app is not told a skin changed.</summary>
+    [Fact]
+    public void A_save_that_fails_keeps_the_skin_dirty_and_says_why()
+    {
+        var folder = MakeSkin("locked", "{}");
+        var r = WithDesigner(d =>
+        {
+            var saved = new List<string>();
+            d.SkinSaved += saved.Add;
+            d.LoadSkin("locked");
+            d.Commit(SkinEdits.SetScale(d.Document, 2));
+            using var hold = new FileStream(Path.Combine(folder, "skin.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            bool ok = d.Save();
+            return (ok, Dirty: d.History.IsDirty, d.Title, d.StatusText.Text, Saved: saved.Count);
+        });
+        _out.WriteLine($"expected: not saved, dirty, a 'Failed to save skin' status, no SkinSaved; actual {r}");
+        Assert.False(r.ok);
+        Assert.True(r.Dirty);
+        Assert.StartsWith("•", r.Title);
+        Assert.Contains("Failed to save skin 'locked'", r.Text);
+        Assert.Equal(0, r.Saved);
+        Assert.Equal("{}", File.ReadAllText(Path.Combine(folder, "skin.json")));
+    }
+
+    /// <summary>A frame count changes the layer's frame size, which must not rebuild the panel
+    /// under the field being stepped or scrubbed: the field's ranges follow in place.</summary>
+    [Fact]
+    public void Stepping_and_scrubbing_frames_keeps_the_same_field()
+    {
+        MakeSkin("frames", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("frames");
+            d.Select(SkinLayer.VolumeEmpty);
+            StaWpf.Pump();
+            var field = Number(d, Loc.T("designer.prop.frames"));
+            var values = new List<int>();
+            field.HandleKey(Key.Up, ModifierKeys.None);
+            values.Add(d.Document.Config.EmptyFrames);
+            field.HandleKey(Key.Up, ModifierKeys.None);
+            values.Add(d.Document.Config.EmptyFrames);
+            bool scrubbing = field.BeginScrub(0);
+            field.ScrubTo(2 * NumberField.ScrubPixelsPerStep);
+            values.Add(d.Document.Config.EmptyFrames);
+            field.Label.ReleaseMouseCapture();
+            var after = Number(d, Loc.T("designer.prop.frames"));
+            return (Same: ReferenceEquals(field, after), Values: values, scrubbing, Undos: d.History.CanUndo);
+        });
+        _out.WriteLine($"expected: the same field, frames 2, 3 then 5 (scrub +2); actual same={r.Same} frames [{string.Join(", ", r.Values)}] " +
+                       $"scrub started={r.scrubbing}");
+        Assert.True(r.scrubbing);
+        Assert.Equal(new[] { 2, 3, 5 }, r.Values);
+        Assert.True(r.Same);
+    }
+
+    /// <summary>Undoing "Add AirPlay strip" with one of its parts selected: the part is no longer
+    /// in the tree, so the selection falls back to the strip's own node.</summary>
+    [Fact]
+    public void Undoing_the_strip_moves_a_selected_part_back_to_the_strip_node()
+    {
+        MakeSkin("undo-strip", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("undo-strip");
+            d.Commit(SkinEdits.AddAirPlay(d.Document, Src("ae.png", 200, 24, Color.Gray), Src("af.png", 200, 24, Color.Blue), new ImageProbe()));
+            d.Select(SkinLayer.AirPlayName);
+            d.History.Undo();
+            var selectedItem = d.LayersTree.Items.OfType<TreeViewItem>().FirstOrDefault(i => i.IsSelected)?.Tag;
+            return (d.Selection, SelectedItem: selectedItem);
+        });
+        _out.WriteLine($"expected AirPlay selected in the tree; actual selection {r.Selection}, tree item {r.SelectedItem}");
+        Assert.Equal(SkinLayer.AirPlay, r.Selection);
+        Assert.Equal(SkinLayer.AirPlay, r.SelectedItem);
+    }
+
+    /// <summary>Art that passes the header check but will not decode: the status line keeps the
+    /// decode failure rather than the "Editing ..." line written after it.</summary>
+    [Fact]
+    public void Loading_keeps_a_decode_failure_in_the_status_line()
+    {
+        var folder = MakeSkin("undecodable", "{}");
+        TestPngs.WriteHeaderOnly(Path.Combine(folder, "empty.png"), 200, 40);
+        var r = WithDesigner(d => (Loaded: d.LoadSkin("undecodable"), d.StatusText.Text, d.VolumeView));
+        _out.WriteLine($"expected status starting '{Loc.T("designer.image-failed-to-decode")}'; actual loaded={r.Loaded} '{r.Text}'");
+        Assert.True(r.Loaded);
+        Assert.StartsWith(Loc.T("designer.image-failed-to-decode"), r.Text);
+        Assert.Null(r.VolumeView);
+    }
+
+    /// <summary>A skin chosen in the picker that no longer loads leaves the picker on the skin that
+    /// is still open, not on one the window is not showing.</summary>
+    [Fact]
+    public void A_skin_that_fails_to_load_from_the_picker_puts_the_picker_back()
+    {
+        MakeSkin("good", "{}");
+        var broken = MakeSkin("broken-later", "{}");
+        var r = WithDesigner(d =>
+        {
+            d.LoadSkin("good");
+            File.Delete(Path.Combine(broken, "full.png")); // after the picker listed it as valid
+            d.SkinSelect.SelectedItem = d.SkinSelect.Items.OfType<ComboBoxItem>().First(i => (string)i.Tag == "broken-later");
+            return (Picker: (d.SkinSelect.SelectedItem as ComboBoxItem)?.Tag, d.Document.Name, d.StatusText.Text);
+        });
+        _out.WriteLine($"expected picker and document on 'good' with the load error shown; actual {r}");
+        Assert.Equal("good", r.Picker);
+        Assert.Equal("good", r.Name);
+        Assert.Contains("full.png", r.Text);
+    }
+
+    /// <summary>A language change rebuilds the Properties panel, so the picker's pending hex is
+    /// applied to its field first and the picker closes.</summary>
+    [Fact]
+    public void A_language_change_ends_the_picker_opening_first()
+    {
+        MakeSkin("language", "{}");
+        var previous = Loc.Language;
+        try
+        {
+            var r = WithDesigner(d =>
+            {
+                d.LoadSkin("language");
+                Click(PercentTextColours(d)[0].Swatch);
+                d.Picker!.HexBox.Text = "#FF2468AC"; // typed, not committed
+                Loc.Language = previous == Languages.Ja ? Languages.En : Languages.Ja;
+                return (d.Document.Config.Text?.Color, d.Picker.IsOpen);
+            });
+            _out.WriteLine($"expected #FF2468AC applied and the picker closed; actual {r}");
+            Assert.Equal(("#FF2468AC", false), r);
+        }
+        finally
+        {
+            _sta.Run(() => Loc.Language = previous);
+        }
+    }
+
     [Fact]
     public void Panel_widths_come_from_settings_and_dragging_a_splitter_reports_them()
     {

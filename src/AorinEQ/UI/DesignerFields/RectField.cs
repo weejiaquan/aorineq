@@ -39,6 +39,15 @@ internal sealed class RectField : Grid
 
     public event Action? EditEnded;
 
+    /// <summary>The area the rectangle lives in changed size: each box's range follows in place.</summary>
+    public void SetArea(int areaWidth, int areaHeight)
+    {
+        X.SetRange(0, areaWidth);
+        Y.SetRange(0, areaHeight);
+        W.SetRange(0, areaWidth);
+        H.SetRange(0, areaHeight);
+    }
+
     public void ShowValue(SkinHitRect rect)
     {
         X.ShowValue(rect.X);

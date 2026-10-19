@@ -35,6 +35,11 @@ public static class SkinClamps
     public const string DefaultTextColor = "#FFFFFFFF";
     public const string DefaultFontFamily = "Segoe UI";
 
+    /// <summary>What an outline or a shadow starts as when the designer switches it on.</summary>
+    public const string DefaultOutlineColor = "#FF000000";
+    public const double DefaultOutlineWidth = 2.0;
+    public const string DefaultShadowColor = "#80000000";
+
     public static double Scale(double value) => Clamp(value, MinScale, MaxScale, DefaultScale);
 
     public static double Fps(double value) => Clamp(value, MinFps, MaxFps, DefaultFps);

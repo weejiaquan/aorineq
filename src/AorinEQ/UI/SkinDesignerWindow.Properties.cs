@@ -40,17 +40,19 @@ public partial class SkinDesignerWindow
         foreach (var refresh in _propertyRefreshers) refresh();
     }
 
-    /// <summary>What decides which fields exist and their ranges.</summary>
+    /// <summary>What decides which fields exist. Sizes are NOT part of it: a frame count changes
+    /// the frame size, and rebuilding then would replace the field being stepped or scrubbed. The
+    /// ranges measured on art follow it in place instead (the NumberEntry taking a max getter).</summary>
     private string PropertiesShape()
     {
         var doc = _history.Current;
         var c = doc.Config;
-        return string.Join("|", _selection, _info.Width, _info.Height, doc.AirPlayError is null, doc.NoticeError is null,
+        return string.Join("|", _selection, doc.AirPlayError is null, doc.NoticeError is null,
+            doc.EmptyPath.Length == 0, doc.FullPath.Length == 0,
             ImageProbe.IsGif(doc.EmptyPath), ImageProbe.IsGif(doc.FullPath), doc.MutedPath is null,
             doc.MutedPath is { } muted && ImageProbe.IsGif(muted),
-            c.AirPlay is null, c.AirPlay?.Width, c.AirPlay?.Height, c.AirPlay?.EmptyIsGif, c.AirPlay?.FullIsGif,
-            c.AirPlay?.ConnectHit is null, c.Notice is null, c.Notice?.HasArt, c.Notice?.ArtIsGif,
-            c.Notice?.Width, c.Notice?.Height);
+            c.AirPlay is null, c.AirPlay?.EmptyIsGif, c.AirPlay?.FullIsGif,
+            c.AirPlay?.ConnectHit is null, c.Notice is null, c.Notice?.HasArt, c.Notice?.ArtIsGif);
     }
 
     private UIElement[] BuildProperties(SkinLayer layer) => layer switch
@@ -105,7 +107,6 @@ public partial class SkinDesignerWindow
 
     private UIElement[] VolumeBarProperties()
     {
-        int width = _info.Width;
         var dim = NumberEntry(Loc.T("designer.text.mute-dim"), 0, 1, d => d.Config.MutedDim, SkinEdits.SetMutedDim,
             decimals: 2, step: 0.05);
         dim.ToolTip = Loc.T("designer.options-scroll.tooltip-4");
@@ -114,9 +115,9 @@ public partial class SkinDesignerWindow
         [
             Section(Loc.T("designer.text.fill-range"),
                 Hint(Loc.T("designer.text.where-the-bar-lives")),
-                NumberEntry(Loc.T("designer.text.0-at"), 0, width, d => VolumeFill(d).Start,
+                NumberEntry(Loc.T("designer.text.0-at"), 0, () => _info.Width, d => VolumeFill(d).Start,
                     (d, v) => SkinEdits.SetFillRange(d, SkinLayer.VolumeBar, (int)v, VolumeFill(d).End, _probe)),
-                NumberEntry(Loc.T("designer.text.100-at"), 0, width, d => VolumeFill(d).End,
+                NumberEntry(Loc.T("designer.text.100-at"), 0, () => _info.Width, d => VolumeFill(d).End,
                     (d, v) => SkinEdits.SetFillRange(d, SkinLayer.VolumeBar, VolumeFill(d).Start, (int)v, _probe))),
             Section(Loc.T("designer.section.mute"), dim),
         ];
@@ -161,9 +162,9 @@ public partial class SkinDesignerWindow
     {
         var doc = _history.Current;
         if (layer != SkinLayer.PercentText && doc.Config.AirPlay is null) return [];
-        var (width, height) = layer == SkinLayer.PercentText
-            ? (_info.Width, _info.Height)
-            : (doc.Config.AirPlay!.Width, doc.Config.AirPlay.Height);
+        // Measured on the bar or the strip as they are now: a frame count changes the height.
+        double Width() => layer == SkinLayer.PercentText ? _info.Width : _history.Current.Config.AirPlay?.Width ?? 0;
+        double Height() => layer == SkinLayer.PercentText ? _info.Height : _history.Current.Config.AirPlay?.Height ?? 0;
 
         SkinText Current(SkinDocument d) => SkinEdits.TextOf(d, layer) ?? SkinText.Hidden;
         SkinDocument Change(SkinDocument d, Func<SkinText, SkinText> change) =>
@@ -173,8 +174,8 @@ public partial class SkinDesignerWindow
         [
             Section(Loc.T("designer.section.position"),
                 ToggleEntry(Loc.T("designer.prop.show"), d => Current(d).Show, (d, on) => Change(d, t => t with { Show = on })),
-                NumberEntry(Loc.T("designer.text.x"), 0, width, d => Current(d).X, (d, v) => Change(d, t => t with { X = (int)v })),
-                NumberEntry(Loc.T("designer.text.y"), 0, height, d => Current(d).Y, (d, v) => Change(d, t => t with { Y = (int)v })),
+                NumberEntry(Loc.T("designer.text.x"), 0, Width, d => Current(d).X, (d, v) => Change(d, t => t with { X = (int)v })),
+                NumberEntry(Loc.T("designer.text.y"), 0, Height, d => Current(d).Y, (d, v) => Change(d, t => t with { Y = (int)v })),
                 AlignEntry(d => Current(d).Align, (d, v) => Change(d, t => t with { Align = v }))),
             Section(Loc.T("designer.section.type"),
                 FontEntry(Loc.T("designer.text.font"), d => Current(d).FontFamily, (d, v) => Change(d, t => t with { FontFamily = v })),
@@ -184,18 +185,15 @@ public partial class SkinDesignerWindow
                 ColorEntry(Loc.T("designer.text.color"), d => Current(d).Color, (d, v) => Change(d, t => t with { Color = v }))),
             Section(Loc.T("designer.outline.label"),
                 ToggleEntry(Loc.T("designer.prop.on"), d => Current(d).OutlineColor is not null,
-                    (d, on) => Change(d, t => on
-                        ? t with { OutlineColor = t.OutlineColor ?? "#FF000000", OutlineWidth = t.OutlineWidth > 0 ? t.OutlineWidth : 2 }
-                        : t with { OutlineColor = null })),
+                    (d, on) => Change(d, t => on ? Outlined(t, OutlineColor(t)) : t with { OutlineColor = null })),
                 // Choosing a colour switches the outline on, as the old tick box did.
-                ColorEntry(Loc.T("designer.text.color"), d => Current(d).OutlineColor ?? "#FF000000",
-                    (d, v) => Change(d, t => t with { OutlineColor = v, OutlineWidth = t.OutlineWidth > 0 ? t.OutlineWidth : 2 })),
+                ColorEntry(Loc.T("designer.text.color"), d => OutlineColor(Current(d)), (d, v) => Change(d, t => Outlined(t, v))),
                 NumberEntry(Loc.T("designer.text.width"), 0, SkinClamps.MaxOutlineWidth, d => Current(d).OutlineWidth,
                     (d, v) => Change(d, t => t with { OutlineWidth = v }), decimals: 1)),
             Section(Loc.T("designer.shadow.label"),
                 ToggleEntry(Loc.T("designer.prop.on"), d => Current(d).ShadowColor is not null,
-                    (d, on) => Change(d, t => t with { ShadowColor = on ? t.ShadowColor ?? "#80000000" : null })),
-                ColorEntry(Loc.T("designer.text.color"), d => Current(d).ShadowColor ?? "#80000000",
+                    (d, on) => Change(d, t => t with { ShadowColor = on ? ShadowColor(t) : null })),
+                ColorEntry(Loc.T("designer.text.color"), d => ShadowColor(Current(d)),
                     (d, v) => Change(d, t => t with { ShadowColor = v })),
                 NumberEntry(Loc.T("designer.text.blur"), 0, SkinClamps.MaxShadow, d => Current(d).ShadowBlur,
                     (d, v) => Change(d, t => t with { ShadowBlur = v }), decimals: 1),
@@ -204,6 +202,18 @@ public partial class SkinDesignerWindow
         ];
     }
 
+    private static string OutlineColor(SkinText t) => t.OutlineColor ?? SkinClamps.DefaultOutlineColor;
+
+    private static string ShadowColor(SkinText t) => t.ShadowColor ?? SkinClamps.DefaultShadowColor;
+
+    /// <summary>The outline switched on in <paramref name="color"/>, at its width or the default
+    /// one when it had none.</summary>
+    private static SkinText Outlined(SkinText t, string color) => t with
+    {
+        OutlineColor = color,
+        OutlineWidth = t.OutlineWidth > 0 ? t.OutlineWidth : SkinClamps.DefaultOutlineWidth,
+    };
+
     private UIElement[] AirPlayProperties()
     {
         if (_history.Current.AirPlayError is { } stripError)
@@ -211,13 +221,14 @@ public partial class SkinDesignerWindow
                 Hint(new SkinIssue(SkinLayer.AirPlay, SkinIssueKind.AirPlayUnloadable, [stripError]).Message),
                 ActionButton(Loc.T("designer.airplay.remove"), RemoveAirPlay),
                 ActionButton(Loc.T("designer.layers.add-airplay"), AddAirPlay))];
-        if (_history.Current.Config.AirPlay is not { } strip) return [];
+        if (_history.Current.Config.AirPlay is null) return [];
+        double Width() => _history.Current.Config.AirPlay?.Width ?? 0;
         return
         [
             Section(Loc.T("designer.text.fill-range"),
-                NumberEntry(Loc.T("designer.text.0-at"), 0, strip.Width, d => d.Config.AirPlay?.FillStartX ?? 0,
+                NumberEntry(Loc.T("designer.text.0-at"), 0, Width, d => d.Config.AirPlay?.FillStartX ?? 0,
                     (d, v) => SkinEdits.SetFillRange(d, SkinLayer.AirPlay, (int)v, d.Config.AirPlay!.FillEndX, _probe)),
-                NumberEntry(Loc.T("designer.text.100-at"), 0, strip.Width, d => d.Config.AirPlay?.FillEndX ?? 0,
+                NumberEntry(Loc.T("designer.text.100-at"), 0, Width, d => d.Config.AirPlay?.FillEndX ?? 0,
                     (d, v) => SkinEdits.SetFillRange(d, SkinLayer.AirPlay, d.Config.AirPlay!.FillStartX, (int)v, _probe))),
             Section(Loc.T("designer.section.power"),
                 ColorEntry(Loc.T("designer.prop.power-color"),
@@ -242,6 +253,7 @@ public partial class SkinDesignerWindow
         _propertyRefreshers.Add(() =>
         {
             var current = layer == SkinLayer.AirPlayDropdown ? _history.Current.Config.AirPlay?.DropdownHit : _history.Current.Config.AirPlay?.ConnectHit;
+            if (_history.Current.Config.AirPlay is { } now) rect.SetArea(now.Width, now.Height);
             if (!rect.IsEditing && current is not null) rect.ShowValue(current);
         });
         var rows = new List<UIElement> { rect };
@@ -290,6 +302,11 @@ public partial class SkinDesignerWindow
         return [Section(Loc.T("designer.text.notice"), [.. rows])];
     }
 
+    // The notice art's frame size as it is now (its frame count is edited on the Notice layer).
+    private double NoticeWidth() => _history.Current.Config.Notice?.Width ?? 0;
+
+    private double NoticeHeight() => _history.Current.Config.Notice?.Height ?? 0;
+
     private UIElement[] NoticeTextProperties()
     {
         if (_history.Current.Config.Notice is not { } notice) return NoticeProperties();
@@ -309,9 +326,9 @@ public partial class SkinDesignerWindow
         [
             type,
             Section(Loc.T("designer.section.position"),
-                NumberEntry(Loc.T("designer.text.x"), 0, notice.Width, d => Text(d).X, (d, v) => Change(d, t => t with { X = (int)v })),
-                NumberEntry(Loc.T("designer.text.y"), 0, notice.Height, d => Text(d).Y, (d, v) => Change(d, t => t with { Y = (int)v })),
-                NumberEntry(Loc.T("designer.prop.width"), 0, notice.Width, d => d.Config.Notice?.TextWidth ?? 0,
+                NumberEntry(Loc.T("designer.text.x"), 0, NoticeWidth, d => Text(d).X, (d, v) => Change(d, t => t with { X = (int)v })),
+                NumberEntry(Loc.T("designer.text.y"), 0, NoticeHeight, d => Text(d).Y, (d, v) => Change(d, t => t with { Y = (int)v })),
+                NumberEntry(Loc.T("designer.prop.width"), 0, NoticeWidth, d => d.Config.Notice?.TextWidth ?? 0,
                     (d, v) => SkinEdits.SetNoticeTextWidth(d, (int)v))),
         ];
     }
@@ -335,8 +352,8 @@ public partial class SkinDesignerWindow
         [
             look,
             Section(Loc.T("designer.section.position"),
-                NumberEntry(Loc.T("designer.text.x"), 0, notice.Width, d => Look(d).Glyph.X, (d, v) => Change(d, g => g with { X = (int)v })),
-                NumberEntry(Loc.T("designer.text.y"), 0, notice.Height, d => Look(d).Glyph.Y, (d, v) => Change(d, g => g with { Y = (int)v }))),
+                NumberEntry(Loc.T("designer.text.x"), 0, NoticeWidth, d => Look(d).Glyph.X, (d, v) => Change(d, g => g with { X = (int)v })),
+                NumberEntry(Loc.T("designer.text.y"), 0, NoticeHeight, d => Look(d).Glyph.Y, (d, v) => Change(d, g => g with { Y = (int)v }))),
         ];
     }
 
@@ -504,13 +521,23 @@ public partial class SkinDesignerWindow
     private string FieldKey() => $"{_selection}:{_propertyRefreshers.Count}";
 
     private NumberField NumberEntry(string label, double min, double max, Func<SkinDocument, double> get,
+        Func<SkinDocument, double, SkinDocument> set, int decimals = 0, double step = 1) =>
+        NumberEntry(label, min, () => max, get, set, decimals, step);
+
+    /// <summary>A number whose upper bound is measured on art that can change size while the field
+    /// is shown: <paramref name="max"/> is read again on every refresh and the range follows.</summary>
+    private NumberField NumberEntry(string label, double min, Func<double> max, Func<SkinDocument, double> get,
         Func<SkinDocument, double, SkinDocument> set, int decimals = 0, double step = 1)
     {
-        var field = new NumberField(label, min, max, decimals, step);
+        var field = new NumberField(label, min, max(), decimals, step);
         var key = FieldKey();
         field.ValueChanged += v => Commit(set(_history.Current, v), key);
         field.EditEnded += EndMerge;
-        _propertyRefreshers.Add(() => { if (!field.IsEditing) field.ShowValue(get(_history.Current)); });
+        _propertyRefreshers.Add(() =>
+        {
+            field.SetRange(min, max());
+            if (!field.IsEditing) field.ShowValue(get(_history.Current));
+        });
         return field;
     }
 

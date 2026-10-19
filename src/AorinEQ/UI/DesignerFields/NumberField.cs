@@ -23,7 +23,8 @@ internal sealed class NumberField : Grid
     /// <summary>DIPs of label drag per step.</summary>
     public const double ScrubPixelsPerStep = 2;
 
-    private readonly double _min, _max, _step;
+    private readonly double _step;
+    private double _min, _max;
     private readonly int _decimals;
     private bool _setting;
     private double? _scrubOrigin;
@@ -48,7 +49,7 @@ internal sealed class NumberField : Grid
         SetColumn(Box, 1);
         Children.Add(Label);
         Children.Add(Box);
-        ToolTip = Loc.T("designer.field.range", Format(_min, decimals), Format(_max, decimals));
+        ShowRange();
 
         Box.PreviewKeyDown += OnKeyDown;
         Box.LostKeyboardFocus += (_, _) =>
@@ -85,6 +86,20 @@ internal sealed class NumberField : Grid
 
     /// <summary>An edit finished: the box lost focus, Enter was pressed, or a scrub ended.</summary>
     public event Action? EditEnded;
+
+    /// <summary>Changes the range in place - the art it is measured against changed size - so the
+    /// field being typed in, stepped or scrubbed is not replaced. The value is clamped to it by the
+    /// next <see cref="ShowValue"/> or commit, not here: this reports nothing.</summary>
+    public void SetRange(double min, double max)
+    {
+        max = Math.Max(min, max);
+        if (min == _min && max == _max) return;
+        _min = min;
+        _max = max;
+        ShowRange();
+    }
+
+    private void ShowRange() => ToolTip = Loc.T("designer.field.range", Format(_min, _decimals), Format(_max, _decimals));
 
     /// <summary>Shows a value without reporting it.</summary>
     public void ShowValue(double value)
