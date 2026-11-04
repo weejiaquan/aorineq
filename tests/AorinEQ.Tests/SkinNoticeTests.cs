@@ -150,6 +150,28 @@ public class SkinNoticeTests : IDisposable
         Assert.Null(info.NoticeError);
     }
 
+    /// <summary>One field of the wrong type used to read the whole block as absent, with no
+    /// reason: the designer then opened the notice as "off" and a save wrote "notice": false over
+    /// the author's hand-written block.</summary>
+    [Theory]
+    [InlineData("""{"notice":{"cornerRadius":"12"}}""", null, "cornerRadius")]
+    [InlineData("""{"notice":{"text":{"fontSize":"big"}}}""", 120, "fontSize")]
+    public void A_notice_block_with_a_field_of_the_wrong_type_is_reported_not_dropped(string json, int? artWidth, string field)
+    {
+        var folder = MakeSkin("typo", json, artWidth is int w ? (w, 40) : null);
+        var info = LoadLogged(folder);
+
+        Assert.True(info.IsValid);
+        Assert.Null(info.Notice);
+        Assert.NotNull(info.NoticeError);
+        Assert.Contains("\"notice\"", info.NoticeError);
+        Assert.Contains(field, info.NoticeError);
+
+        var issues = SkinDocument.FromInfo(info).Issues(new ImageProbe());
+        _out.WriteLine("issues: " + string.Join(" | ", issues.Select(i => i.Message)));
+        Assert.Contains(issues, i => i.Kind == SkinIssueKind.NoticeUnloadable);
+    }
+
     [Fact]
     public void Frames_that_do_not_divide_the_art_are_reported()
     {

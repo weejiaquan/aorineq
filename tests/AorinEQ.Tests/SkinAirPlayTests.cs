@@ -234,6 +234,27 @@ public class SkinAirPlayTests : IDisposable
         Assert.Equal(300, skin.Width);
     }
 
+    /// <summary>An object with one field of the wrong type used to load as a strip at all its
+    /// defaults, so a designer save silently wrote the defaults over the hand-written block. It is
+    /// now unloadable with a reason naming the field, which the designer treats as blocking.</summary>
+    [Fact]
+    public void An_airplay_block_with_a_field_of_the_wrong_type_is_reported_and_blocks_saving()
+    {
+        var json = """{ "airplay": { "fillStartX": 10, "fillEndX": "290" } }""";
+        var skin = SkinLoader.Load(MakeSkin("typo", airPlayArt: true, airPlayJson: json));
+        _out.WriteLine($"valid={skin.IsValid} strip={skin.AirPlay is not null} airPlayError={skin.AirPlayError ?? "(none)"}");
+
+        Assert.True(skin.IsValid);
+        Assert.Null(skin.AirPlay);
+        Assert.NotNull(skin.AirPlayError);
+        Assert.Contains("\"airplay\"", skin.AirPlayError);
+        Assert.Contains("fillEndX", skin.AirPlayError);
+
+        var issues = SkinDocument.FromInfo(skin).Issues(new ImageProbe());
+        _out.WriteLine("issues: " + string.Join(" | ", issues.Select(i => i.Message)));
+        Assert.Contains(issues, i => i.Kind == SkinIssueKind.AirPlayUnloadable);
+    }
+
     /// <summary>Every field of the strip the writer can author, at a non-default value, read back
     /// by the real loader. The designer edits the strip now, so the writer writes it from the
     /// config rather than copying whatever block happened to be on disk.</summary>

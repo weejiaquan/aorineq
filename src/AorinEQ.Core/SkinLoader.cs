@@ -281,18 +281,8 @@ public static class SkinLoader
     /// <summary>Reads the "airplay" block out of its raw element, or null when it is absent or is
     /// not an object at all. Deliberately total: a wrong type there must not throw, for the same
     /// reason "title": 42 must not - a malformed decoration cannot be allowed to cost the skin.</summary>
-    private static SkinAirPlayJson? ParseAirPlay(JsonElement? element)
-    {
-        if (element is not { ValueKind: JsonValueKind.Object } obj) return null;
-        try
-        {
-            return obj.Deserialize<SkinAirPlayJson>(JsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+    private static SkinAirPlayJson? ParseAirPlay(JsonElement? element, out string? error) =>
+        ParseBlock<SkinAirPlayJson>(element, "airplay", out error);
 
     /// <summary>Loads the optional AirPlay bar. Returns the bar, or null plus the reason.
     ///
@@ -301,7 +291,8 @@ public static class SkinLoader
     /// is half-written keeps working as the volume skin it has always been.</summary>
     private static (SkinAirPlay? Bar, string? Error) LoadAirPlay(string folder, JsonElement? raw)
     {
-        var json = ParseAirPlay(raw);
+        var json = ParseAirPlay(raw, out var blockError);
+        if (blockError is not null) return (null, blockError);
         bool hasEmpty = File.Exists(Path.Combine(folder, "airplay-empty.png"))
                      || File.Exists(Path.Combine(folder, "airplay-empty.gif"));
         bool hasFull = File.Exists(Path.Combine(folder, "airplay-full.png"))
@@ -365,18 +356,32 @@ public static class SkinLoader
         SkinText.HiddenOf(SkinLayer.NoticeText) with { Show = true },
         new SkinNoticeGlyph(true, 16, 0, 18, null));
 
-    private static SkinNoticeJson? ParseNotice(JsonElement? element)
+    private static SkinNoticeJson? ParseNotice(JsonElement? element, out string? error) =>
+        ParseBlock<SkinNoticeJson>(element, "notice", out error);
+
+    /// <summary>Reads an optional block, or null when it is absent or not an object. An object
+    /// with a field of the wrong type (<c>"cornerRadius": "12"</c>) also reads as null - it must
+    /// not cost the skin - but with <paramref name="error"/> naming the field: the block is
+    /// treated as unloadable rather than as missing, so the designer refuses to save over it and
+    /// says why instead of quietly writing the defaults in its place.</summary>
+    private static T? ParseBlock<T>(JsonElement? element, string block, out string? error) where T : class
     {
+        error = null;
         if (element is not { ValueKind: JsonValueKind.Object } obj) return null;
-        try { return obj.Deserialize<SkinNoticeJson>(JsonOptions); }
-        catch (JsonException) { return null; }
+        try { return obj.Deserialize<T>(JsonOptions); }
+        catch (JsonException ex)
+        {
+            error = $"skin.json's \"{block}\" block could not be read ({ex.Path?.TrimStart('$', '.') ?? "?"} has the wrong type)";
+            return null;
+        }
     }
 
     /// <summary>Loads the optional notice look. Soft like the AirPlay bar: nothing here can
     /// invalidate the volume skin, and every failure falls back to the default plate.</summary>
     private static (SkinNotice? Notice, string? Error) LoadNotice(string folder, JsonElement? raw)
     {
-        var json = ParseNotice(raw);
+        var json = ParseNotice(raw, out var blockError);
+        if (blockError is not null) return (null, blockError);
         bool hasArt = File.Exists(Path.Combine(folder, "notice.png"))
                    || File.Exists(Path.Combine(folder, "notice.gif"));
         if (json is null && !hasArt) return (null, null);
