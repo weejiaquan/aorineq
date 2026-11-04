@@ -26,6 +26,10 @@ public partial class OsdWindow : Window
     private const double DefaultMargin = 12; // matches OsdPosition.Compute's own default
 
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+
+    /// <summary>Where the window was last put, in its target screen's DIPs - re-applied when the
+    /// move lands it on a screen of another scale (see <see cref="OsdScreen"/>).</summary>
+    private (OsdScreen.Target Screen, double Left, double Top)? _placed;
     private TimeSpan _hideDelay = TimeSpan.FromMilliseconds(1500);
     /// <summary>Which fade-out is still allowed to hide this window. Cancelling a fade does not
     /// cancel its Completed event — see <see cref="OsdFade"/>. Identical to SkinOsdWindow's,
@@ -93,6 +97,7 @@ public partial class OsdWindow : Window
     public OsdWindow()
     {
         InitializeComponent();
+        DpiChanged += (_, _) => { if (_placed is { } p) OsdScreen.MoveTo(this, p.Screen, p.Left, p.Top); };
         _hideTimer.Tick += (_, _) =>
         {
             // IsMouseOver: user is interacting; IsMouseCaptureWithin: the volume Slider's Thumb
@@ -169,7 +174,8 @@ public partial class OsdWindow : Window
         GlyphText.Text = muted ? GlyphMute : GlyphVolume;
         FluentGlyphText.Text = muted ? GlyphMute : GlyphVolume;
 
-        var wa = SystemParameters.WorkArea;
+        var screen = OsdScreen.Active();
+        var wa = screen.WorkArea;
         bool isMinimal = _style == OsdStyles.MinimalBar;
         if (isMinimal)
         {
@@ -199,7 +205,7 @@ public partial class OsdWindow : Window
         // minimal-bar sits flush against the edge(s) its anchor names (margin 0); the two
         // center-vertical anchors (left-center/right-center) aren't against a top/bottom edge,
         // so they keep the standard margin. dark-pill always uses the standard margin.
-        Present(wa, isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin, _hideDelay);
+        Present(screen, isMinimal && !IsCenterVerticalAnchor(_anchor) ? 0.0 : DefaultMargin, _hideDelay);
     }
 
     /// <summary>The active skin's notice look (null: it describes none, or no skin is loaded) and
@@ -237,13 +243,15 @@ public partial class OsdWindow : Window
         Width = size.Width;
         Height = size.Height;
 
-        Present(SystemParameters.WorkArea, DefaultMargin, DeviceNotice.HoldFor(_hideDelay));
+        Present(OsdScreen.Active(), DefaultMargin, DeviceNotice.HoldFor(_hideDelay));
     }
 
-    /// <summary>Places the window, already sized, on its anchor and shows it, to hide again after
-    /// <paramref name="hold"/>. Shared by everything this window can show.</summary>
-    private void Present(Rect wa, double margin, TimeSpan hold)
+    /// <summary>Places the window, already sized, on its anchor on <paramref name="screen"/> and
+    /// shows it, to hide again after <paramref name="hold"/>. Shared by everything this window can
+    /// show.</summary>
+    private void Present(OsdScreen.Target screen, double margin, TimeSpan hold)
     {
+        var wa = screen.WorkArea;
         double left, top;
         try
         {
@@ -258,8 +266,8 @@ public partial class OsdWindow : Window
             (left, top) = OsdPosition.Compute(
                 "bottom-center", Width, Height, wa.Left, wa.Top, wa.Width, wa.Height, 0, 0);
         }
-        Left = left;
-        Top = top;
+        _placed = (screen, left, top);
+        OsdScreen.MoveTo(this, screen, left, top);
 
         CancelFade();
         Show();

@@ -25,6 +25,10 @@ public partial class SkinOsdWindow : Window
     private readonly SkinView _view;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromMilliseconds(1500) };
 
+    /// <summary>Where the window was last put, in its target screen's DIPs - re-applied when the
+    /// move lands it on a screen of another scale (see <see cref="OsdScreen"/>).</summary>
+    private (OsdScreen.Target Screen, double Left, double Top)? _placed;
+
     /// <summary>The AirPlay strip, stacked under the skin's own artwork. It draws the SKIN's
     /// AirPlay bar when the skin ships one and a native strip when it does not - which is what
     /// every skin written before this release gets, and is the whole of the legacy story.</summary>
@@ -78,6 +82,7 @@ public partial class SkinOsdWindow : Window
     public SkinOsdWindow(SkinInfo info)
     {
         InitializeComponent();
+        DpiChanged += (_, _) => { if (_placed is { } p) OsdScreen.MoveTo(this, p.Screen, p.Left, p.Top); };
 
         _view = new SkinView(info);
         ViewHost.Children.Add(_view);
@@ -229,7 +234,8 @@ public partial class SkinOsdWindow : Window
     {
         _view.SetVolume(percent, muted);
 
-        var wa = SystemParameters.WorkArea;
+        var screen = OsdScreen.Active();
+        var wa = screen.WorkArea;
         double left, top;
         try
         {
@@ -243,8 +249,8 @@ public partial class SkinOsdWindow : Window
             (left, top) = OsdPosition.Compute(
                 "bottom-center", Width, Height, wa.Left, wa.Top, wa.Width, wa.Height, 0, 0);
         }
-        Left = left;
-        Top = top;
+        _placed = (screen, left, top);
+        OsdScreen.MoveTo(this, screen, left, top);
 
         CancelFade();
         Show();
