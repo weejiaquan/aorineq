@@ -446,7 +446,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         if (!await ConfirmLeaveAsync()) return;
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Filter = "Skin zip (*.zip)|*.zip",
+            Filter = Loc.T("settings.skin-zip.filter"),
             Title = Loc.T("designer.import-a-shared-skin"),
         };
         if (dialog.ShowDialog(this) != true) return;
@@ -509,7 +509,7 @@ public partial class SkinDesignerWindow : Wpf.Ui.Controls.FluentWindow, IDisposa
         if (_loadedName is null) return null;
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Filter = "Skin zip (*.zip)|*.zip",
+            Filter = Loc.T("settings.skin-zip.filter"),
             FileName = _loadedName + ".zip",
             Title = dialogTitle,
         };

@@ -486,16 +486,16 @@
                                 <ColumnDefinition />
                             </Grid.ColumnDefinitions>
                             <ToggleButton x:Name="AnchorTopLeft" Grid.Row="0" Grid.Column="0" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Top left" ToolTip="{loc:T settings.anchor-top-left.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-top-left.tooltip}" ToolTip="{loc:T settings.anchor-top-left.tooltip}"
                                           Click="OnAnchorClicked" />
                             <ToggleButton x:Name="AnchorTopCenter" Grid.Row="0" Grid.Column="1" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Top centre" ToolTip="{loc:T settings.anchor-top-center.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-top-center.tooltip}" ToolTip="{loc:T settings.anchor-top-center.tooltip}"
                                           Click="OnAnchorClicked" />
                             <ToggleButton x:Name="AnchorTopRight" Grid.Row="0" Grid.Column="2" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Top right" ToolTip="{loc:T settings.anchor-top-right.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-top-right.tooltip}" ToolTip="{loc:T settings.anchor-top-right.tooltip}"
                                           Click="OnAnchorClicked" />
                             <ToggleButton x:Name="AnchorLeftCenter" Grid.Row="1" Grid.Column="0" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Left centre" ToolTip="{loc:T settings.anchor-left-center.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-left-center.tooltip}" ToolTip="{loc:T settings.anchor-left-center.tooltip}"
                                           Click="OnAnchorClicked" />
                             <!-- The centre is not an anchor — the OSD attaches to the 8 edges and corners only. It
                                  is drawn as an empty gap rather than a ninth square: now that the cells fill their
@@ -505,18 +505,18 @@
                             <ToggleButton Grid.Row="1" Grid.Column="1" Style="{StaticResource AnchorCell}"
                                           Background="Transparent" BorderBrush="Transparent"
                                           IsEnabled="False" IsHitTestVisible="False" IsTabStop="False"
-                                          AutomationProperties.Name="Centre (not an anchor)" />
+                                          AutomationProperties.Name="{loc:T settings.anchor-centre.name}" />
                             <ToggleButton x:Name="AnchorRightCenter" Grid.Row="1" Grid.Column="2" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Right centre" ToolTip="{loc:T settings.anchor-right-center.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-right-center.tooltip}" ToolTip="{loc:T settings.anchor-right-center.tooltip}"
                                           Click="OnAnchorClicked" />
                             <ToggleButton x:Name="AnchorBottomLeft" Grid.Row="2" Grid.Column="0" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Bottom left" ToolTip="{loc:T settings.anchor-bottom-left.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-bottom-left.tooltip}" ToolTip="{loc:T settings.anchor-bottom-left.tooltip}"
                                           Click="OnAnchorClicked" />
                             <ToggleButton x:Name="AnchorBottomCenter" Grid.Row="2" Grid.Column="1" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Bottom centre" ToolTip="{loc:T settings.anchor-bottom-center.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-bottom-center.tooltip}" ToolTip="{loc:T settings.anchor-bottom-center.tooltip}"
                                           Click="OnAnchorClicked" />
                             <ToggleButton x:Name="AnchorBottomRight" Grid.Row="2" Grid.Column="2" Style="{StaticResource AnchorCell}"
-                                          AutomationProperties.Name="Bottom right" ToolTip="{loc:T settings.anchor-bottom-right.tooltip}"
+                                          AutomationProperties.Name="{loc:T settings.anchor-bottom-right.tooltip}" ToolTip="{loc:T settings.anchor-bottom-right.tooltip}"
                                           Click="OnAnchorClicked" />
                         </Grid>
                     </ui:CardControl>
@@ -612,6 +612,10 @@
                                 <ui:TextBlock Style="{StaticResource RowTitle}" Text="{loc:T settings.add-spectrum.title}" />
                                 <ui:TextBlock Style="{StaticResource RowSubtitle}"
                                               Text="{loc:T settings.add-spectrum.subtitle}" />
+                                <!-- Shown, with the add buttons disabled, once the layout holds
+                                     HudLayout.MaxWidgets: past it an add is a silent no-op. -->
+                                <ui:TextBlock x:Name="HudFullText" Style="{StaticResource RowSubtitle}"
+                                              Visibility="Collapsed" />
                             </StackPanel>
                         </ui:CardControl.Header>
                         <WrapPanel>
@@ -685,6 +689,18 @@
                                      skin carries none, so an uncredited skin costs no layout. -->
                                 <ui:TextBlock x:Name="SkinCreditText" Style="{StaticResource SkinCredit}"
                                               Visibility="Collapsed" />
+                                <!-- What the selected skin carries beyond the bar (AirPlay strip,
+                                     notice, muted art, animation), and any reason a part of it, or
+                                     the whole skin, will not load. Collapsed when there is nothing. -->
+                                <ui:TextBlock x:Name="SkinFeaturesText" Style="{StaticResource SkinCredit}"
+                                              Visibility="Collapsed" />
+                                <ui:TextBlock x:Name="SkinProblemText" Style="{StaticResource SkinCredit}"
+                                              Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                              Visibility="Collapsed" />
+                                <!-- The selected skin drawn by the OSD's own renderer at 60%, shrunk
+                                     (never enlarged) to fit. -->
+                                <Viewbox x:Name="SkinPreviewBox" StretchDirection="DownOnly" MaxHeight="64" MaxWidth="320"
+                                         HorizontalAlignment="Left" Margin="0,8,0,0" Visibility="Collapsed" />
                             </StackPanel>
                         </ui:CardControl.Header>
                         <ComboBox x:Name="SkinCombo" MinWidth="200" SelectionChanged="OnSkinChanged" />

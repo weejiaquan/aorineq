@@ -624,7 +624,6 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     private void ApplyOsdSettings(Settings settings)
     {
         SelectByTag(StyleCombo, settings.OsdStyle);
-        SkinCombo.IsEnabled = settings.OsdStyle == OsdStyles.Skin;
 
         foreach (var (button, anchor) in _anchorButtons)
             button.IsChecked = anchor == settings.OsdAnchor;
@@ -668,6 +667,9 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                     IsEnabled = skin.IsValid,
                     ToolTip = SkinTooltip(skin),
                 };
+                // A broken skin is disabled, and WPF shows no tooltip on a disabled element unless
+                // told to - which left the only place its error was written unreachable.
+                ToolTipService.SetShowOnDisabled(item, true);
                 SkinCombo.Items.Add(item);
             }
             // Resolve rather than leave it blank: an empty name IS the default skin now,
@@ -678,7 +680,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         {
             SkinCombo.SelectionChanged += OnSkinChanged;
         }
-        UpdateSkinCredit();
+        UpdateSkinDetails();
     }
 
     /// <summary>Everything about a skin that doesn't fit the one-line label: its folder (which the
@@ -686,31 +688,69 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     /// that won't load — why.</summary>
     private static string SkinTooltip(SkinInfo skin)
     {
-        var lines = new List<string> { "Folder: " + skin.Name };
+        var lines = new List<string> { Loc.T("settings.skin-tooltip.folder", skin.Name) };
         if (skin.Meta.Description is { } description) lines.Add(description);
-        if (skin.Meta.Version is { } version) lines.Add("Version " + version);
-        if (skin.Meta.Tags.Count > 0) lines.Add("Tags: " + SkinMeta.FormatTags(skin.Meta.Tags));
+        if (skin.Meta.Version is { } version) lines.Add(Loc.T("settings.skin-tooltip.version", version));
+        if (skin.Meta.Tags.Count > 0) lines.Add(Loc.T("settings.skin-tooltip.tags", SkinMeta.FormatTags(skin.Meta.Tags)));
         if (skin.Meta.SourceUrl is { } source) lines.Add(source);
         if (skin.Error is { } error) lines.Add(error);
         return string.Join(Environment.NewLine, lines);
     }
 
-    /// <summary>Shows who made the selected skin, under the picker. Collapsed when the skin has no
-    /// credits at all — every skin authored before 3.2 — so nothing appears that says nothing.</summary>
-    private void UpdateSkinCredit()
+    /// <summary>Everything under the picker for the selected skin: who made it (collapsed when it
+    /// carries no credits - every skin authored before 3.2), what it draws beyond the volume bar,
+    /// why it or a part of it will not load, and the skin itself drawn by the OSD's renderer.</summary>
+    private void UpdateSkinDetails()
     {
         var name = SelectedTag(SkinCombo);
-        var meta = name is null
-            ? SkinMeta.None
-            : SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), name)).Meta;
+        var skin = name is null ? null : SkinLoader.Load(Path.Combine(ApoPaths.GetSkinsRoot(), name));
+        var meta = skin?.Meta ?? SkinMeta.None;
 
-        var parts = new List<string>();
-        if (meta.Title is { } title) parts.Add(title);
-        if (meta.Author is { } author) parts.Add("by " + author);
-        if (meta.Version is { } version) parts.Add("v" + version);
+        var credit = new List<string>();
+        if (meta.Title is { } title) credit.Add(title);
+        if (meta.Author is { } author) credit.Add(Loc.T("settings.skin-credit.by", author));
+        if (meta.Version is { } version) credit.Add(Loc.T("settings.skin-credit.version", version));
+        ShowLine(SkinCreditText, string.Join(" · ", credit));
 
-        SkinCreditText.Text = string.Join(" · ", parts);
-        SkinCreditText.Visibility = parts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var features = new List<string>();
+        if (skin is { IsValid: true })
+        {
+            if (skin.HasAirPlay) features.Add(Loc.T("settings.skin-features.airplay"));
+            if (skin.HasNotice) features.Add(Loc.T("settings.skin-features.notice"));
+            if (skin.HasMuted) features.Add(Loc.T("settings.skin-features.muted"));
+            if (skin.EmptyIsGif || skin.FullIsGif || skin.EmptyFrames > 1 || skin.FullFrames > 1)
+                features.Add(Loc.T("settings.skin-features.animated"));
+        }
+        ShowLine(SkinFeaturesText, string.Join(" · ", features));
+
+        var problems = new List<string>();
+        if (skin?.Error is { } error) problems.Add(Loc.T("settings.skin-problem.skin", error));
+        if (skin?.AirPlayError is { } stripError) problems.Add(Loc.T("settings.skin-problem.airplay", stripError));
+        if (skin?.NoticeError is { } noticeError) problems.Add(Loc.T("settings.skin-problem.notice", noticeError));
+        ShowLine(SkinProblemText, string.Join(Environment.NewLine, problems));
+
+        SkinPreviewBox.Child = null;
+        if (skin is { IsValid: true })
+        {
+            try
+            {
+                var view = new SkinView(skin);
+                view.SetVolume(60, muted: false);
+                SkinPreviewBox.Child = view;
+            }
+            catch (Exception ex) when (SkinFrames.IsImagingFailure(ex))
+            {
+                // The loader only reads headers; art that cannot actually be decoded shows no
+                // preview here, as the OSD itself would fall back.
+            }
+        }
+        SkinPreviewBox.Visibility = SkinPreviewBox.Child is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static void ShowLine(System.Windows.Controls.TextBlock line, string text)
+    {
+        line.Text = text;
+        line.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>Selects the ComboBoxItem whose Tag matches, or leaves nothing selected if the
@@ -728,7 +768,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         combo.SelectedIndex = -1;
     }
 
-    private static string FormatSeconds(double seconds) => seconds.ToString("0.0") + "s";
+    private static string FormatSeconds(double seconds) => Loc.T("settings.hide-delay.seconds", seconds.ToString("0.0"));
 
     private static string? SelectedTag(System.Windows.Controls.ComboBox combo) => (combo.SelectedItem as ComboBoxItem)?.Tag as string;
 
@@ -766,16 +806,18 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
                 SystemModeRadio.IsChecked == true ? VolumeModes.System : VolumeModes.Eapo);
     }
 
-    private void OnStyleChanged(object sender, SelectionChangedEventArgs e)
-    {
-        SkinCombo.IsEnabled = SelectedTag(StyleCombo) == OsdStyles.Skin;
-        RaiseOsdSettingsChanged();
-    }
+    private void OnStyleChanged(object sender, SelectionChangedEventArgs e) => RaiseOsdSettingsChanged();
 
+    /// <summary>Picking a skin is asking to see it, so a style other than Custom skin is switched
+    /// to it - the picker used to be disabled until the style was set on another page, whose help
+    /// in turn sent people here first. Switching the style raises the change itself.</summary>
     private void OnSkinChanged(object sender, SelectionChangedEventArgs e)
     {
-        UpdateSkinCredit();
-        RaiseOsdSettingsChanged();
+        UpdateSkinDetails();
+        if (!_initializing && SelectedTag(StyleCombo) != OsdStyles.Skin)
+            SelectByTag(StyleCombo, OsdStyles.Skin);
+        else
+            RaiseOsdSettingsChanged();
     }
 
     private void OnOpenSkinsFolder(object sender, RoutedEventArgs e)
@@ -796,7 +838,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Filter = "Skin zip (*.zip)|*.zip",
+            Filter = Loc.T("settings.skin-zip.filter"),
             Title = Loc.T("settings.import-a-shared-skin"),
         };
         if (dialog.ShowDialog(this) != true) return;
@@ -987,6 +1029,12 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             HudEmptyText.Visibility = layout.Widgets.Count == 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+
+            bool full = layout.Widgets.Count >= HudLayout.MaxWidgets;
+            foreach (var add in new UIElement[] { AddSpectrumButton, AddLevelsButton, AddEqCurveButton, AddVolumeButton })
+                add.IsEnabled = !full;
+            HudFullText.Text = Loc.T("settings.hud-full.subtitle", HudLayout.MaxWidgets);
+            HudFullText.Visibility = full ? Visibility.Visible : Visibility.Collapsed;
         }
         finally
         {
@@ -1016,7 +1064,7 @@ public partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         var remove = new Wpf.Ui.Controls.Button
         {
-            Content = "Remove",
+            Content = Loc.T("settings.hud-widget.remove"),
             Icon = new Wpf.Ui.Controls.SymbolIcon(Wpf.Ui.Controls.SymbolRegular.Delete24),
             Margin = new Thickness(12, 0, 0, 0),
         };

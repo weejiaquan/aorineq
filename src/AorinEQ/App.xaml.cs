@@ -1297,7 +1297,7 @@ public partial class App : System.Windows.Application
                 {
                     // e.g. an unreachable skins root — this is an async void handler, so
                     // anything escaping here would crash the process.
-                    _tray?.ShowWarning($"Skin install failed: {ex.Message}");
+                    _tray?.ShowWarning(Loc.T("tray.skin-install-failed", ex.Message));
                 }
             }
         }
@@ -1320,7 +1320,7 @@ public partial class App : System.Windows.Application
         }
         if (result.Status != ProtocolParseStatus.Ok)
         {
-            _tray?.ShowWarning("Invalid AorinEQ link.");
+            _tray?.ShowWarning(Loc.T("tray.invalid-link"));
             return;
         }
 
@@ -1363,7 +1363,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
-            _tray?.ShowWarning($"Skin install failed: {ex.Message}");
+            _tray?.ShowWarning(Loc.T("tray.skin-install-failed", ex.Message));
             return;
         }
         finally
@@ -1384,7 +1384,7 @@ public partial class App : System.Windows.Application
         else
         {
             _settingsWindow?.RefreshSkins();
-            _tray?.ShowInfo($"Skin '{link.Name}' installed.");
+            _tray?.ShowInfo(Loc.T("tray.skin-installed", link.Name));
         }
     }
 
@@ -3045,7 +3045,9 @@ public partial class App : System.Windows.Application
 
     private void OnHudWidgetAdded(string type)
     {
-        if (_hud is null) return;
+        // A full layout ignores the add; switching to edit mode for it would be a change with
+        // nothing to show for it.
+        if (_hud is null || _hud.Layout.Widgets.Count >= HudLayout.MaxWidgets) return;
         _hud.Add(type);
         // A brand-new widget lands in whatever mode the HUD is in. In live mode that is a
         // click-through window the user cannot pick up, so adding one switches to edit — you

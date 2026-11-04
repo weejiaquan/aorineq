@@ -47,6 +47,7 @@ public class LocCompletenessTests
         "designer.status.cursor",
         "osd.glyph.text", "osd.fluent-glyph.text",
         "eq.hz-db-q", "settings.search.result", "app.tray.tooltip.level",
+        "settings.skin-credit.version",
         // A build tag for whoever is testing, not the user: "dev" is the same word in every log and bug report.
         "app.tray.tooltip.dev-suffix",
 
