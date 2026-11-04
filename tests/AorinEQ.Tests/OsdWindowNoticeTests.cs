@@ -125,7 +125,8 @@ public class OsdWindowNoticeTests
             // The ink, not the text's box: the box is the star column whatever is drawn in it.
             var glyphs = Notice(osd).NoticeText.Glyphs;
             double right = glyphs.TranslatePoint(new System.Windows.Point(glyphs.Data.Bounds.Right, 0), plate).X;
-            return (narrow, osd.Width, right, plate.ActualWidth, SystemParameters.WorkArea,
+            // The screen the notice was put on: the foreground window's, not necessarily the primary.
+            return (narrow, osd.Width, right, plate.ActualWidth, OsdScreen.Active().WorkArea,
                 new Rect(osd.Left, osd.Top, osd.Width, osd.Height));
         });
 
