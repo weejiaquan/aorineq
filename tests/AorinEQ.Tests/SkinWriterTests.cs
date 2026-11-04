@@ -67,6 +67,51 @@ public class SkinWriterTests : IDisposable
         Assert.Equal(2.0, info.Scale);
     }
 
+    /// <summary>Layers are copied in a fixed order, so swapping two of the skin's own files used
+    /// to copy full.png over empty.png and then that (now full) empty.png back over full.png:
+    /// both layers ended up with the full art and the empty art was gone.</summary>
+    [Fact]
+    public void Save_swapping_two_of_the_skins_own_layers_keeps_both_images()
+    {
+        TestPngs.Write(_fullSrc, 300, 120); // a different size, so the two files' bytes differ
+        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
+        var destEmpty = Path.Combine(folder, "empty.png");
+        var destFull = Path.Combine(folder, "full.png");
+        var emptyBytes = File.ReadAllBytes(destEmpty);
+        var fullBytes = File.ReadAllBytes(destFull);
+        Assert.NotEqual(emptyBytes, fullBytes);
+
+        SkinWriter.Save(_root, "my-skin", destFull, destEmpty, new SkinConfig(null, 1.0));
+        _out.WriteLine($"after swap: empty.png {new FileInfo(destEmpty).Length} B (was full {fullBytes.Length} B), "
+                     + $"full.png {new FileInfo(destFull).Length} B (was empty {emptyBytes.Length} B)");
+
+        Assert.Equal(fullBytes, File.ReadAllBytes(destEmpty));
+        Assert.Equal(emptyBytes, File.ReadAllBytes(destFull));
+    }
+
+    /// <summary>Notice art is written after empty/full, so pointing it at the skin's own
+    /// empty.png while replacing empty.png in the same save used to give the notice the NEW
+    /// empty art instead of the old one the author chose.</summary>
+    [Fact]
+    public void Save_notice_art_taken_from_a_layer_being_replaced_keeps_the_old_art()
+    {
+        var folder = SkinWriter.Save(_root, "my-skin", _emptySrc, _fullSrc, new SkinConfig(null, 1.0));
+        var destEmpty = Path.Combine(folder, "empty.png");
+        var oldEmpty = File.ReadAllBytes(destEmpty);
+        var newEmpty = Path.Combine(_dir, "src", "new-empty.png");
+        TestPngs.Write(newEmpty, 300, 140);
+        var notice = new SkinNotice("#202020", null, 8, 12, 8, new SkinText(true, 10, 10),
+            new SkinNoticeGlyph(true, 0, 0, 16, null), ArtPath: destEmpty, Width: 300, Height: 100);
+
+        SkinWriter.Save(_root, "my-skin", newEmpty, _fullSrc, new SkinConfig(null, 1.0, Notice: notice));
+        var noticeFile = Path.Combine(folder, "notice.png");
+        _out.WriteLine($"notice.png {new FileInfo(noticeFile).Length} B; old empty {oldEmpty.Length} B; "
+                     + $"new empty {new FileInfo(destEmpty).Length} B");
+
+        Assert.Equal(oldEmpty, File.ReadAllBytes(noticeFile));
+        Assert.Equal(File.ReadAllBytes(newEmpty), File.ReadAllBytes(destEmpty));
+    }
+
     [Fact]
     public void Save_overwrites_existing_folder_images()
     {

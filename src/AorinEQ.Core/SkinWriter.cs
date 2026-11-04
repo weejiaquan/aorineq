@@ -44,19 +44,44 @@ public static class SkinWriter
             throw new ArgumentException(nameError, nameof(name));
 
         var folder = Path.Combine(skinsRoot, name.Trim());
+        var staged = new List<string>();
         try
         {
             Directory.CreateDirectory(folder);
-            CopyLayer(emptySourcePath, folder, SkinLoader.EmptyLayer);
-            CopyLayer(fullSourcePath, folder, SkinLoader.FullLayer);
-            if (mutedSourcePath is not null)
-                CopyLayer(mutedSourcePath, folder, SkinLoader.MutedLayer);
+
+            // Layers are written one after another, so a source that is ANOTHER layer's file in
+            // this folder (empty and full swapped, notice art pointed at full.png) would be
+            // overwritten or deleted before its own turn came and both layers would end up with
+            // the same art. Every such source is copied aside first; a source that is its own
+            // destination is still left in place.
+            string Stage(string source, string layer)
+            {
+                if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(source)), Path.GetFullPath(folder),
+                        StringComparison.OrdinalIgnoreCase)
+                    || IsDestination(source, folder, layer))
+                    return source;
+                var copy = Path.Combine(Path.GetTempPath(), $"aorineq-skin-{Guid.NewGuid():N}{Path.GetExtension(source)}");
+                File.Copy(source, copy);
+                staged.Add(copy);
+                return copy;
+            }
+            var emptySource = Stage(emptySourcePath, SkinLoader.EmptyLayer);
+            var fullSource = Stage(fullSourcePath, SkinLoader.FullLayer);
+            var mutedSource = mutedSourcePath is null ? null : Stage(mutedSourcePath, SkinLoader.MutedLayer);
+            var stripEmptySource = config.AirPlay is { } s1 ? Stage(s1.EmptyPath, SkinLoader.AirPlayEmptyLayer) : null;
+            var stripFullSource = config.AirPlay is { } s2 ? Stage(s2.FullPath, SkinLoader.AirPlayFullLayer) : null;
+            var noticeSource = config.Notice?.ArtPath is { } art ? Stage(art, SkinLoader.NoticeLayer) : null;
+
+            CopyLayer(emptySource, folder, SkinLoader.EmptyLayer);
+            CopyLayer(fullSource, folder, SkinLoader.FullLayer);
+            if (mutedSource is not null)
+                CopyLayer(mutedSource, folder, SkinLoader.MutedLayer);
             else
                 DeleteLayer(folder, SkinLoader.MutedLayer);
-            if (config.AirPlay is { } strip)
+            if (stripEmptySource is not null && stripFullSource is not null)
             {
-                CopyLayer(strip.EmptyPath, folder, SkinLoader.AirPlayEmptyLayer);
-                CopyLayer(strip.FullPath, folder, SkinLoader.AirPlayFullLayer);
+                CopyLayer(stripEmptySource, folder, SkinLoader.AirPlayEmptyLayer);
+                CopyLayer(stripFullSource, folder, SkinLoader.AirPlayFullLayer);
             }
             else
             {
@@ -76,8 +101,8 @@ public static class SkinWriter
                     || ReadTopLevel(jsonPath, "notice") is not null
                     || SkinArt.All.Contains(name.Trim(), StringComparer.OrdinalIgnoreCase));
 
-            if (config.Notice?.ArtPath is { } noticeArt)
-                CopyLayer(noticeArt, folder, SkinLoader.NoticeLayer);
+            if (noticeSource is not null)
+                CopyLayer(noticeSource, folder, SkinLoader.NoticeLayer);
             else
                 DeleteLayer(folder, SkinLoader.NoticeLayer);
 
@@ -131,6 +156,11 @@ public static class SkinWriter
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException($"Failed to save skin '{name.Trim()}': {ex.Message}", ex);
+        }
+        finally
+        {
+            foreach (var copy in staged)
+                try { File.Delete(copy); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* a temp file */ }
         }
     }
 
@@ -252,14 +282,22 @@ public static class SkinWriter
         return set.Count == 0 ? null : set;
     }
 
+    private static bool IsGif(string source) =>
+        Path.GetExtension(source).Equals(".gif", StringComparison.OrdinalIgnoreCase);
+
+    private static string Destination(string source, string folder, string layer) =>
+        Path.Combine(folder, layer + (IsGif(source) ? ".gif" : ".png"));
+
+    private static bool IsDestination(string source, string folder, string layer) =>
+        string.Equals(Path.GetFullPath(source), Path.GetFullPath(Destination(source, folder, layer)),
+            StringComparison.OrdinalIgnoreCase);
+
     private static void CopyLayer(string source, string folder, string layer)
     {
-        bool isGif = Path.GetExtension(source).Equals(".gif", StringComparison.OrdinalIgnoreCase);
-        var destination = Path.Combine(folder, layer + (isGif ? ".gif" : ".png"));
-        var staleVariant = Path.Combine(folder, layer + (isGif ? ".png" : ".gif"));
+        var staleVariant = Path.Combine(folder, layer + (IsGif(source) ? ".png" : ".gif"));
 
-        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase))
-            File.Copy(source, destination, overwrite: true);
+        if (!IsDestination(source, folder, layer))
+            File.Copy(source, Destination(source, folder, layer), overwrite: true);
         if (File.Exists(staleVariant))
             File.Delete(staleVariant);
     }
