@@ -29,9 +29,11 @@ public sealed class RtspClient : IDisposable
     private readonly List<string> _exchanges = new();
     private int _cseq;
 
-    /// <summary>Sent on every request. Left as a plain product identifier: the receiver was
-    /// verified to serve legacy RAOP regardless of this string.</summary>
-    public const string UserAgent = "AorinEQ/1.0 (Windows)";
+    /// <summary>Sent on every request, and it must name AirPlay. HomePod firmware 1005.13.2
+    /// (OS 27.2) answers OPTIONS from an unrecognised agent with 403 Forbidden, measured against
+    /// the same request differing only in this header: "AorinEQ/1.0 (Windows)" got 403 and
+    /// "AirPlay/381.13" got 200. Firmware 960.13.1 had accepted any string.</summary>
+    public const string UserAgent = "AirPlay/381.13";
 
     public string ClientInstance { get; } = RandomHex(16);
     public string DacpId { get; } = RandomHex(16);

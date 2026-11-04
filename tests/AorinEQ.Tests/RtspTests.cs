@@ -32,6 +32,17 @@ public class RtspTests
         Assert.Equal("AirTunes/960.13.1", r.Header("Server"));
     }
 
+    /// <summary>HomePod firmware 1005.13.2 returns 403 to OPTIONS unless the User-Agent names
+    /// AirPlay. A tidy-up back to a product string would break every connection with nothing
+    /// but "OPTIONS refused (403)" to go on, so the form is pinned.</summary>
+    [Fact]
+    public void User_agent_names_airplay_or_the_receiver_refuses_options()
+    {
+        _out.WriteLine($"User-Agent: {RtspClient.UserAgent}");
+
+        Assert.Matches(@"^AirPlay/\d+(\.\d+)*$", RtspClient.UserAgent);
+    }
+
     [Fact]
     public void Header_lookup_is_case_insensitive()
     {
