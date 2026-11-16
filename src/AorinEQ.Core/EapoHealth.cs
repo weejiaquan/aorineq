@@ -213,7 +213,8 @@ public sealed class EapoHealthTracker
 /// repair on the same EDGE that would have raised the balloon; the UAC prompt is the consent.
 ///
 /// Once per device, not once per fault: a device the user declined (or that the repair refused)
-/// is in <paramref name="declined"/> and is only ever repaired from the button again. That is
+/// is in <paramref name="declined"/> and is only repaired from the button — until Equalizer APO
+/// is seen running on it again (see <see cref="Forgiven"/>). That is
 /// what stops a headset somebody deliberately runs without Equalizer APO from raising a UAC
 /// prompt every time it reconnects — while a driver update, which re-creates the endpoint under a
 /// new GUID, still gets its automatic repair.</summary>
@@ -224,6 +225,18 @@ public static class EapoAutoRepair
         && update.Event is EapoHealthEvent.Unhealthy or EapoHealthEvent.Lost
         && update.Snapshot is { Installed: true, ActiveOnDevice: false, EndpointGuid: { } guid }
         && declined?.Contains(guid, StringComparer.OrdinalIgnoreCase) != true;
+
+    /// <summary><paramref name="declined"/> without this reading's device, when the reading shows
+    /// Equalizer APO running on it; null when there is nothing to forgive. A device that has
+    /// Equalizer APO switched on — by the button, or by the Configurator — is not one somebody
+    /// runs without it, so the next update that detaches it is repaired automatically again. A
+    /// failed attempt (the device dropping out mid-repair) therefore costs one automatic repair,
+    /// not all of them.</summary>
+    public static IReadOnlyList<string>? Forgiven(EapoHealthSnapshot snapshot, IReadOnlyList<string>? declined) =>
+        snapshot is { ActiveOnDevice: true, EndpointGuid: { } guid }
+        && declined?.Contains(guid, StringComparer.OrdinalIgnoreCase) == true
+            ? [.. declined.Where(d => !string.Equals(d, guid, StringComparison.OrdinalIgnoreCase))]
+            : null;
 }
 
 /// <summary>Every sentence the health monitor says, in one place and free of jargon.

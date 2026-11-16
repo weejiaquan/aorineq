@@ -474,6 +474,28 @@ public class EapoHealthTests
     }
 
     [Fact]
+    public void A_declined_device_seen_running_Equalizer_APO_is_repaired_automatically_again()
+    {
+        const string other = "{99999999-2222-3333-4444-555555555555}";
+
+        // Reported 2026-11-15: a USB DAC dropped out during the automatic repair, was declined,
+        // and after the button repaired it stayed declined — so the next detach would go unrepaired.
+        var remaining = EapoAutoRepair.Forgiven(Snap(), [other, Guid1.ToUpperInvariant()]);
+        _out.WriteLine($"running on a declined device: [{(remaining is null ? "<unchanged>" : string.Join(", ", remaining))}]");
+        Assert.Equal([other], remaining);
+
+        var lost = new EapoHealthTracker().Update(Snap(active: false));
+        Assert.True(EapoAutoRepair.ShouldStart(lost, remaining));
+
+        // Still detached: it stays declined, or every reconnect of a headset somebody runs
+        // without Equalizer APO would prompt. Not declined, or no device: nothing to change.
+        Assert.Null(EapoAutoRepair.Forgiven(Snap(active: false), [Guid1]));
+        Assert.Null(EapoAutoRepair.Forgiven(Snap(), [other]));
+        Assert.Null(EapoAutoRepair.Forgiven(Snap(), null));
+        Assert.Null(EapoAutoRepair.Forgiven(Snap() with { EndpointGuid = null }, [Guid1]));
+    }
+
+    [Fact]
     public void Only_the_fault_the_repair_can_fix_starts_it()
     {
         // Not installed: there is nothing to switch on. Include line missing on an active device:

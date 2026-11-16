@@ -451,6 +451,28 @@ public static class EapoRepair
         + "• Only the device you're listening through is touched, and you can undo it afterwards.\n\n"
         + "Repair it now?";
 
+    /// <summary>How long <see cref="VerifyPatiently"/> waits for a device that is not usable yet.
+    /// Measured on this project's machine: a USB DAC that drops off the bus when a stream opens
+    /// after the audio restart is back in 4 to 8 seconds.</summary>
+    public static readonly TimeSpan VerifyPatience = TimeSpan.FromSeconds(12);
+
+    public static readonly TimeSpan VerifyRetryInterval = TimeSpan.FromSeconds(2);
+
+    /// <summary><paramref name="verify"/>, asked again every <see cref="VerifyRetryInterval"/>
+    /// until it holds or <see cref="VerifyPatience"/> runs out. A device that re-enumerates during
+    /// the check fails it once and passes when it is back; an effect chain that cannot load fails
+    /// every time, so the revert it must trigger is delayed, never skipped.</summary>
+    public static bool VerifyPatiently(Func<bool> verify, Action<TimeSpan>? wait = null)
+    {
+        wait ??= Thread.Sleep;
+        for (var waited = TimeSpan.Zero; ; waited += VerifyRetryInterval)
+        {
+            if (verify()) return true;
+            if (waited >= VerifyPatience) return false;
+            wait(VerifyRetryInterval);
+        }
+    }
+
     /// <summary>Repairs one endpoint, or explains why it will not. <paramref name="restartAudio"/>
     /// returns true when the audio services came back; <paramref name="verifyEndpointUsable"/> is
     /// the caller's independent check that the device is still enumerable and still opens for

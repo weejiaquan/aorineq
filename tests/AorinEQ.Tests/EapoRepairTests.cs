@@ -331,6 +331,43 @@ public class EapoRepairTests
         Assert.Throws<ArgumentException>(() => EapoRepair.BackupPathFor("..\\..\\evil"));
     }
 
+    // ---------------------------------------------------------------- the verification's patience
+
+    [Fact]
+    public void A_device_that_drops_out_during_the_check_passes_once_it_is_back()
+    {
+        // Reported 2026-11-15: a USB DAC re-enumerated (gone ~4 s) while the repair was checking
+        // it, and a working repair was reverted as "the playback device stopped responding".
+        int asked = 0;
+        var waits = new List<TimeSpan>();
+        bool ok = EapoRepair.VerifyPatiently(() => ++asked >= 3, waits.Add);
+        _out.WriteLine($"asked {asked} times, waited {string.Join(", ", waits)} -> {ok}");
+        Assert.True(ok);
+        Assert.Equal(3, asked);
+        Assert.Equal([EapoRepair.VerifyRetryInterval, EapoRepair.VerifyRetryInterval], waits);
+    }
+
+    [Fact]
+    public void A_device_that_is_usable_straight_away_is_not_kept_waiting()
+    {
+        var waits = new List<TimeSpan>();
+        Assert.True(EapoRepair.VerifyPatiently(() => true, waits.Add));
+        Assert.Empty(waits);
+    }
+
+    [Fact]
+    public void A_device_that_never_comes_back_still_fails_the_check_after_the_patience_runs_out()
+    {
+        // The revert depends on this: an effect chain that cannot load must end in "false".
+        int asked = 0;
+        var waited = TimeSpan.Zero;
+        bool ok = EapoRepair.VerifyPatiently(() => { asked++; return false; }, w => waited += w);
+        _out.WriteLine($"asked {asked} times over {waited} -> {ok}");
+        Assert.False(ok);
+        Assert.Equal(EapoRepair.VerifyPatience, waited);
+        Assert.Equal((int)(EapoRepair.VerifyPatience / EapoRepair.VerifyRetryInterval) + 1, asked);
+    }
+
     // ---------------------------------------------------------------- refusals, without writing
 
     [Fact]
