@@ -509,6 +509,7 @@
   "app.aorineq-hit-an-unexpected-error-and": "AorinEQ에서 예기치 않은 오류가 발생해 종료합니다.\n\n{0}: {1}\n\n",
   "app.equalizer-apo-isn-t-set-up": "Equalizer APO 설정이 아직 끝나지 않았습니다 (또는 설정 폴더에 쓸 수 없습니다). 그전까지 EQ 변경은 소리에 닿지 않습니다. 설정 → 설정 가이드를 보세요.",
   "app.an-equalizer-apo-repair-didn-t": "지난번 Equalizer APO 복구가 끝나지 않았습니다. 소리가 이상하면 설정에서 되돌리세요.",
+  "health-notice.dismiss": "닫기",
   "app.aorineq-won-t-undo-from-a": "이 PC의 다른 프로그램이 바꿨을 수 있는 기록으로는 AorinEQ가 되돌리지 않습니다. Equalizer APO에 딸린 Configurator로 이 기기를 초기화할 수 있습니다.",
   "app.aorineq-will-put-this-playback-device": "AorinEQ가 이 재생 기기의 설정을 복구 전 상태로 정확히 되돌리고 Windows 오디오를 다시 시작합니다. Equalizer APO는 이 기기 처리를 중단합니다.\n\n복구를 되돌릴까요?",
   "app.the-repair-stopped-before-it-reported": "복구가 아무것도 보고하지 않은 채 멈췄습니다 (코드 {0}). 그 시점까지는 설정을 바꾸지 않았습니다.",

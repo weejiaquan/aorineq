@@ -509,6 +509,7 @@
   "app.aorineq-hit-an-unexpected-error-and": "AorinEQ で予期しないエラーが発生したため、終了します。\n\n{0}: {1}\n\n",
   "app.equalizer-apo-isn-t-set-up": "Equalizer APO のセットアップが済んでいません (または設定フォルダーに書き込めません)。それまで EQ の変更は音に届きません。設定 → セットアップガイドをご覧ください。",
   "app.an-equalizer-apo-repair-didn-t": "前回の Equalizer APO の修復が完了していません。音がおかしい場合は設定から元に戻してください。",
+  "health-notice.dismiss": "閉じる",
   "app.aorineq-won-t-undo-from-a": "この PC 上の他のものが書き換えた可能性のある記録からは、AorinEQ は元に戻しません。Equalizer APO 付属の Configurator でこの機器をリセットできます。",
   "app.aorineq-will-put-this-playback-device": "AorinEQ はこの再生機器の設定を修復前の状態に正確に戻し、Windows のオーディオを再起動します。Equalizer APO はこの機器の処理をやめます。\n\n修復を元に戻しますか？",
   "app.the-repair-stopped-before-it-reported": "修復は何も報告しないまま停止しました (コード {0})。その時点では設定を変更していません。",

@@ -509,6 +509,7 @@
   "app.aorineq-hit-an-unexpected-error-and": "AorinEQ hit an unexpected error and has to close.\n\n{0}: {1}\n\n",
   "app.equalizer-apo-isn-t-set-up": "Equalizer APO isn't set up (or its config folder isn't writable) — EQ changes won't reach your audio until it is. See Settings → Setup guide.",
   "app.an-equalizer-apo-repair-didn-t": "An Equalizer APO repair didn't finish last time. Open Settings to undo it if your sound isn't right.",
+  "health-notice.dismiss": "Dismiss",
   "app.aorineq-won-t-undo-from-a": "AorinEQ won't undo from a record that something else on this PC could have changed. Equalizer APO's own Configurator can reset this device.",
   "app.aorineq-will-put-this-playback-device": "AorinEQ will put this playback device's settings back exactly as they were before the repair, and restart Windows audio again. Equalizer APO will stop processing this device.\n\nUndo the repair?",
   "app.the-repair-stopped-before-it-reported": "The repair stopped before it reported anything (code {0}), and it had not changed any settings by then.",

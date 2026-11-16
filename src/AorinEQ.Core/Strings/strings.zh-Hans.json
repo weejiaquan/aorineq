@@ -509,6 +509,7 @@
   "app.aorineq-hit-an-unexpected-error-and": "AorinEQ 遇到意外错误，必须关闭。\n\n{0}: {1}\n\n",
   "app.equalizer-apo-isn-t-set-up": "Equalizer APO 尚未设置好（或它的配置文件夹不可写）——在此之前 EQ 的改动不会影响声音。请见「设置 → 设置向导」。",
   "app.an-equalizer-apo-repair-didn-t": "上次的 Equalizer APO 修复没有完成。如果声音不正常，请打开设置撤销它。",
+  "health-notice.dismiss": "关闭",
   "app.aorineq-won-t-undo-from-a": "如果那份记录可能已被这台电脑上的其他程序改动过，AorinEQ 就不会据此撤销。Equalizer APO 自带的 Configurator 可以重置这个设备。",
   "app.aorineq-will-put-this-playback-device": "AorinEQ 会把这个播放设备的设置恢复到修复之前的状态，并再次重启 Windows 音频。Equalizer APO 将停止处理该设备。\n\n要撤销修复吗？",
   "app.the-repair-stopped-before-it-reported": "修复在报告任何结果之前就停止了（代码 {0}），当时还没有改动任何设置。",

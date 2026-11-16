@@ -109,6 +109,7 @@ public partial class App : System.Windows.Application
     /// <summary>Equalizer APO health: one tracker, fed from four triggers (default-device change,
     /// session unlock, resume from sleep, and a slow timer). See <see cref="SetupEapoHealthMonitor"/>.</summary>
     private readonly EapoHealthTracker _eapoHealth = new();
+    private UI.HealthNoticeWindow? _healthNotice;
     /// <summary>An elevated repair or undo helper is in flight — see <see cref="RunEapoRepairHelperAsync"/>.</summary>
     private bool _eapoRepairRunning;
     /// <summary>The <c>--endpoint</c> of the run in flight (null: the default device). Only
@@ -1561,7 +1562,7 @@ public partial class App : System.Windows.Application
         // A repair that never reached its own verification — the helper was killed, the machine
         // lost power — leaves a backup still marked "applying". The endpoint is then in a state
         // nothing has checked, so the user is told, once, that the way out exists. Only ever a
-        // balloon: undoing somebody's audio settings without asking is exactly the behaviour this
+        // notice: undoing somebody's audio settings without asking is exactly the behaviour this
         // whole feature is careful not to have. Only a record something can undo is announced, and
         // the click goes to the page that can — see EapoRepair.InterruptedRepairPage.
         if (EapoRepair.InterruptedRepairPage(
@@ -1569,7 +1570,7 @@ public partial class App : System.Windows.Application
                 AudioEndpoint.EndpointGuid(AudioEndpoint.GetDefaultRenderEndpointId()),
                 VirtualCable.Find()?.Guid) is { } page)
         {
-            _tray?.ShowActionableWarning(
+            ShowHealthNotice(
                 Loc.T("app.an-equalizer-apo-repair-didn-t"),
                 () => _ = OpenSettingsAsync(page));
         }
@@ -1658,6 +1659,12 @@ public partial class App : System.Windows.Application
         var update = _eapoHealth.Update(snapshot);
         _settingsWindow?.SetEapoHealth(update.Snapshot, _settings.VolumeMode, applies: true);
 
+        if (EapoAutoRepair.Forgiven(update.Snapshot, _settings.EapoAutoRepairDeclined) is { } stillDeclined)
+        {
+            _settings = _settings with { EapoAutoRepairDeclined = stillDeclined };
+            SaveSettings();
+        }
+
         // WhyNotAvailable is the unprivileged preview of the helper's own refusals: a device the
         // repair would refuse (another effect on it) gets the balloon, not a UAC prompt for nothing.
         if (!_eapoRepairRunning && EapoAutoRepair.ShouldStart(update, _settings.EapoAutoRepairDeclined)
@@ -1668,13 +1675,22 @@ public partial class App : System.Windows.Application
         }
         else if (EapoHealthCopy.Balloon(update, _settings.VolumeMode) is { } text)
         {
-            if (update.Event == EapoHealthEvent.Recovered)
-                _tray?.ShowInfo(text);
-            else
-                // Clickable: a warning about a setting is only actionable from where the setting
-                // is, and the banner with the two buttons is on that page.
-                _tray?.ShowActionableWarning(text, () => _ = OpenSettingsAsync(SettingsSections.Volume));
+            // A warning about a setting is only actionable from where the setting is, and the
+            // banner with the two buttons is on that page.
+            ShowHealthNotice(text, update.Event == EapoHealthEvent.Recovered
+                ? null
+                : () => _ = OpenSettingsAsync(SettingsSections.Volume));
         }
+    }
+
+    /// <summary>Says something about Equalizer APO's health in <see cref="UI.HealthNoticeWindow"/>,
+    /// replacing whatever it was saying before — a "working again" must not sit beside the warning
+    /// it answers.</summary>
+    private void ShowHealthNotice(string text, Action? action)
+    {
+        _healthNotice?.Close();
+        _healthNotice = new UI.HealthNoticeWindow(text, action);
+        _healthNotice.Present();
     }
 
     /// <summary>Re-adds the Include line, best effort. Returns whether it is worth re-reading.</summary>
@@ -1840,7 +1856,8 @@ public partial class App : System.Windows.Application
                 }
                 else
                 {
-                    result = EapoRepair.Repair(guid, Restart, () => IsEndpointUsable(guid, repairingDefault));
+                    result = EapoRepair.Repair(guid, Restart,
+                        () => EapoRepair.VerifyPatiently(() => IsEndpointUsable(guid, repairingDefault)));
                 }
             }
 
@@ -1990,7 +2007,7 @@ public partial class App : System.Windows.Application
             var message = result?.Message ?? NoVerdictMessage(exitCode, endpointGuid);
             ShowRepairStatus(_settingsWindow, endpointGuid, message, busy: false);
             if (result is { Outcome: EapoRepairOutcome.Repaired })
-                _tray?.ShowInfo(Loc.T("app.equalizer-apo-is-switched-on-for"));
+                ShowHealthNotice(Loc.T("app.equalizer-apo-is-switched-on-for"), action: null);
             // Anything short of success is said in a dialog, not only in the status line. The user
             // sat through a UAC prompt; a refusal whispered under the buttons reads as "I clicked
             // repair and nothing happened" — which is exactly how it was reported (2026-08-30).

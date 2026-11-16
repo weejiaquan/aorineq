@@ -455,13 +455,6 @@ public sealed class TrayIcon : IDisposable
     /// directory isn't writable for the in-place swap.</summary>
     public void ShowNotice(string text, Action onClick) => Show(text, ToolTipIcon.Info, 10000, onClick);
 
-    /// <summary>A warning balloon that runs <paramref name="onClick"/> when clicked, and stays up
-    /// longer because it is asking the user to do something — the Equalizer APO health monitor's
-    /// "this stopped working, here is where to fix it". A warning nobody can act on from where it
-    /// appears is just an interruption.</summary>
-    public void ShowActionableWarning(string text, Action onClick) =>
-        Show(text, ToolTipIcon.Warning, 10000, onClick);
-
     /// <summary>The one place a balloon is raised, so the click action is always set (or cleared)
     /// in the same breath: a stale action left behind by an earlier balloon would fire from a
     /// click on this one.</summary>
